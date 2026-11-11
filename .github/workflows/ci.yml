@@ -1,0 +1,24 @@
+name: CI
+on:
+  pull_request:
+    branches: [develop, main]
+  push:
+    branches: [main, develop]
+jobs:
+  node:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - run: npm install
+      - name: Validate Prisma (requires DATABASE_URL for CLI parsing)
+        run: npm run prisma:validate
+        env:
+          DATABASE_URL: postgresql://ci:ci@localhost:5432/vera?schema=public
+      - run: npm run prisma:generate
+        env:
+          DATABASE_URL: postgresql://ci:ci@localhost:5432/vera?schema=public
+      - run: npm run test
+      - run: npm run build

@@ -1,0 +1,250 @@
+// VERA Match — Prisma data model draft. Requires `prisma validate` and migration test.
+generator client { provider = "prisma-client-js" }
+datasource db { provider = "postgresql" url = env("DATABASE_URL") }
+
+enum UserRole { MEMBER EXPERT MODERATOR ADMIN }
+enum AccountStatus { PENDING_EMAIL ACTIVE SUSPENDED DELETED }
+enum ConsentPurpose { PROFILE_MATCHING VIDEO_STORAGE EXPERT_VIDEO_REVIEW REPORT_SHARING VIDEO_CLAIM_MATCHING }
+enum VideoStatus { UPLOADING READY UNDER_REVIEW DELETED }
+enum AssignmentStatus { ASSIGNED IN_PROGRESS SUBMITTED CANCELLED COMPLETED }
+enum ReviewStatus { DRAFT SUBMITTED RETURNED APPROVED WITHDRAWN }
+enum ObservationCategory { EYE FACIAL BODY SPEECH CROSS_MODAL }
+enum DisputeStatus { OPEN IN_REVIEW RESOLVED REJECTED }
+enum MatchChoice { ACCEPT DECLINE }
+enum ReportStatus { OPEN IN_REVIEW RESOLVED DISMISSED }
+
+model User {
+  id String @id @default(cuid())
+  email String @unique
+  passwordHash String
+  displayName String?
+  role UserRole @default(MEMBER)
+  status AccountStatus @default(PENDING_EMAIL)
+  declaredAdult Boolean @default(false)
+  emailVerifiedAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  sessions Session[]
+  emailTokens EmailVerificationToken[]
+  resetTokens PasswordResetToken[]
+  profile Profile?
+  preferences MatchPreference?
+  questionnaireAnswers QuestionnaireAnswer[]
+  consents Consent[]
+  videos Video[]
+  expertAssignments ExpertAssignment[] @relation("AssignedExpert")
+  @@index([status, role])
+}
+
+model Session {
+  id String @id @default(cuid())
+  userId String
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String @unique
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime @default(now())
+  lastSeenAt DateTime?
+  @@index([userId, expiresAt])
+}
+model EmailVerificationToken {
+  id String @id @default(cuid())
+  userId String
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String @unique
+  expiresAt DateTime
+  consumedAt DateTime?
+  createdAt DateTime @default(now())
+  @@index([userId, expiresAt])
+}
+model PasswordResetToken {
+  id String @id @default(cuid())
+  userId String
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String @unique
+  expiresAt DateTime
+  consumedAt DateTime?
+  createdAt DateTime @default(now())
+  @@index([userId, expiresAt])
+}
+model Profile {
+  id String @id @default(cuid())
+  userId String @unique
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  birthDate DateTime?
+  occupation String?
+  city String?
+  bio String? @db.Text
+  relationshipGoal String?
+  interests Json?
+  values Json?
+  visibilityEnabled Boolean @default(false)
+  updatedAt DateTime @updatedAt
+}
+model MatchPreference {
+  id String @id @default(cuid())
+  userId String @unique
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  minAge Int?
+  maxAge Int?
+  relationshipGoal String?
+  dealBreakers Json?
+  priorities Json?
+  updatedAt DateTime @updatedAt
+}
+model QuestionnaireAnswer {
+  id String @id @default(cuid())
+  userId String
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  questionKey String
+  questionnaireVersion Int @default(1)
+  responseText String @db.Text
+  updatedAt DateTime @updatedAt
+  @@unique([userId, questionKey, questionnaireVersion])
+}
+model Consent {
+  id String @id @default(cuid())
+  userId String
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  purpose ConsentPurpose
+  granted Boolean @default(false)
+  grantedAt DateTime?
+  revokedAt DateTime?
+  updatedAt DateTime @updatedAt
+  @@unique([userId, purpose])
+}
+model Video {
+  id String @id @default(cuid())
+  ownerId String
+  owner User @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  bucket String
+  objectKey String @unique
+  mimeType String
+  sizeBytes Int?
+  durationMs Int?
+  status VideoStatus @default(UPLOADING)
+  createdAt DateTime @default(now())
+  deletedAt DateTime?
+  assignments ExpertAssignment[]
+  @@index([ownerId, status])
+}
+model ExpertAssignment {
+  id String @id @default(cuid())
+  videoId String
+  video Video @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  expertId String
+  expert User @relation("AssignedExpert", fields: [expertId], references: [id])
+  assignedById String
+  status AssignmentStatus @default(ASSIGNED)
+  dueAt DateTime?
+  cancelledAt DateTime?
+  createdAt DateTime @default(now())
+  review ExpertReview?
+  @@index([expertId, status])
+  @@index([videoId, status])
+}
+model ExpertReview {
+  id String @id @default(cuid())
+  assignmentId String @unique
+  assignment ExpertAssignment @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+  status ReviewStatus @default(DRAFT)
+  summary String? @db.Text
+  limitations String? @db.Text
+  version Int @default(1)
+  submittedAt DateTime?
+  qaById String?
+  qaAt DateTime?
+  qaFeedback String? @db.Text
+  observations ExpertObservation[]
+  claims ReviewClaim[]
+  disputes ReviewDispute[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+model ExpertObservation {
+  id String @id @default(cuid())
+  reviewId String
+  review ExpertReview @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+  category ObservationCategory
+  startMs Int
+  endMs Int
+  observation String @db.Text
+  context String? @db.Text
+  createdAt DateTime @default(now())
+  @@index([reviewId, category])
+}
+model ReviewClaim {
+  id String @id @default(cuid())
+  reviewId String
+  review ExpertReview @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+  // Only owner-confirmed, QA-approved, factual semantic claims may be matchable.
+  claimType String
+  claimText String @db.Text
+  qaApproved Boolean @default(false)
+  ownerConfirmed Boolean @default(false)
+  shareApproved Boolean @default(false)
+  revokedAt DateTime?
+  createdAt DateTime @default(now())
+  @@index([reviewId, qaApproved, ownerConfirmed, shareApproved])
+}
+model ReviewDispute {
+  id String @id @default(cuid())
+  reviewId String
+  review ExpertReview @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+  ownerId String
+  reason String @db.Text
+  status DisputeStatus @default(OPEN)
+  resolution String? @db.Text
+  resolvedAt DateTime?
+  createdAt DateTime @default(now())
+  @@index([ownerId, status])
+}
+model MatchPair {
+  id String @id @default(cuid())
+  userLowId String
+  userHighId String
+  // Store sorted user ids to prevent (A,B) vs (B,A) duplicate pairs.
+  score Float?
+  reasons Json?
+  createdAt DateTime @default(now())
+  decisions MatchDecision[]
+  @@unique([userLowId, userHighId])
+}
+model MatchDecision {
+  id String @id @default(cuid())
+  pairId String
+  pair MatchPair @relation(fields: [pairId], references: [id], onDelete: Cascade)
+  actorUserId String
+  choice MatchChoice
+  createdAt DateTime @default(now())
+  @@unique([pairId, actorUserId])
+}
+model Block {
+  id String @id @default(cuid())
+  blockerId String
+  blockedId String
+  createdAt DateTime @default(now())
+  @@unique([blockerId, blockedId])
+  @@index([blockedId])
+}
+model Report {
+  id String @id @default(cuid())
+  reporterId String
+  targetUserId String
+  reason String @db.Text
+  status ReportStatus @default(OPEN)
+  moderatorId String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@index([status, createdAt])
+}
+model AuditLog {
+  id String @id @default(cuid())
+  actorId String?
+  action String
+  subjectType String
+  subjectId String?
+  createdAt DateTime @default(now())
+  // No raw video bytes, tokens, password, or sensitive review text in audit.
+  @@index([actorId, createdAt])
+}

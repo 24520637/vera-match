@@ -1,0 +1,15 @@
+node_modules/
+.next/
+dist/
+build/
+coverage/
+*.log
+.env
+.env.*
+!.env.example
+apps/api/.env
+.venv/
+__pycache__/
+.DS_Store
+*.tsbuildinfo
+.prisma/
