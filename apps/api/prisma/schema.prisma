@@ -1,17 +1,74 @@
 // VERA Match — Prisma data model draft. Requires `prisma validate` and migration test.
-generator client { provider = "prisma-client-js" }
-datasource db { provider = "postgresql" url = env("DATABASE_URL") }
+generator client {
+  provider = "prisma-client-js"
+}
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
 
-enum UserRole { MEMBER EXPERT MODERATOR ADMIN }
-enum AccountStatus { PENDING_EMAIL ACTIVE SUSPENDED DELETED }
-enum ConsentPurpose { PROFILE_MATCHING VIDEO_STORAGE EXPERT_VIDEO_REVIEW REPORT_SHARING VIDEO_CLAIM_MATCHING }
-enum VideoStatus { UPLOADING READY UNDER_REVIEW DELETED }
-enum AssignmentStatus { ASSIGNED IN_PROGRESS SUBMITTED CANCELLED COMPLETED }
-enum ReviewStatus { DRAFT SUBMITTED RETURNED APPROVED WITHDRAWN }
-enum ObservationCategory { EYE FACIAL BODY SPEECH CROSS_MODAL }
-enum DisputeStatus { OPEN IN_REVIEW RESOLVED REJECTED }
-enum MatchChoice { ACCEPT DECLINE }
-enum ReportStatus { OPEN IN_REVIEW RESOLVED DISMISSED }
+enum UserRole {
+  MEMBER
+  EXPERT
+  MODERATOR
+  ADMIN
+}
+enum AccountStatus {
+  PENDING_EMAIL
+  ACTIVE
+  SUSPENDED
+  DELETED
+}
+enum ConsentPurpose {
+  PROFILE_MATCHING
+  VIDEO_STORAGE
+  EXPERT_VIDEO_REVIEW
+  REPORT_SHARING
+  VIDEO_CLAIM_MATCHING
+}
+enum VideoStatus {
+  UPLOADING
+  READY
+  UNDER_REVIEW
+  DELETED
+}
+enum AssignmentStatus {
+  ASSIGNED
+  IN_PROGRESS
+  SUBMITTED
+  CANCELLED
+  COMPLETED
+}
+enum ReviewStatus {
+  DRAFT
+  SUBMITTED
+  RETURNED
+  APPROVED
+  WITHDRAWN
+}
+enum ObservationCategory {
+  EYE
+  FACIAL
+  BODY
+  SPEECH
+  CROSS_MODAL
+}
+enum DisputeStatus {
+  OPEN
+  IN_REVIEW
+  RESOLVED
+  REJECTED
+}
+enum MatchChoice {
+  ACCEPT
+  DECLINE
+}
+enum ReportStatus {
+  OPEN
+  IN_REVIEW
+  RESOLVED
+  DISMISSED
+}
 
 model User {
   id String @id @default(cuid())
