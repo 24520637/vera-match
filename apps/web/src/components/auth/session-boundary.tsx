@@ -7,7 +7,7 @@ import { useAuth } from './auth-provider';
 
 export function SessionUnavailable({ denied = false, server = false }: { denied?: boolean; server?: boolean }) {
   const router = useRouter(); const { refresh } = useAuth();
-  return <div className="container page-heading"><Notice tone={denied ? 'warning' : 'error'} title={denied ? 'This account cannot open this page.' : 'We could not check your session.'}>{denied ? 'Your account does not have permission for this page.' : 'The service or connection is unavailable. This does not mean you have been signed out.'}</Notice><div className="inline"><Button onClick={() => { if (server) router.refresh(); else void refresh(); }}>Try again</Button><ButtonLink variant="quiet" href="/">Back to home</ButtonLink></div></div>;
+  return <div className="container page-heading"><h1>Account access</h1><Notice tone={denied ? 'warning' : 'error'} title={denied ? 'This account cannot open this page.' : 'We could not check your session.'}>{denied ? 'Your account does not have permission for this page.' : 'The service or connection is unavailable. This does not mean you have been signed out.'}</Notice><div className="inline"><Button onClick={() => { void refresh(); if (server) router.refresh(); }}>Try again</Button><ButtonLink variant="quiet" href="/">Back to home</ButtonLink></div></div>;
 }
 export function SessionBoundary({ children }: { children: ReactNode }) {
   const { state } = useAuth(); const router = useRouter();

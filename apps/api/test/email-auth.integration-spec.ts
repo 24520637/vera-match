@@ -131,4 +131,19 @@ describe('email authentication HTTP / PostgreSQL / native SMTP', () => {
     await database.client.session.update({ where: { id: session.id }, data: { expiresAt: new Date(Date.now() - 1000) } }); expect((await me(cookie)).status).toBe(401);
     await database.client.session.update({ where: { id: session.id }, data: { expiresAt: new Date(Date.now() + 60000), revokedAt: new Date() } }); expect((await me(cookie)).status).toBe(401);
   });
+
+  it('revokes one or all owned sessions, clears the exact cookie and leaves other accounts untouched', async () => {
+    const email = newEmail(); const password = 'synthetic-logout-password';
+    await post('register', { email, password, declaredAdult: true }); const activation = await readActivationEmail(email); await post('verify-email', { token: activation.token });
+    const signIn = async (address = email) => (await post('login', { email: address, password })).headers.get('set-cookie')!.split(';')[0];
+    const first = await signIn(); const second = await signIn();
+    const me = (cookie: string) => fetch(`${base}/api/auth/me`, { headers: { Cookie: cookie } });
+    const logout = await post('logout', {}, origin, first); expect(logout.status).toBe(204); expect(logout.headers.get('set-cookie')).toContain('Path=/'); expect(logout.headers.get('set-cookie')).toContain('Expires=');
+    expect((await me(first)).status).toBe(401); expect((await me(second)).status).toBe(200); expect((await post('logout', {}, origin, first)).status).toBe(204);
+    const other = newEmail(); await post('register', { email: other, password, declaredAdult: true }); const otherActivation = await readActivationEmail(other); await post('verify-email', { token: otherActivation.token }); const otherCookie = await signIn(other);
+    expect((await post('logout-all', {}, 'https://attacker.invalid', second)).status).toBe(403); expect((await me(second)).status).toBe(200);
+    expect((await post('logout-all', {}, origin, second)).status).toBe(204);
+    expect((await me(first)).status).toBe(401); expect((await me(second)).status).toBe(401); expect((await me(otherCookie)).status).toBe(200);
+    expect((await post('logout', {})).status).toBe(204);
+  });
 });
