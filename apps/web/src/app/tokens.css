@@ -15,6 +15,10 @@
   --color-success: #245840;
   --color-success-bg: #eaf3ec;
   --color-error: #982e42;
+  --color-danger-hover: #762034;
+  --color-tap-highlight: #51395726;
+  --color-backdrop: #35263b80;
+  --color-focus-on-dark: #ffffff;
   --color-error-bg: #fff0f2;
   --color-warning: #795411;
   --color-warning-bg: #faf1db;
