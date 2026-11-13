@@ -21,7 +21,7 @@ export default function HomePage() {
           <p>Reciprocal preferences, clear explanations, member-controlled data sharing, and mutual decisions.</p>
         </div>
       </section>
-      <p className="hint">This is a starter, not a working matchmaking service. See README.md and docs/COMMIT-PLAN.md.</p>
+      <p className="hint">This is a starter, not a working matchmaking service. See README.md for implementation status.</p>
     </>
   );
 }

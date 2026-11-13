@@ -1,6 +1,5 @@
-## Ticket / commit IDs
+## Ticket
 - Ticket: T__
-- Planned commits: C___–C___
 
 ## Changes
 - 

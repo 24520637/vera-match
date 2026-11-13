@@ -5,7 +5,7 @@ about: Feature delivery end-to-end
 ## Owner
 Huong / Phuc
 ## Branch
-## Ticket and commit range
+## Ticket and task scope
 ## UI / API / DB / Test checklist
 ## Authorization / consent risks
 ## Acceptance criteria
