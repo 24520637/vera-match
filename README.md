@@ -54,6 +54,26 @@ Create a private `vera-private` bucket in MinIO before implementing uploads. Ful
 
 ## Development workflow
 
+### Same-origin API client
+
+Browser code imports `apiFetch`, `apiJson`, and `ApiError` from
+`@/lib/api`. Pass paths such as `/health`; the client requests `/api/health`
+through the Next.js rewrite. `apiFetch` returns a raw `Response` and
+`apiJson<T>` returns parsed JSON or `undefined` for an empty response. The
+generic type describes an expected contract, not runtime schema validation.
+
+Set the server-only `API_INTERNAL_ORIGIN` in the web process environment before
+building (default `http://localhost:4000`). The value must be an HTTP(S) origin
+without credentials or a path. Root `.env` files are not automatically loaded
+by the web workspace; export this variable or use its local default. Next.js
+records rewrites at build time, so rebuild when changing the destination.
+`NEXT_PUBLIC_API_BASE_URL` is no longer used.
+
+Run `npm run build` before the Playwright suite. Its managed services start the
+built NestJS API on port 4000 and Next.js on port 3100. The health proxy smoke
+test needs no database. Production verification uses `CI=1` in the environment
+when running `npm run test:ui --workspace apps/web`.
+
 `develop` is the integration branch; `main` contains reviewed releases. Start one task at a time from current `develop`, using your own branch prefix:
 
 ```powershell
