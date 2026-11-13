@@ -37,7 +37,7 @@ export class VerificationService {
     try { user = await this.prisma.user.findFirst({ where: { email: { equals: email, mode: 'insensitive' }, status: 'PENDING_EMAIL', emailVerifiedAt: null }, select: { id: true } }); }
     catch { throw new ServiceUnavailableException({ code: 'VERIFICATION_UNAVAILABLE', message: 'Activation is temporarily unavailable. Try again later.' }); }
     if (user) await this.issue(user.id, true);
-    return { message: 'If this address needs activation, check its inbox. You can request another email after the cooldown.' };
+    return { message: 'If this address needs activation, check its inbox. You can request another email after the cooldown.', retryAfterSeconds: this.environment.values.verification.resendCooldownSeconds };
   }
 
   async issue(userId: string, enforceCooldown = false) {
