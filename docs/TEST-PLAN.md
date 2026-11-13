@@ -13,6 +13,12 @@ Each feature needs valid inputs, invalid inputs, unauthorized access, state/race
 | Security | CSRF, cookie flags, throttling, redacted audit logs, signed URL TTL | Reproducible security evidence; no open critical/high issues |
 | E2E | Register → verify → login → profile/consent → upload → expert → QA → owner → matching | Browser journey passes with synthetic or explicitly licensed test media only |
 
+## T01 executable foundation checks
+
+- `npm test`: unit checks for typed configuration, Prisma lifecycle, Argon2id, cookie/session validation and role authorization.
+- `npm run test:integration --workspace apps/api`: explicit PostgreSQL 18 smoke on localhost:5433; reads the machine-local DATABASE_URL. All synthetic users/sessions are inserted in transactions that always roll back, with cleanup verification. No reset, truncation or migration is run by this suite.
+- Integration-only HTTP fixtures are absent from the production app. Real guard/Prisma behavior covers 200/401/403, changed account/session state, readiness and shutdown. DB failures stay 503 rather than masquerading as session expiry.
+
 ## Release gate
 
 - [ ] Prisma validation and migration apply plus a tested rollback/recovery procedure in a test database.
