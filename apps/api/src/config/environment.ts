@@ -1,4 +1,5 @@
 export interface AppConfiguration {
+  readonly verification: { readonly ttlSeconds: number };
   readonly nodeEnv: "development" | "test" | "production";
   readonly apiPort: number;
   readonly databaseUrl: string;
@@ -194,6 +195,7 @@ export function parseEnvironment(
   )
     issues.push("MINIO_BUCKET must be a valid bucket name");
   const config: AppConfiguration = {
+    verification: { ttlSeconds: integer('VERIFICATION_TTL_SECONDS', 1800, 60, 86400) },
     nodeEnv: nodeEnv as AppConfiguration["nodeEnv"],
     apiPort: integer("API_PORT", 4000, 1, 65535),
     databaseUrl,
