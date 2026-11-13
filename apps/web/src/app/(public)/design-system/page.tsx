@@ -17,6 +17,7 @@ import { AuthExample } from "@/components/patterns/auth-example";
 import { ProfileExample } from "@/components/patterns/profile-example";
 import { MatchingExample } from "@/components/patterns/matching-example";
 import { ReviewExample } from "@/components/patterns/review-example";
+import { FormExample } from "@/components/patterns/form-example";
 import "./design-system.css";
 
 export const metadata: Metadata = {
@@ -155,6 +156,14 @@ export default function DesignSystemPage() {
                 These controls are isolated examples. They do not change your
                 account settings.
               </p>
+            </div>
+          </div>
+          <div className="component-group">
+            <h3>Form states</h3>
+            <div className="component-group__content">
+              <div className="sample-controls">
+                <FormExample />
+              </div>
             </div>
           </div>
           <div className="component-group">
