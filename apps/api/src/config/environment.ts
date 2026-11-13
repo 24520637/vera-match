@@ -1,5 +1,8 @@
 export interface AppConfiguration {
-  readonly verification: { readonly ttlSeconds: number; readonly resendCooldownSeconds: number };
+  readonly verification: {
+    readonly ttlSeconds: number;
+    readonly resendCooldownSeconds: number;
+  };
   readonly nodeEnv: "development" | "test" | "production";
   readonly apiPort: number;
   readonly databaseUrl: string;
@@ -76,7 +79,9 @@ export function parseEnvironment(
     if (
       value.length < min ||
       (production &&
-        /change.?me|change.?this|example|placeholder|vera_dev|your_|replace_/i.test(value))
+        /change.?me|change.?this|example|placeholder|vera_dev|your_|replace_/i.test(
+          value,
+        ))
     )
       issues.push(
         `${key} requires a non-placeholder secret of at least ${min} characters`,
@@ -115,7 +120,9 @@ export function parseEnvironment(
       !url.password ||
       url.pathname.length < 2 ||
       (production &&
-        /change.?me|vera_dev|your_|replace_/i.test(decodeURIComponent(url.password)))
+        /change.?me|vera_dev|your_|replace_/i.test(
+          decodeURIComponent(url.password),
+        ))
     )
       throw new Error();
   } catch {
@@ -195,7 +202,15 @@ export function parseEnvironment(
   )
     issues.push("MINIO_BUCKET must be a valid bucket name");
   const config: AppConfiguration = {
-    verification: { ttlSeconds: integer('VERIFICATION_TTL_SECONDS', 1800, 60, 86400), resendCooldownSeconds: integer('VERIFICATION_RESEND_COOLDOWN_SECONDS', 60, 10, 3600) },
+    verification: {
+      ttlSeconds: integer("VERIFICATION_TTL_SECONDS", 1800, 60, 86400),
+      resendCooldownSeconds: integer(
+        "VERIFICATION_RESEND_COOLDOWN_SECONDS",
+        60,
+        10,
+        3600,
+      ),
+    },
     nodeEnv: nodeEnv as AppConfiguration["nodeEnv"],
     apiPort: integer("API_PORT", 4000, 1, 65535),
     databaseUrl,

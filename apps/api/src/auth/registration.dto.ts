@@ -1,7 +1,16 @@
-import { Transform } from 'class-transformer';
-import { Equals, IsBoolean, IsEmail, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
+import { Transform } from "class-transformer";
+import {
+  Equals,
+  IsBoolean,
+  IsEmail,
+  IsOptional,
+  IsString,
+  MaxLength,
+  MinLength,
+} from "class-validator";
 
-export const normalizeEmail = ({ value }: { value: unknown }) => typeof value === 'string' ? value.trim().toLowerCase() : value;
+export const normalizeEmail = ({ value }: { value: unknown }) =>
+  typeof value === "string" ? value.trim().toLowerCase() : value;
 
 export class RegistrationDto {
   @Transform(normalizeEmail)
@@ -15,11 +24,13 @@ export class RegistrationDto {
   password!: string;
 
   @IsBoolean()
-  @Equals(true, { message: 'You must declare that you are 18 or older.' })
+  @Equals(true, { message: "You must declare that you are 18 or older." })
   declaredAdult!: boolean;
 
   @IsOptional()
-  @Transform(({ value }: { value: unknown }) => typeof value === 'string' ? value.trim() : value)
+  @Transform(({ value }: { value: unknown }) =>
+    typeof value === "string" ? value.trim() : value,
+  )
   @IsString()
   @MinLength(1)
   @MaxLength(80)

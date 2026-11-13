@@ -11,7 +11,10 @@ test("public page is responsive and honest about product availability", async ({
     "A meaningful connection starts with you.",
   );
   await expect(
-    page.getByText("Private video reviews and matching are still taking shape.", { exact: false }),
+    page.getByText(
+      "Private video reviews and matching are still taking shape.",
+      { exact: false },
+    ),
   ).toBeVisible();
   for (const width of [320, 390, 768, 1440]) {
     await page.setViewportSize({ width, height: 900 });

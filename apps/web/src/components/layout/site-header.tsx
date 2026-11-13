@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "../ui/button";
-import { AuthNavigation } from '../auth/auth-navigation';
+import { AuthNavigation } from "../auth/auth-navigation";
 
 export function SiteHeader() {
   const pathname = usePathname();
