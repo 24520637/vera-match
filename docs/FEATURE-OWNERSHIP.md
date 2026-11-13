@@ -16,6 +16,8 @@
 
 ## Shared boundaries
 
+- **Huong owns the shared frontend design system:** tokens, reusable controls, layout patterns, accessibility, and visual direction. See `docs/UI-DESIGN-SYSTEM.md`. Phuc retains web integration and feature ownership above; both coordinate adoption of shared components. This UI foundation does not implement or reassign backend features.
+
 - Huong primarily owns `Session`, `EmailVerificationToken`, `PasswordResetToken`, `Video`, `Block`, and `Report`.
 - Phuc primarily owns `Profile`, `QuestionnaireAnswer`, `Consent`, `MatchPreference`, `ExpertAssignment`, `ExpertReview`, `ExpertObservation`, `ReviewClaim`, `ReviewDispute`, `MatchPair`, and `MatchDecision`.
 - Both review changes to `User`, shared environment configuration, API contracts, and Prisma migrations. Do not overwrite concurrent schema changes.

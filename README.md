@@ -2,7 +2,7 @@
 
 An adult matchmaking platform based on member profiles, questionnaires, reciprocal preferences, and consent-controlled expert review of private videos.
 
-**Current implementation:** Next.js landing page, NestJS health endpoint, Prisma schema and initial migration, local infrastructure, and CI configuration. Authentication, private video review, and matching remain planned. A checked-in migration does not establish that it has been applied or verified.
+**Current implementation:** Next.js landing page and shared UI design-system preview at `/design-system`, NestJS health endpoint, Prisma schema and initial migration, local infrastructure, and CI configuration. The preview uses page-local examples. Authentication, private video review, and matching remain planned. A checked-in migration does not establish that it has been applied or verified.
 
 ## Stack
 
@@ -72,6 +72,7 @@ Huong owns authentication, sessions, private video, safety, and privacy. Phuc ow
 | --- | --- |
 | [Scope](docs/SCOPE-DECISIONS.md) | Required features and exclusions |
 | [Architecture](docs/ARCHITECTURE.md) | Components and trust boundaries |
+| [UI design system](docs/UI-DESIGN-SYSTEM.md) | Shared tokens, components, interaction patterns, and Huong’s design review |
 | [API contract](docs/API-CONTRACT.md) | Planned endpoints and access rules |
 | [Authentication](docs/AUTH-SPEC.md) | Sessions, account states, CSRF, and authorization |
 | [Database](docs/DATABASE.md) | Models and data invariants |
