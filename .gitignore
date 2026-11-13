@@ -13,3 +13,5 @@ __pycache__/
 .DS_Store
 *.tsbuildinfo
 .prisma/
+playwright-report/
+test-results/
