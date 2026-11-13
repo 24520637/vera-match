@@ -17,3 +17,19 @@ test('restores a real HttpOnly session after refresh and browser-context reopen'
     try { const other = await reopened.newPage(); await other.goto('http://localhost:3100/account'); await expect(other.getByText(email, { exact: true })).toBeVisible(); } finally { await reopened.close(); }
   } finally { await clearTestEmails(email); }
 });
+
+test('uses real sign-in, rejects external next targets and remembers only explicitly selected email', async ({ page, context }) => {
+  const email = `browser-${randomUUID()}@example.invalid`; const password = 'synthetic-browser-password';
+  const post = (path: string, data: object) => context.request.post(`http://localhost:4100/api/auth/${path}`, { headers: { Origin: 'http://localhost:3100' }, data });
+  try {
+    await post('register', { email, password, declaredAdult: true }); const activation = await readActivationEmail(email); await post('verify-email', { token: activation.token });
+    await page.goto('/login?next=https://attacker.invalid');
+    const form = page.getByRole('form', { name: 'Sign in', exact: true });
+    await form.getByLabel('Email address').fill(email); await form.getByLabel('Password', { exact: false }).fill(password);
+    await form.getByLabel('Remember email on this device').check(); await form.getByRole('button', { name: 'Sign in', exact: true }).click();
+    await expect(page).toHaveURL('/account'); await expect(page.getByText(email, { exact: true })).toBeVisible();
+    expect(await page.evaluate(() => Object.entries(localStorage))).toEqual([['vera.rememberedEmail', email]]);
+    expect(await page.evaluate(() => sessionStorage.length)).toBe(0);
+    await page.goto('/login?next=//attacker.invalid'); await expect(page).toHaveURL('/account');
+  } finally { await clearTestEmails(email); }
+});
