@@ -7,6 +7,7 @@ export interface AppConfiguration {
   readonly session: { readonly cookieName: string; readonly ttlSeconds: number; readonly secure: boolean; readonly sameSite: 'lax' | 'strict' | 'none'; readonly httpOnly: true; readonly path: '/' };
   readonly smtp: { readonly host: string; readonly port: number; readonly from: string; readonly secure: boolean; readonly requireTls: boolean; readonly user?: string; readonly password?: string };
   readonly minio: { readonly endpoint: string; readonly accessKey: string; readonly secretKey: string; readonly bucket: string };
+  readonly password: { readonly memoryCost: number; readonly timeCost: number; readonly parallelism: number };
 }
 
 export class ConfigurationError extends Error {
@@ -77,6 +78,7 @@ export function parseEnvironment(env: Record<string, unknown>): AppConfiguration
     session: { cookieName, ttlSeconds: integer('SESSION_TTL_SECONDS', 604800, 60, 2592000), secure, sameSite: sameSite as AppConfiguration['session']['sameSite'], httpOnly: true, path: '/' },
     smtp: { host: smtpHost, port: integer('SMTP_PORT', 1025, 1, 65535), from: smtpFrom, secure: smtpSecure, requireTls, user: smtpUser || undefined, password: smtpPassword || undefined },
     minio: { endpoint: minioEndpoint, accessKey: secret('MINIO_ROOT_USER', '', 3), secretKey: secret('MINIO_ROOT_PASSWORD', '', 8), bucket },
+    password: { memoryCost: integer('ARGON2_MEMORY_COST_KIB', 65536, 19456, 262144), timeCost: integer('ARGON2_TIME_COST', 3, 2, 10), parallelism: integer('ARGON2_PARALLELISM', 1, 1, 4) },
   };
   if (issues.length) throw new ConfigurationError(issues);
   return config;

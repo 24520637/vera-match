@@ -21,6 +21,14 @@ The API validates configuration before listening. Configuration errors report va
 
 `GET /api/health` is process liveness and does not query PostgreSQL. `GET /api/health/ready` executes a query and returns 503 with a sanitized error if it fails. An initial unavailable database prevents startup; readiness covers loss of a running connection. On Windows use Ctrl+C for shutdown; SIGTERM semantics differ from Unix. Integration smoke also exercises `app.close()` and verifies the disconnect hook.
 
+## Existing account schema (C003 — ALREADY COMPLETE)
+
+The merged initial migration already defines User.status=PENDING_EMAIL, MEMBER role, nullable emailVerifiedAt, unique email and session/token hashes, expiration/revocation/consumption timestamps and user/expiry indexes. Prisma validate/generate and migrate status pass; migrate diff against the live local database reports no difference. A synthetic User created without a status received PENDING_EMAIL; its transaction was rolled back and cleanup verified. No schema or migration history changes were needed. Login/registration endpoints are not part of T01.
+
+## Password helper (C004)
+
+`PasswordService` hashes with Argon2id v19, a random per-password salt and 32-byte output. Defaults: 64 MiB memory, 3 iterations, 1 lane. Configured lower bounds are 19 MiB / 2 iterations / 1 lane; upper bounds prevent accidental resource exhaustion. Input is bounded to 1024 UTF-8 bytes without normalization or truncation. Invalid/non-Argon2id/corrupt/excessive-cost stored hashes fail closed. No password or hash is logged. Minimum password policy belongs to the later registration DTO; this primitive does not pretend to implement registration.
+
 ## Shared review contract
 
 Phuc must review configuration, User/session access and any Prisma/API changes before merge. No Phuc GitHub username is recorded in the repository; assign Phuc as reviewer manually if it cannot be resolved. Only the existing Prisma migration is used unless a verified schema gap requires an incremental change.
