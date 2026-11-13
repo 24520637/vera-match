@@ -46,4 +46,30 @@ describe('email authentication HTTP / PostgreSQL / native SMTP', () => {
     expect(await database.client.user.count({ where: { email } })).toBe(1);
     expect(await database.client.session.count({ where: { userId: user.id } })).toBe(0);
   });
+
+  it('consumes activation once under concurrent verification, without creating a session', async () => {
+    const email = newEmail();
+    expect((await post('register', { email, password: 'synthetic-password-123', declaredAdult: true })).status).toBe(202);
+    const activation = await readActivationEmail(email);
+    const responses = await Promise.all([post('verify-email', { token: activation.token }), post('verify-email', { token: activation.token })]);
+    expect(responses.map(response => response.status).sort()).toEqual([200, 400]);
+    const user = await database.client.user.findUniqueOrThrow({ where: { email } });
+    expect(user.status).toBe('ACTIVE'); expect(user.emailVerifiedAt).not.toBeNull();
+    expect(await database.client.session.count({ where: { userId: user.id } })).toBe(0);
+    expect((await post('verify-email', { token: activation.token })).status).toBe(400);
+  });
+
+  it('rejects unknown, expired and suspended activation without activating the account', async () => {
+    expect((await post('verify-email', { token: 'a'.repeat(43) })).status).toBe(400);
+    const email = newEmail();
+    await post('register', { email, password: 'synthetic-password-123', declaredAdult: true });
+    const activation = await readActivationEmail(email);
+    await database.client.emailVerificationToken.update({ where: { tokenHash: hashVerificationToken(activation.token) }, data: { expiresAt: new Date(Date.now() - 1000) } });
+    expect((await post('verify-email', { token: activation.token })).status).toBe(400);
+    expect((await database.client.user.findUniqueOrThrow({ where: { email } })).status).toBe('PENDING_EMAIL');
+    await database.client.emailVerificationToken.update({ where: { tokenHash: hashVerificationToken(activation.token) }, data: { expiresAt: new Date(Date.now() + 60000) } });
+    await database.client.user.update({ where: { email }, data: { status: 'SUSPENDED' } });
+    expect((await post('verify-email', { token: activation.token })).status).toBe(400);
+    expect((await database.client.emailVerificationToken.findUniqueOrThrow({ where: { tokenHash: hashVerificationToken(activation.token) } })).consumedAt).toBeNull();
+  });
 });

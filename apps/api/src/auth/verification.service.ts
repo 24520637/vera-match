@@ -1,4 +1,4 @@
-import { Injectable, ServiceUnavailableException } from '@nestjs/common';
+import { BadRequestException, Injectable, ServiceUnavailableException } from '@nestjs/common';
 import { randomBytes, createHash } from 'node:crypto';
 import { PrismaService } from '../database/prisma.service';
 import { EnvironmentService } from '../config/environment.service';
@@ -9,6 +9,28 @@ export const hashVerificationToken = (token: string) => createHash('sha256').upd
 @Injectable()
 export class VerificationService {
   constructor(private readonly prisma: PrismaService, private readonly environment: EnvironmentService, private readonly email: EmailService) {}
+
+  async verify(token: string) {
+    const invalid = () => new BadRequestException({ code: 'INVALID_VERIFICATION_LINK', message: 'This activation link is invalid, expired or already used. Request a new email.' });
+    if (Buffer.from(token, 'base64url').toString('base64url') !== token) throw invalid();
+    try {
+      await this.prisma.$transaction(async tx => {
+        const row = await tx.emailVerificationToken.findUnique({ where: { tokenHash: hashVerificationToken(token) }, select: { id: true, userId: true } });
+        if (!row) throw invalid();
+        // Same lock order as resend/login: account first, then dependent rows.
+        await tx.$queryRaw`SELECT id FROM "User" WHERE id = ${row.userId} FOR UPDATE`;
+        const now = new Date();
+        const consumed = await tx.emailVerificationToken.updateMany({ where: { id: row.id, consumedAt: null, expiresAt: { gt: now } }, data: { consumedAt: now } });
+        if (consumed.count !== 1) throw invalid();
+        const activated = await tx.user.updateMany({ where: { id: row.userId, status: 'PENDING_EMAIL', emailVerifiedAt: null }, data: { status: 'ACTIVE', emailVerifiedAt: now } });
+        if (activated.count !== 1) throw invalid();
+      });
+    } catch (error) {
+      if (error instanceof BadRequestException) throw error;
+      throw new ServiceUnavailableException({ code: 'VERIFICATION_UNAVAILABLE', message: 'Activation is temporarily unavailable. Try again later.' });
+    }
+    return { message: 'Email verified. You can now sign in.' };
+  }
 
   async issue(userId: string) {
     const token = randomBytes(32).toString('base64url');
