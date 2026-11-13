@@ -39,7 +39,10 @@ jobs:
             sudo pg_ctlcluster 18 main stop
           fi
           /usr/lib/postgresql/18/bin/initdb -D "$RUNNER_TEMP/vera-postgres" --username=vera_ci --auth-local=trust --auth-host=trust
-          /usr/lib/postgresql/18/bin/pg_ctl -D "$RUNNER_TEMP/vera-postgres" -l "$RUNNER_TEMP/vera-postgres.log" -o "-h 127.0.0.1 -p 5433" -w start
+          if ! /usr/lib/postgresql/18/bin/pg_ctl -D "$RUNNER_TEMP/vera-postgres" -l "$RUNNER_TEMP/vera-postgres.log" -o "-h 127.0.0.1 -p 5433 -k $RUNNER_TEMP" -w start; then
+            cat "$RUNNER_TEMP/vera-postgres.log"
+            exit 1
+          fi
           /usr/lib/postgresql/18/bin/createdb -h 127.0.0.1 -p 5433 -U vera_ci vera_t01_test
       - name: Apply existing migrations to disposable CI database
         run: npx prisma migrate deploy --schema apps/api/prisma/schema.prisma
