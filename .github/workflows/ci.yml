@@ -22,6 +22,39 @@ jobs:
           DATABASE_URL: postgresql://ci:ci@localhost:5432/vera?schema=public
       - run: npm run test
       - run: npm run build
+      - name: Start native PostgreSQL 18 (no Docker)
+        shell: bash
+        run: |
+          if [[ ! -x /usr/lib/postgresql/18/bin/pg_ctl ]]; then
+            sudo apt-get update
+            sudo apt-get install -y postgresql-common ca-certificates curl
+            sudo install -d /usr/share/postgresql-common/pgdg
+            sudo curl --fail -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc https://www.postgresql.org/media/keys/ACCC4CF8.asc
+            source /etc/os-release
+            echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" | sudo tee /etc/apt/sources.list.d/vera-pgdg.list
+            sudo apt-get update
+            sudo apt-get install -y postgresql-18
+          fi
+          if pg_lsclusters --no-header | awk '$1 == "18" && $2 == "main" && $4 ~ /^online/ { found = 1 } END { exit !found }'; then
+            sudo pg_ctlcluster 18 main stop
+          fi
+          /usr/lib/postgresql/18/bin/initdb -D "$RUNNER_TEMP/vera-postgres" --username=vera_ci --auth-local=trust --auth-host=trust
+          if ! /usr/lib/postgresql/18/bin/pg_ctl -D "$RUNNER_TEMP/vera-postgres" -l "$RUNNER_TEMP/vera-postgres.log" -o "-h 127.0.0.1 -p 5433 -k $RUNNER_TEMP" -w start; then
+            cat "$RUNNER_TEMP/vera-postgres.log"
+            exit 1
+          fi
+          /usr/lib/postgresql/18/bin/createdb -h 127.0.0.1 -p 5433 -U vera_ci vera_t01_test
+      - name: Apply existing migrations to disposable CI database
+        run: npx prisma migrate deploy --schema apps/api/prisma/schema.prisma
+        env:
+          DATABASE_URL: postgresql://vera_ci:synthetic-ci-only@127.0.0.1:5433/vera_t01_test?schema=public
+      - name: Verify authentication and PostgreSQL foundation
+        run: npm run test:integration --workspace apps/api
+        env:
+          NODE_ENV: test
+          DATABASE_URL: postgresql://vera_ci:synthetic-ci-only@127.0.0.1:5433/vera_t01_test?schema=public
+          MINIO_ROOT_USER: synthetic-ci
+          MINIO_ROOT_PASSWORD: synthetic-ci-only-not-a-secret
       - name: Install browser for shared UI checks
         run: npx playwright install --with-deps chromium
       - name: Check shared UI interactions and accessibility
@@ -33,3 +66,10 @@ jobs:
           name: ui-test-report
           path: apps/web/playwright-report/
           retention-days: 7
+      - name: Stop native CI PostgreSQL
+        if: always()
+        shell: bash
+        run: |
+          if [[ -f "$RUNNER_TEMP/vera-postgres/postmaster.pid" ]]; then
+            /usr/lib/postgresql/18/bin/pg_ctl -D "$RUNNER_TEMP/vera-postgres" -m fast -w stop
+          fi

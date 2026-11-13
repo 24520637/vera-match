@@ -1,6 +1,6 @@
 # Authentication, session management, and authorization specification
 
-**Implementation status:** PLANNED. The starter does not yet contain a working registration, login, or session implementation.
+**Implementation status:** T01 provides typed configuration, Prisma lifecycle/readiness, an Argon2id helper and server-side session/role guard primitives, with real database smoke tests. Registration, login, session issuance/restoration endpoints and their UI remain PLANNED. See `AUTH-FOUNDATION.md` for the implemented boundary; the full acceptance journey below is not complete.
 
 ## 1. Account state and roles
 
