@@ -7,9 +7,9 @@ export async function findTestEmails(email: string): Promise<{ ID: string }[]> {
   if (!response.ok) throw new Error('Native Mailpit API unavailable');
   return ((await response.json()) as { messages: { ID: string }[] }).messages;
 }
-export async function readActivationEmail(email: string) {
+export async function readActivationEmail(email: string, excludedIds: string[] = []) {
   for (let i = 0; i < 30; i++) {
-    const messages = await findTestEmails(email);
+    const messages = (await findTestEmails(email)).filter(message => !excludedIds.includes(message.ID));
     if (messages.length) {
       const message = await (await fetch(`${base}/api/v1/message/${messages[0].ID}`)).json() as MailpitMessage;
       if (!message.To.some(recipient => recipient.Address === email)) throw new Error('Unexpected recipient');
