@@ -32,7 +32,15 @@ export class VerificationService {
     return { message: 'Email verified. You can now sign in.' };
   }
 
-  async issue(userId: string) {
+  async resend(email: string) {
+    let user;
+    try { user = await this.prisma.user.findFirst({ where: { email: { equals: email, mode: 'insensitive' }, status: 'PENDING_EMAIL', emailVerifiedAt: null }, select: { id: true } }); }
+    catch { throw new ServiceUnavailableException({ code: 'VERIFICATION_UNAVAILABLE', message: 'Activation is temporarily unavailable. Try again later.' }); }
+    if (user) await this.issue(user.id, true);
+    return { message: 'If this address needs activation, check its inbox. You can request another email after the cooldown.' };
+  }
+
+  async issue(userId: string, enforceCooldown = false) {
     const token = randomBytes(32).toString('base64url');
     let delivery: { id: string; email: string } | null;
     try {
@@ -41,6 +49,12 @@ export class VerificationService {
         const user = await tx.user.findUnique({ where: { id: userId }, select: { email: true, status: true, emailVerifiedAt: true } });
         if (!user || user.status !== 'PENDING_EMAIL' || user.emailVerifiedAt) return null;
         const now = new Date();
+        if (enforceCooldown) {
+          const latest = await tx.emailVerificationToken.findFirst({ where: { userId }, orderBy: { createdAt: 'desc' }, select: { createdAt: true } });
+          if (latest && latest.createdAt.getTime() > now.getTime() - this.environment.values.verification.resendCooldownSeconds * 1000) return null;
+          const recent = await tx.emailVerificationToken.count({ where: { userId, createdAt: { gt: new Date(now.getTime() - 900000) } } });
+          if (recent >= 3) return null;
+        }
         await tx.emailVerificationToken.updateMany({ where: { userId, consumedAt: null }, data: { consumedAt: now } });
         const row = await tx.emailVerificationToken.create({ data: { userId, tokenHash: hashVerificationToken(token), expiresAt: new Date(now.getTime() + this.environment.values.verification.ttlSeconds * 1000) }, select: { id: true } });
         return { id: row.id, email: user.email };

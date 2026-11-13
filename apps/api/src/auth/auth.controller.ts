@@ -4,6 +4,7 @@ import { RegistrationDto } from './registration.dto';
 import { RegistrationService } from './registration.service';
 import { VerificationService } from './verification.service';
 import { VerificationDto } from './verification.dto';
+import { EmailDto } from './email.dto';
 
 export const REGISTRATION_RESPONSE = { message: 'Registration request received. If this address is eligible, activate your account before signing in.' };
 
@@ -14,6 +15,10 @@ export class AuthController {
   @HttpCode(200)
   @UseGuards(AuthRequestGuard)
   verify(@Body() input: VerificationDto) { return this.verification.verify(input.token); }
+  @Post('resend-verification')
+  @HttpCode(202)
+  @UseGuards(AuthRequestGuard)
+  resend(@Body() input: EmailDto) { return this.verification.resend(input.email); }
   @Post('register')
   @HttpCode(202)
   @UseGuards(AuthRequestGuard)

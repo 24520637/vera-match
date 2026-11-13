@@ -29,7 +29,7 @@ export class AuthRequestGuard implements CanActivate {
     if (request.headers.origin !== this.environment.values.corsOrigin) throw new ForbiddenException({ code: 'ORIGIN_DENIED', message: 'This request origin is not allowed.' });
     if (!request.is('application/json')) throw new HttpException({ code: 'JSON_REQUIRED', message: 'Send a JSON request.' }, 415);
     const action = context.getHandler().name;
-    this.limiter.consume(`${action}:ip`, request.ip ?? request.socket.remoteAddress ?? 'unknown', action === 'register' ? 20 : 60);
+    this.limiter.consume(`${action}:ip`, request.ip ?? request.socket.remoteAddress ?? 'unknown', action === 'register' ? 20 : action === 'resend' ? 10 : 60);
     if (action === 'login') {
       const email = typeof request.body?.email === 'string' ? request.body.email.trim().toLowerCase().slice(0, 254) : 'invalid';
       this.limiter.consume('login:identity', email, 10);

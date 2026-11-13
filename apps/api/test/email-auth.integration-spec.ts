@@ -7,7 +7,7 @@ import { parseEnvironment } from '../src/config/environment';
 import { configureApplication } from '../src/configure-app';
 import { hashVerificationToken } from '../src/auth/verification.service';
 import { createAuthDatabase } from './disposable-auth-database';
-import { clearTestEmails, readActivationEmail } from './mailpit-fixtures';
+import { clearTestEmails, findTestEmails, readActivationEmail } from './mailpit-fixtures';
 
 describe('email authentication HTTP / PostgreSQL / native SMTP', () => {
   let database: Awaited<ReturnType<typeof createAuthDatabase>>;
@@ -15,13 +15,16 @@ describe('email authentication HTTP / PostgreSQL / native SMTP', () => {
   const recipients: string[] = [];
   beforeAll(async () => {
     database = await createAuthDatabase();
+  }, 60000);
+  beforeEach(async () => {
     const values = parseEnvironment({ ...process.env, DATABASE_URL: database.url }); origin = values.corsOrigin;
     const module = await Test.createTestingModule({ imports: [AppModule] }).overrideProvider(EnvironmentService).useValue({ values }).compile();
     app = module.createNestApplication({ logger: false }); configureApplication(app); await app.listen(0, '127.0.0.1'); base = await app.getUrl();
-  }, 60000);
+  });
+  afterEach(async () => { await app?.close(); });
   afterAll(async () => {
     try { for (const email of recipients) await clearTestEmails(email); }
-    finally { await app?.close(); await database?.close(); }
+    finally { await database?.close(); }
   });
   const newEmail = () => { const email = `auth-${randomUUID()}@example.invalid`; recipients.push(email); return email; };
   const post = (path: string, body: object, requestOrigin?: string, cookie?: string) => fetch(`${base}/api/auth/${path}`, { method: 'POST', headers: { Origin: requestOrigin ?? origin, 'Content-Type': 'application/json', ...(cookie ? { Cookie: cookie } : {}) }, body: JSON.stringify(body) });
@@ -71,5 +74,26 @@ describe('email authentication HTTP / PostgreSQL / native SMTP', () => {
     await database.client.user.update({ where: { email }, data: { status: 'SUSPENDED' } });
     expect((await post('verify-email', { token: activation.token })).status).toBe(400);
     expect((await database.client.emailVerificationToken.findUniqueOrThrow({ where: { tokenHash: hashVerificationToken(activation.token) } })).consumedAt).toBeNull();
+  });
+
+  it('resends with a cooldown, invalidates old links, and uses generic unknown/suspended responses', async () => {
+    const email = newEmail(); const unknown = newEmail();
+    await post('register', { email, password: 'synthetic-password-123', declaredAdult: true });
+    const first = await readActivationEmail(email);
+    const unknownResponse = await post('resend-verification', { email: unknown }); expect(unknownResponse.status).toBe(202);
+    const generic = await unknownResponse.json();
+    expect(await (await post('resend-verification', { email })).json()).toEqual(generic);
+    expect((await findTestEmails(email)).length).toBe(1);
+    const user = await database.client.user.findUniqueOrThrow({ where: { email } });
+    await database.client.emailVerificationToken.updateMany({ where: { userId: user.id }, data: { createdAt: new Date(Date.now() - 61000) } });
+    const resends = await Promise.all([post('resend-verification', { email }), post('resend-verification', { email })]);
+    expect(resends.map(response => response.status)).toEqual([202, 202]);
+    const second = await readActivationEmail(email, [first.id]);
+    expect((await findTestEmails(email)).length).toBe(2);
+    expect((await post('verify-email', { token: first.token })).status).toBe(400);
+    expect((await post('verify-email', { token: second.token })).status).toBe(200);
+    await database.client.user.update({ where: { id: user.id }, data: { status: 'SUSPENDED' } });
+    expect(await (await post('resend-verification', { email })).json()).toEqual(generic);
+    expect((await findTestEmails(email)).length).toBe(2);
   });
 });
