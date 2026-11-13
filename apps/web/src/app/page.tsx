@@ -16,7 +16,8 @@ export default function HomePage() {
           </p>
           <ButtonLink href="/register">Create your account</ButtonLink>
           <p className="small muted">
-            <span translate="no">VERA Match</span> is in development. Private video reviews and matching are still taking shape.
+            <span translate="no">VERA Match</span> is in development. Private
+            video reviews and matching are still taking shape.
           </p>
         </div>
         <div className="conversation">
