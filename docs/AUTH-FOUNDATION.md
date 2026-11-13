@@ -15,6 +15,12 @@ The API validates configuration before listening. Configuration errors report va
 
 `AGENTS.md`, `CODEX_CONTEXT.md` and `docs/COMMIT-PLAN.md` were removed in merged PR #3. This feature follows the live specifications and the user-provided C001–C006 scope; it does not recreate those removed files.
 
+## Database lifecycle (C002)
+
+`DatabaseModule` exports one injectable `PrismaService`. Startup explicitly connects; connection failures stop startup with a redacted message. Nest shutdown hooks disconnect the client. Explicit connection/pool timeouts in DATABASE_URL are preserved; otherwise both waits default to 3 seconds.
+
+`GET /api/health` is process liveness and does not query PostgreSQL. `GET /api/health/ready` executes a query and returns 503 with a sanitized error if it fails. An initial unavailable database prevents startup; readiness covers loss of a running connection. On Windows use Ctrl+C for shutdown; SIGTERM semantics differ from Unix. Integration smoke also exercises `app.close()` and verifies the disconnect hook.
+
 ## Shared review contract
 
 Phuc must review configuration, User/session access and any Prisma/API changes before merge. No Phuc GitHub username is recorded in the repository; assign Phuc as reviewer manually if it cannot be resolved. Only the existing Prisma migration is used unless a verified schema gap requires an incremental change.

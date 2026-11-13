@@ -8,6 +8,7 @@ import { EnvironmentService } from './config/environment.module';
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   const settings = app.get(EnvironmentService).values;
+  app.enableShutdownHooks(['SIGINT', 'SIGTERM']);
   app.setGlobalPrefix('api');
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true }));
   app.enableCors({ origin: settings.corsOrigin, credentials: true });
