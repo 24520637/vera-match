@@ -10,11 +10,12 @@ import { AuthController } from './auth.controller';
 import { AuthRateLimiter, AuthRequestGuard } from './auth-request.guard';
 import { EmailService } from './email.service';
 import { VerificationService } from './verification.service';
+import { LoginService } from './login.service';
 
 @Module({
   imports: [EnvironmentModule, DatabaseModule],
   controllers: [AuthController],
-  providers: [PasswordService, SessionService, SessionAuthGuard, RolesGuard, RegistrationService, AuthRateLimiter, AuthRequestGuard, EmailService, VerificationService],
+  providers: [PasswordService, SessionService, SessionAuthGuard, RolesGuard, RegistrationService, AuthRateLimiter, AuthRequestGuard, EmailService, VerificationService, LoginService],
   exports: [PasswordService, SessionService, SessionAuthGuard, RolesGuard],
 })
 export class AuthModule {}

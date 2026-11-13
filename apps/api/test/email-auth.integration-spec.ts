@@ -6,6 +6,7 @@ import { EnvironmentService } from '../src/config/environment.service';
 import { parseEnvironment } from '../src/config/environment';
 import { configureApplication } from '../src/configure-app';
 import { hashVerificationToken } from '../src/auth/verification.service';
+import { hashSessionToken } from '../src/auth/session-token';
 import { createAuthDatabase } from './disposable-auth-database';
 import { clearTestEmails, findTestEmails, readActivationEmail } from './mailpit-fixtures';
 
@@ -95,5 +96,23 @@ describe('email authentication HTTP / PostgreSQL / native SMTP', () => {
     await database.client.user.update({ where: { id: user.id }, data: { status: 'SUSPENDED' } });
     expect(await (await post('resend-verification', { email })).json()).toEqual(generic);
     expect((await findTestEmails(email)).length).toBe(2);
+  });
+
+  it('issues persistent HttpOnly cookies only after real credential and activation checks', async () => {
+    const email = newEmail(); const password = 'synthetic-login-password';
+    await post('register', { email, password, declaredAdult: true });
+    const pending = await post('login', { email, password }); expect(pending.status).toBe(401); expect(pending.headers.get('set-cookie')).toBeNull();
+    const activation = await readActivationEmail(email); await post('verify-email', { token: activation.token });
+    expect((await post('login', { email, password: 'wrong-synthetic-password' })).status).toBe(401);
+    expect((await post('login', { email: newEmail(), password })).status).toBe(401);
+    const loggedIn = await post('login', { email: email.toUpperCase(), password }); expect(loggedIn.status).toBe(200);
+    const cookie = loggedIn.headers.get('set-cookie')!;
+    expect(cookie).toContain('HttpOnly'); expect(cookie).toContain('SameSite=Lax'); expect(cookie).toContain('Path=/'); expect(cookie).toContain('Max-Age=604800'); expect(cookie).not.toContain('Domain=');
+    const token = cookie.split(';')[0].split('=')[1];
+    const body = await loggedIn.json(); expect(body).toMatchObject({ email, role: 'MEMBER' }); expect(Object.keys(body as object).sort()).toEqual(['displayName', 'email', 'id', 'role']);
+    const session = await database.client.session.findUniqueOrThrow({ where: { tokenHash: hashSessionToken(token) } }); expect(session.tokenHash).not.toBe(token);
+    await database.client.user.update({ where: { email }, data: { status: 'SUSPENDED' } }); expect((await post('login', { email, password })).status).toBe(401);
+    await database.client.user.update({ where: { email }, data: { status: 'DELETED' } }); expect((await post('login', { email, password })).status).toBe(401);
+    expect(await database.client.session.count({ where: { userId: session.userId } })).toBe(1);
   });
 });
