@@ -115,4 +115,20 @@ describe('email authentication HTTP / PostgreSQL / native SMTP', () => {
     await database.client.user.update({ where: { email }, data: { status: 'DELETED' } }); expect((await post('login', { email, password })).status).toBe(401);
     expect(await database.client.session.count({ where: { userId: session.userId } })).toBe(1);
   });
+
+  it('restores only a valid live session and returns the minimal current-user projection', async () => {
+    const email = newEmail(); const password = 'synthetic-session-password';
+    await post('register', { email, password, declaredAdult: true });
+    const activation = await readActivationEmail(email); await post('verify-email', { token: activation.token });
+    const login = await post('login', { email, password });
+    const cookie = login.headers.get('set-cookie')!.split(';')[0];
+    const me = (value?: string) => fetch(`${base}/api/auth/me`, { headers: value ? { Cookie: value } : {} });
+    expect((await me()).status).toBe(401); expect((await me('vera_session=invalid')).status).toBe(401);
+    const response = await me(cookie); expect(response.status).toBe(200); expect(response.headers.get('cache-control')).toBe('no-store');
+    const user = await response.json() as { id: string };
+    expect(Object.keys(user).sort()).toEqual(['displayName', 'email', 'id', 'role']);
+    const session = await database.client.session.findFirstOrThrow({ where: { userId: user.id } });
+    await database.client.session.update({ where: { id: session.id }, data: { expiresAt: new Date(Date.now() - 1000) } }); expect((await me(cookie)).status).toBe(401);
+    await database.client.session.update({ where: { id: session.id }, data: { expiresAt: new Date(Date.now() + 60000), revokedAt: new Date() } }); expect((await me(cookie)).status).toBe(401);
+  });
 });
