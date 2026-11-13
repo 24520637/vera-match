@@ -1,0 +1,9 @@
+.auth-shell { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, var(--form-width)); gap: clamp(2rem, 6vw, 6rem); align-items: start; padding-block: var(--space-8); }
+.auth-context { display: grid; gap: var(--space-5); min-width: 0; padding-top: var(--space-5); }
+.auth-context h1 { max-width: 13ch; }
+.auth-context .lede { max-width: 35ch; }
+.auth-panel { min-width: 0; }
+.auth-form-title { font-size: 2rem; }
+.password-field { display: grid; gap: var(--space-1); }
+.password-field .button { justify-self: start; }
+@media (max-width: 48rem) { .auth-shell { grid-template-columns: 1fr; padding-block: var(--space-7); gap: var(--space-6); } .auth-context { padding-top: 0; } .auth-context h1 { max-width: 20ch; } }
