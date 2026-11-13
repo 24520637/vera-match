@@ -1,6 +1,6 @@
 # Planned API contract — VERA Match
 
-**Status: DESIGN ONLY.** With the current scaffold, only `GET /api/health` is implemented. Every endpoint below requires actual code, authorization, tests, and acceptance before use.
+**Status:** `GET /api/health` (process liveness) and `GET /api/health/ready` (PostgreSQL readiness; sanitized `503 DATABASE_UNAVAILABLE` on failure) are implemented. Business endpoints below remain DESIGN ONLY and require actual code, authorization, tests, and acceptance before use.
 
 API prefix: `/api`. The browser uses a server-issued HttpOnly session cookie. Mutating cookie-authenticated endpoints require CSRF protection. Suggested error envelope: `{code, message, details?}`. Use `401` for unauthenticated, `403` for denied access, `409` for state/version conflict, and `400`/`422` for invalid requests.
 

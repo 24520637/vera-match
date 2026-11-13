@@ -2,7 +2,7 @@
 
 An adult matchmaking platform based on member profiles, questionnaires, reciprocal preferences, and consent-controlled expert review of private videos.
 
-**Current implementation:** Next.js landing page and shared UI design-system preview at `/design-system`, NestJS health endpoint, Prisma schema and initial migration, local infrastructure, and CI configuration. The preview uses page-local examples. Authentication, private video review, and matching remain planned. A checked-in migration does not establish that it has been applied or verified.
+**Current implementation:** Next.js landing page and shared UI design-system preview at `/design-system`; NestJS typed configuration, Prisma lifecycle/readiness, Argon2id helper and database-backed session/role guards; Prisma schema and initial migration; CI checks. The preview uses page-local examples. Registration/login endpoints, private video review, and matching remain planned. See [T01 foundation](docs/AUTH-FOUNDATION.md) for verified scope and limitations.
 
 ## Stack
 
@@ -13,7 +13,7 @@ An adult matchmaking platform based on member profiles, questionnaires, reciproc
 
 ## Local setup
 
-Install Git, Node.js 24 (see `.nvmrc`), npm, and Docker Desktop. In PowerShell:
+Install Git, Node.js 24 (see `.nvmrc`), npm, and native PostgreSQL 18 listening on `localhost:5433`. T01 uses no Docker. In PowerShell:
 
 ```powershell
 git clone https://github.com/24520637/vera-match.git
@@ -26,14 +26,13 @@ Copy-Item .env.example apps/api/.env
 Update the example credentials in both environment files, keeping `POSTGRES_PASSWORD` and `DATABASE_URL` consistent. Then run:
 
 ```powershell
-docker compose --env-file .env -f infra/docker-compose.yml up -d
 npm ci
 npm run prisma:validate
 npm run prisma:generate
-npm run prisma:migrate
+npm exec prisma -- migrate status --schema apps/api/prisma/schema.prisma
 ```
 
-Start each service in a separate terminal at the repository root:
+For an existing configured database, keep its applied migration history. Only for a new empty database, apply the committed migration with `npm exec prisma -- migrate deploy --schema apps/api/prisma/schema.prisma`; do not regenerate the initial migration. Start each service in a separate terminal at the repository root:
 
 ```powershell
 npm run dev:api
@@ -47,10 +46,11 @@ npm run dev:web
 | --- | --- |
 | Web | http://localhost:3000 |
 | API process health (no database probe) | http://localhost:4000/api/health |
+| Database readiness | http://localhost:4000/api/health/ready |
 | Mailpit | http://localhost:8025 |
 | MinIO console | http://localhost:9001 |
 
-Create a private `vera-private` bucket in MinIO before implementing uploads. Full setup, migration, and application flows still require verification; use synthetic test data until security and privacy controls work.
+Mailpit and MinIO require separately installed native services for later email/media features; T01 does not start or depend on them. Create a private `vera-private` bucket before implementing uploads. Use synthetic test data until the relevant security and privacy controls work.
 
 ## Development workflow
 
@@ -75,6 +75,7 @@ Huong owns authentication, sessions, private video, safety, and privacy. Phuc ow
 | [UI design system](docs/UI-DESIGN-SYSTEM.md) | Shared tokens, components, interaction patterns, and Huong’s design review |
 | [API contract](docs/API-CONTRACT.md) | Planned endpoints and access rules |
 | [Authentication](docs/AUTH-SPEC.md) | Sessions, account states, CSRF, and authorization |
+| [Authentication foundation](docs/AUTH-FOUNDATION.md) | Implemented T01 contracts, native setup, test evidence and review handoff |
 | [Database](docs/DATABASE.md) | Models and data invariants |
 | [Expert review](docs/EXPERT-REVIEW-WORKFLOW.md) | Assignment, observations, independent QA, and owner controls |
 | [Matching](docs/MATCHING-DESIGN.md) | Reciprocal rules and permitted factual claims |
