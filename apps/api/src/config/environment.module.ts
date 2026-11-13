@@ -1,16 +1,18 @@
-import { Global, Injectable, Module } from '@nestjs/common';
-import { ConfigModule, ConfigService } from '@nestjs/config';
-import { AppConfiguration, validateEnvironment } from './environment';
-
-@Injectable()
-export class EnvironmentService {
-  readonly values: AppConfiguration;
-  constructor(config: ConfigService) { this.values = config.getOrThrow<AppConfiguration>('app'); }
-}
+import { Global, Module } from "@nestjs/common";
+import { ConfigModule } from "@nestjs/config";
+import { validateEnvironment } from "./environment";
+import { EnvironmentService } from "./environment.service";
 
 @Global()
 @Module({
-  imports: [ConfigModule.forRoot({ isGlobal: true, envFilePath: ['.env', '../../.env'], validate: validateEnvironment })],
-  providers: [EnvironmentService], exports: [EnvironmentService],
+  imports: [
+    ConfigModule.forRoot({
+      isGlobal: true,
+      envFilePath: [".env", "../../.env"],
+      validate: validateEnvironment,
+    }),
+  ],
+  providers: [EnvironmentService],
+  exports: [EnvironmentService],
 })
 export class EnvironmentModule {}
