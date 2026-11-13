@@ -1,6 +1,6 @@
 import { Module } from '@nestjs/common';
-import { ConfigModule } from '@nestjs/config';
+import { EnvironmentModule } from './config/environment.module';
 import { HealthController } from './health.controller';
 
-@Module({ imports: [ConfigModule.forRoot({ isGlobal: true })], controllers: [HealthController] })
+@Module({ imports: [EnvironmentModule], controllers: [HealthController] })
 export class AppModule {}
