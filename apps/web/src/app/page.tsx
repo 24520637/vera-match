@@ -8,16 +8,15 @@ export default function HomePage() {
     <div className="container">
       <section className="home-hero" aria-labelledby="home-title">
         <div className="home-hero__copy">
-          <Badge>Thoughtfully taking shape</Badge>
+          <Badge>A considered beginning</Badge>
           <h1 id="home-title">A meaningful connection starts with you.</h1>
           <p className="lede">
             Space to share what matters. Thoughtful human perspectives.
             Introductions shaped by what you both want.
           </p>
-          <ButtonLink href="#approach">Discover our approach</ButtonLink>
+          <ButtonLink href="/register">Create your account</ButtonLink>
           <p className="small muted">
-            A preview of <span translate="no">VERA Match</span>. Registration is
-            not open yet.
+            <span translate="no">VERA Match</span> is in development. Private video reviews and matching are still taking shape.
           </p>
         </div>
         <div className="conversation">
@@ -107,7 +106,7 @@ export default function HomePage() {
             establish honesty, character or the future of a relationship.
           </p>
           <p>
-            These protections are part of our design requirements. Account,
+            These protections are part of our design requirements. Private video
             review and matching services are still in development.
           </p>
           <Link href="/design-system#patterns">

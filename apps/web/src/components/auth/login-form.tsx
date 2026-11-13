@@ -44,5 +44,5 @@ export function LoginForm({ nextPath }: { nextPath: string }) {
     <Checkbox name="rememberEmail" label="Remember email on this device" checked={remember} onChange={event => { setRemember(event.target.checked); if (!event.target.checked) { try { rememberEmail(localStorage, '', false); } catch { setStorageAvailable(false); } } }} disabled={pending || !storageAvailable} hint={storageAvailable ? 'Optional. Saves your email only, never your password or session.' : 'This browser cannot remember email. You can still sign in.'} />
     {message && <Notice tone="error" title="Sign-in could not be completed.">{message}</Notice>}
     <FormActions><Button type="submit" loading={pending} loadingLabel="Signing in…">Sign in</Button></FormActions>
-  </Form><p className="small muted">Not activated yet? Open the link in your activation email.</p><p className="small">New here? <Link href="/register">Create an account</Link></p></div>;
+  </Form><p className="small muted">Not activated yet? <Link href="/resend-verification">Request an activation email</Link>.</p><p className="small">New here? <Link href="/register">Create an account</Link></p></div>;
 }

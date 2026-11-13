@@ -57,7 +57,7 @@ export default function RootLayout({
               Thoughtful introductions. Your choices, respected.
             </p>
             <p>
-              In development. Accounts, video reviews and matching are not
+              In development. Private video reviews and matching are not
               available yet.
               <br />
               <Link href="/design-system">Explore the design preview</Link>

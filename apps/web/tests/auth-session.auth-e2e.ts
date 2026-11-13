@@ -1,3 +1,4 @@
+import AxeBuilder from '@axe-core/playwright';
 import { expect, test } from '@playwright/test';
 import { randomUUID } from 'node:crypto';
 import { readActivationEmail, clearTestEmails } from '../../api/test/mailpit-fixtures';
@@ -50,4 +51,58 @@ test('confirms logout-all and invalidates independently issued sessions in two b
     await page.getByRole('button', { name: 'Sign out on all devices' }).click(); await dialog.getByRole('button', { name: 'Sign out everywhere', exact: true }).click();
     await expect(page).toHaveURL(/\/login/); await other.reload(); await expect(other).toHaveURL(/\/login/);
   } finally { await second.close(); await clearTestEmails(email); }
+});
+
+
+test('registers, verifies a real email link and signs in through accessible forms', async ({ page }) => {
+  const email = `browser-${randomUUID()}@example.invalid`; const password = 'synthetic-browser-password';
+  try {
+    await page.goto('/register');
+    const form = page.getByRole('form', { name: 'Create account', exact: true });
+    await form.getByRole('button', { name: 'Create account', exact: true }).click();
+    await expect(form.getByLabel('Email address')).toBeFocused();
+    await form.getByLabel('Display name (optional)').fill('Synthetic Member');
+    await form.getByLabel('Email address').fill(email);
+    await form.getByLabel(/^Password \(required\)$/).fill(password);
+    await form.getByLabel(/^Confirm password \(required\)$/).fill(password);
+    await form.getByRole('button', { name: 'Create account', exact: true }).click();
+    await expect(form.getByLabel('I declare that I am 18 or older')).toBeFocused();
+    await form.getByLabel('I declare that I am 18 or older').check();
+    await form.getByRole('button', { name: 'Create account', exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'Check your inbox.' })).toBeFocused();
+    expect((await page.context().cookies()).some(cookie => cookie.name === 'vera_e2e_session')).toBe(false);
+    const activation = await readActivationEmail(email);
+    await page.goto(activation.link);
+    await expect(page).toHaveURL('/verify-email');
+    await page.getByRole('button', { name: 'Verify email', exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'Email verified.' })).toBeFocused();
+    await page.getByRole('main').getByRole('link', { name: 'Sign in', exact: true }).click();
+    const login = page.getByRole('form', { name: 'Sign in', exact: true });
+    await login.getByLabel('Email address').fill(email); await login.getByLabel(/^Password \(required\)$/).fill(password);
+    await login.getByRole('button', { name: 'Sign in', exact: true }).click();
+    await expect(page).toHaveURL('/account'); await expect(page.getByText(email, { exact: true })).toBeVisible();
+    expect(await page.evaluate(() => localStorage.length + sessionStorage.length)).toBe(0);
+    await page.getByRole('button', { name: 'Sign out', exact: true }).click(); await expect(page).toHaveURL(/\/login/);
+    await page.goto('/account'); await expect(page).toHaveURL(/\/login/);
+    await page.goto(activation.link); await page.getByRole('button', { name: 'Verify email', exact: true }).click();
+    await expect(page.getByText('This link cannot be used.', { exact: true })).toBeVisible();
+    await page.getByRole('link', { name: 'Request another email', exact: true }).click();
+    await page.getByLabel('Email address').fill(email); await page.getByRole('button', { name: 'Request activation email' }).click();
+    await expect(page.getByText('Activation request received.', { exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Request activation email' })).toBeDisabled();
+  } finally { await clearTestEmails(email); }
+});
+
+
+test('auth pages preserve accessible keyboard forms and fit a 320px viewport', async ({ page }, testInfo) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  for (const path of ['/register', '/login', '/resend-verification', '/verify-email']) {
+    await page.goto(path); await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
+    await expect(page.getByRole('main')).toBeVisible();
+    expect((await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21aa']).analyze()).violations).toEqual([]);
+    await page.screenshot({ path: testInfo.outputPath(path.slice(1) + '.png'), fullPage: true });
+    await page.setViewportSize({ width: 320, height: 844 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await page.keyboard.press('Tab'); expect(await page.evaluate(() => document.activeElement?.tagName)).not.toBe('BODY');
+  }
 });
