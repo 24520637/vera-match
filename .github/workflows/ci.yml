@@ -22,3 +22,14 @@ jobs:
           DATABASE_URL: postgresql://ci:ci@localhost:5432/vera?schema=public
       - run: npm run test
       - run: npm run build
+      - name: Install browser for shared UI checks
+        run: npx playwright install --with-deps chromium
+      - name: Check shared UI interactions and accessibility
+        run: npm run test:ui --workspace apps/web
+      - name: Save UI test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-test-report
+          path: apps/web/playwright-report/
+          retention-days: 7
