@@ -4,6 +4,7 @@ import localFont from "next/font/local";
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { SiteHeader } from "@/components/layout/site-header";
+import { AuthProvider } from '@/components/auth/auth-provider';
 import "./globals.css";
 
 const editorial = localFont({
@@ -40,6 +41,7 @@ export default function RootLayout({
   return (
     <html lang="en" className={`${editorial.variable} ${body.variable}`}>
       <body>
+        <AuthProvider>
         <a className="skip-link" href="#main-content">
           Skip to content
         </a>
@@ -62,6 +64,7 @@ export default function RootLayout({
             </p>
           </div>
         </footer>
+        </AuthProvider>
       </body>
     </html>
   );

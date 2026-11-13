@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "../ui/button";
+import { AuthNavigation } from '../auth/auth-navigation';
 
 export function SiteHeader() {
   const pathname = usePathname();
@@ -51,6 +52,7 @@ export function SiteHeader() {
           aria-label="Main navigation"
           className={`site-nav ${expanded ? "site-nav--open" : ""}`}
         >
+          <AuthNavigation onNavigate={() => setExpanded(false)} />
           <Link href="/#approach" onClick={() => setExpanded(false)}>
             Our approach
           </Link>
