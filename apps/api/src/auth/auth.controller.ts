@@ -1,5 +1,5 @@
-import { Body, Controller, Get, HttpCode, Post, Res, UseGuards } from '@nestjs/common';
-import type { Response } from 'express';
+import { Body, Controller, Get, HttpCode, Post, Req, Res, UseGuards } from '@nestjs/common';
+import type { Request, Response } from 'express';
 import { AuthRequestGuard } from './auth-request.guard';
 import { RegistrationDto } from './registration.dto';
 import { RegistrationService } from './registration.service';
@@ -13,12 +13,27 @@ import { sessionCookieOptions } from './session-cookie';
 import { SessionAuthGuard } from './session-auth.guard';
 import { CurrentUser } from './current-user.decorator';
 import type { CurrentUser as SafeUser } from './auth-context';
+import { LogoutService } from './logout.service';
 
 export const REGISTRATION_RESPONSE = { message: 'Registration request received. If this address is eligible, activate your account before signing in.' };
 
 @Controller('auth')
 export class AuthController {
-  constructor(private readonly registration: RegistrationService, private readonly verification: VerificationService, private readonly loginService: LoginService, private readonly environment: EnvironmentService) {}
+  constructor(private readonly registration: RegistrationService, private readonly verification: VerificationService, private readonly loginService: LoginService, private readonly environment: EnvironmentService, private readonly logoutService: LogoutService) {}
+  @Post('logout')
+  @HttpCode(204)
+  @UseGuards(AuthRequestGuard)
+  async logout(@Req() request: Request, @Res({ passthrough: true }) response: Response) {
+    await this.logoutService.current(request.headers.cookie);
+    response.clearCookie(this.environment.values.session.cookieName, sessionCookieOptions(this.environment.values, false));
+  }
+  @Post('logout-all')
+  @HttpCode(204)
+  @UseGuards(AuthRequestGuard, SessionAuthGuard)
+  async logoutAll(@CurrentUser() user: SafeUser, @Res({ passthrough: true }) response: Response) {
+    await this.logoutService.all(user.id);
+    response.clearCookie(this.environment.values.session.cookieName, sessionCookieOptions(this.environment.values, false));
+  }
   @Get('me')
   @UseGuards(SessionAuthGuard)
   me(@CurrentUser() user: SafeUser) { return user; }
