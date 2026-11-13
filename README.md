@@ -1,120 +1,91 @@
 # VERA Match
 
-**Starter repository for the VERA Match matchmaking platform**  
-**Team:** Huong and Phuc · **Plan:** 10 working days / 2 weeks · **Release target:** `v0.1.0`
+An adult matchmaking platform based on member profiles, questionnaires, reciprocal preferences, and consent-controlled expert review of private videos.
 
-> **Starter status, not a finished product.** This repository currently contains a Next.js landing page, a NestJS health endpoint, a draft Prisma schema, local infrastructure, CI configuration, and implementation specifications. Registration, email activation, secure login, video review, and matchmaking are **planned features—not working functionality**. Do not use real personal information or private videos until the relevant security and privacy controls have been implemented and verified.
+**Current implementation:** Next.js landing page, NestJS health endpoint, Prisma schema and initial migration, local infrastructure, and CI configuration. Authentication, private video review, and matching remain planned. A checked-in migration does not establish that it has been applied or verified.
 
-## What VERA Match does
+## Stack
 
-VERA Match helps adults discover mutually compatible connections using self-declared profiles, questionnaires, preferences, and consent-controlled information from privately submitted videos. Qualified **human reviewers** may review videos using an assigned-workflow interface; the system does **not** run a pretrained personality-inference model. Reviewer observations are contextual judgments, not objective personality diagnoses.
+- Next.js 15, React 19, TypeScript (`apps/web`)
+- NestJS 10 (`apps/api`)
+- PostgreSQL 16 and Prisma 6 (`apps/api/prisma`)
+- Private S3-compatible media storage; MinIO and Mailpit for local development
 
-### In scope (P0)
+## Local setup
 
-| Area | Required functionality |
-| --- | --- |
-| Authentication | Register, verify email, resend activation, login, HttpOnly cookie, database-backed sessions, restore login after refresh, `GET /auth/me`, logout/logout-all, password recovery, account states, route protection, and AuthN/AuthZ guards |
-| Profiles and consent | Editable profile, versioned questionnaire, reciprocal preferences, independently revocable purposes, privacy defaults |
-| Private video | Capture/upload, private object storage, owner playback, access-controlled reviewer playback, deletion, and consent withdrawal |
-| Reviewer operations | Staff eligibility, moderator assignment, assigned review queue, timestamped observations, draft autosave, submission, separate QA approval, owner report, feedback/dispute |
-| Matching | Reciprocal hard constraints, explainable ranking based on user inputs and allowed confirmed factual claims, accept/decline, block exclusions |
-| Trust and safety | User reports, moderation scope, audit trails, account deactivation, ownership and assignment authorization, security regression tests |
-
-**Out of scope:** automated/pretrained AI personality scoring, facial identification, fake identity verification, fake deepfake detection, Premium/subscription/payment/concierge features. **P1 only if P0 is complete:** post-match chat, notifications, avatars, and advanced export.
-
-## Technology
-
-- **Web:** Next.js 15, React 19, TypeScript — `apps/web`
-- **API:** NestJS 10, TypeScript — `apps/api`
-- **Database:** PostgreSQL 16, Prisma 6 draft data model — `apps/api/prisma/schema.prisma`
-- **Media:** MinIO (local) or private S3-compatible object storage
-- **Development email:** Mailpit (SMTP capture)
-- **CI:** GitHub Actions for web/API validation, tests, and builds
-
-These versions reflect the **actual starter package manifests**, not future upgrade targets. No Python inference service is included.
-
-## Quick start — Windows PowerShell
-
-Prerequisites: Git, **Node.js 24** (see `.nvmrc`), npm, and Docker Desktop running. Open PowerShell in the folder containing the downloaded `.bundle` file:
+Install Git, Node.js 24 (see `.nvmrc`), npm, and Docker Desktop. In PowerShell:
 
 ```powershell
-# Use this ONE-LINE command in PowerShell. Do not insert backslashes between arguments.
-git clone -b main .\vera-match-english-branches.bundle vera-match
-cd .\vera-match
+git clone https://github.com/24520637/vera-match.git
+cd vera-match
 git switch develop
-# The bundle contains placeholder branches; set the local origin HEAD display to main.
-git remote set-head origin main
-
-git status
 Copy-Item .env.example .env
 Copy-Item .env.example apps/api/.env
-# Edit both .env files. Synchronize POSTGRES_PASSWORD and DATABASE_URL.
-# These example values are only for an isolated local machine.
+```
 
+Update the example credentials in both environment files, keeping `POSTGRES_PASSWORD` and `DATABASE_URL` consistent. Then run:
+
+```powershell
 docker compose --env-file .env -f infra/docker-compose.yml up -d
-npm install
+npm ci
 npm run prisma:validate
 npm run prisma:generate
 npm run prisma:migrate
 ```
 
-Run the services in **separate PowerShell windows**, each in the project root:
+Start each service in a separate terminal at the repository root:
 
 ```powershell
-npm run dev:api  # API: http://localhost:4000/api/health
+npm run dev:api
 ```
 
 ```powershell
-npm run dev:web  # Web: http://localhost:3000
+npm run dev:web
 ```
 
-Mailpit: `http://localhost:8025`. MinIO Console: `http://localhost:9001`. Create the `vera-private` bucket with **private** access before implementing uploads. The API health endpoint currently checks the API process, **not** PostgreSQL availability.
+| Service | Local address |
+| --- | --- |
+| Web | http://localhost:3000 |
+| API process health (no database probe) | http://localhost:4000/api/health |
+| Mailpit | http://localhost:8025 |
+| MinIO console | http://localhost:9001 |
 
-**Important:** Prisma schema validation, migrations, and a full Node.js build have not been verified end-to-end in this distributed starter. Treat errors as setup or development tasks. See [`docs/SETUP-WINDOWS-POWERSHELL.md`](docs/SETUP-WINDOWS-POWERSHELL.md) for a precise walkthrough and GitHub instructions.
+Create a private `vera-private` bucket in MinIO before implementing uploads. Full setup, migration, and application flows still require verification; use synthetic test data until security and privacy controls work.
 
-## Branches and GitHub
+## Development workflow
 
-- Permanent branches: `main` (releases) and `develop` (integration).
-- Feature branches: `huong/...` and `phuc/...`; create them from up-to-date `develop` when a ticket starts.
-- Release branch: `release/v0.1.0`, **created from tested `develop` on release day**, never from the bundle placeholder.
-- The bundle includes 16 reference names, but feature and release refs are placeholders pointing to the starter commit—not completed work. Do not push placeholder branches to GitHub.
-- Each PR targets `develop`, is reviewed by the other developer, and must pass the required tests. No fabricated commits.
-
-**Initial Git commit message in the revised bundle:** `chore: set up the VERA Match project`.
-
-### Connect to GitHub
-
-This repository is connected to **the bundle file** immediately after cloning, not to GitHub. Create an empty GitHub repo first; make it **Private**, especially because the product will handle sensitive personal information. Then run:
+`develop` is the integration branch; `main` contains reviewed releases. Start one task at a time from current `develop`, using your own branch prefix:
 
 ```powershell
-git remote set-url origin https://github.com/24520637/vera-match.git
-git push -u origin main
-git push -u origin develop
+git switch develop
+git pull --ff-only origin develop
+git switch -c huong/chore/cleanup-docs
 ```
 
-**Do not run the push commands against a GitHub repository that already has the old starter commit.** A replaced initial commit creates a different history; see `docs/GIT-MIGRATION-GUIDE.md` to update an existing repo **without force-pushing**. If the GitHub repository is empty, these commands work normally after authentication.
+Use `huong/feat/<task>`, `huong/fix/<task>`, or `huong/chore/<task>` for Huong; Phuc uses `phuc/...`. Open PRs into `develop`, request review from the other developer, and pass relevant checks. Commit and push only when explicitly requested.
 
-## The two-person plan
+Huong owns authentication, sessions, private video, safety, and privacy. Phuc owns web foundation, profiles and consent, expert assignment/review/QA, and matching. Both deliver UI, API, database changes, and tests for their features. See [feature ownership](docs/FEATURE-OWNERSHIP.md) and [backlog](docs/BACKLOG.md).
 
-- **Huong:** registration and email verification; login/session recovery and security; private video storage and permissions; safety, privacy, and security tests.
-- **Phuc:** web framework and CI; profile/questionnaire/consent; reviewer assignment; review workspace, QA, owner confirmation, and matching; E2E tests.
-- Both developers own **UI + API + database + tests** for their features and review each other's changes.
-- Planning documents include **20 tickets and 104 *proposed* micro-tasks** (`C001`–`C104`): 52 Huong / 52 Phuc, not 104 pre-written commits.
-- The CSV uses **November 2–13, 2026 as the original sample schedule**. These dates are already historical; map D1–D10 to the team's actual agreed start date rather than using them as upcoming deadlines.
+## Essential documentation
 
-## Read the docs in this order
+| Document | Purpose |
+| --- | --- |
+| [Scope](docs/SCOPE-DECISIONS.md) | Required features and exclusions |
+| [Architecture](docs/ARCHITECTURE.md) | Components and trust boundaries |
+| [API contract](docs/API-CONTRACT.md) | Planned endpoints and access rules |
+| [Authentication](docs/AUTH-SPEC.md) | Sessions, account states, CSRF, and authorization |
+| [Database](docs/DATABASE.md) | Models and data invariants |
+| [Expert review](docs/EXPERT-REVIEW-WORKFLOW.md) | Assignment, observations, independent QA, and owner controls |
+| [Matching](docs/MATCHING-DESIGN.md) | Reciprocal rules and permitted factual claims |
+| [Test plan](docs/TEST-PLAN.md) | Acceptance scenarios and release gates |
+| [Deployment](docs/DEPLOYMENT.md) | Local operations and production prerequisites |
 
-1. [`AGENTS.md`](AGENTS.md) and [`CODEX_CONTEXT.md`](CODEX_CONTEXT.md) — working rules for developers and Codex.
-2. [`docs/PLAN-2-WEEKS.md`](docs/PLAN-2-WEEKS.md) and [`docs/FEATURE-OWNERSHIP.md`](docs/FEATURE-OWNERSHIP.md) — work assignments.
-3. [`docs/BACKLOG.md`](docs/BACKLOG.md), [`docs/COMMIT-PLAN.md`](docs/COMMIT-PLAN.md), and [`docs/COMMIT-PLAN.csv`](docs/COMMIT-PLAN.csv) — tickets, steps, expected checks.
-4. [`docs/AUTH-SPEC.md`](docs/AUTH-SPEC.md) — authentication/session/security design.
-5. [`docs/EXPERT-REVIEW-WORKFLOW.md`](docs/EXPERT-REVIEW-WORKFLOW.md) — reviewer assignment, evidence, QA, and owner controls.
-6. [`docs/API-CONTRACT.md`](docs/API-CONTRACT.md), [`docs/DATABASE.md`](docs/DATABASE.md), and [`docs/TEST-PLAN.md`](docs/TEST-PLAN.md) — integration and acceptance.
+## Quality and product rules
 
-## Working agreement and quality bar
+A feature is done only when its UI → API → database flow works, server authorization is enforced, relevant tests pass, and loading/empty/error/success states and accessible controls are present. Schema changes require a reviewed migration. Report checks as `PASS`, `FAIL`, or `NOT RUN`; documentation alone is not implementation evidence.
 
-A ticket is done only when the code works through the relevant user interface, API, database, and tests; ownership/role/assignment/consent checks are enforced on the server; the interface handles loading, empty, error, and success states; and the test results are reported accurately as `PASS`, `FAIL`, or `NOT RUN`.
+Validate cookie sessions on the server, protect state-changing requests against CSRF, enforce rate limits, and never store session tokens in browser storage. Distinguish invalid sessions (`401`) from denied access (`403`) and network/server failures. Experts may access only currently assigned videos with valid consent; QA reviewers cannot approve their own assessments.
 
-Human review must be performed by eligible staff and approved independently by QA. Only **QA-approved, owner-confirmed, explicitly shared, and unrevoked factual claims** may affect matching. A reviewer's subjective impressions, facial behavior, or unvalidated personality labels do **not** directly increase or decrease match scores.
+Only QA-approved, owner-confirmed, explicitly share-approved, unrevoked factual claims covered by current matching consent may affect matching. Human observations are contextual assessments. Automated personality inference, fake identity/deepfake verification, paid tiers, checkout, subscriptions, and concierge services are excluded.
 
-**Release rule:** If privacy, session security, authorization, review QA, or end-to-end acceptance is incomplete, label the result an internal demonstration—not a production release. Two developers and ten working days do not guarantee production readiness.
+Never commit credentials, tokens, production personal data, or private user videos. Incomplete privacy, security, QA, or end-to-end acceptance means internal demonstration only.
