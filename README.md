@@ -70,9 +70,31 @@ records rewrites at build time, so rebuild when changing the destination.
 `NEXT_PUBLIC_API_BASE_URL` is no longer used.
 
 Run `npm run build` before the Playwright suite. Its managed services start the
-built NestJS API on port 4000 and Next.js on port 3100. The health proxy smoke
-test needs no database. Production verification uses `CI=1` in the environment
-when running `npm run test:ui --workspace apps/web`.
+built NestJS API on port 4000 and Next.js on port 3100, plus the isolated C010
+fixture on port 3101. The API runs with `NODE_ENV=test`; Playwright waits for
+`/api/health/ready`, so a configured, migrated PostgreSQL database is required
+even though the `/api/health` proxy assertion itself does not query it. Supply
+`DATABASE_URL`, `MINIO_ROOT_USER`, and `MINIO_ROOT_PASSWORD` in the invoking
+environment or the API's configured local environment files. No running MinIO
+or SMTP service is required by these foundation tests. Set `CI=1` when running
+`npm run test:ui --workspace apps/web` to test the built web app without reusing
+existing servers; the C010 fixture still uses its isolated development server.
+
+### C011 CI validation
+
+PRs into `develop` or `main` run `npm ci`, Prisma validation/generation, Jest
+unit tests, and API/web builds. CI then starts native PostgreSQL 18 on port
+5433, applies existing migrations to a disposable database, runs API integration
+tests, and runs Playwright with synthetic database/MinIO configuration. Reports
+are uploaded and PostgreSQL cleanup runs even after a failure. Docker is not a
+local prerequisite.
+
+`npm test` runs API unit tests; it does not run database integration or browser
+tests. Run `npm run test:integration --workspace apps/api` separately against
+configured local PostgreSQL 18 on port 5433, and run
+`npm run test:ui --workspace apps/web` separately for transport, UI, accessibility,
+and C010 presentation checks. See [validation criteria](docs/TEST-PLAN.md).
+On Windows with restricted PowerShell script execution, use `npm.cmd`.
 
 `develop` is the integration branch; `main` contains reviewed releases. Start one task at a time from current `develop`, using your own branch prefix:
 
