@@ -1,4 +1,6 @@
 "use client";
+import { useRetryAfter } from "./use-retry-after";
+import { RetryAfterFeedback } from "./retry-after-feedback";
 import Link from "next/link";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { postAuth } from "@/lib/api";
@@ -15,6 +17,7 @@ import {
 import { Notice } from "../ui/status";
 import { PasswordInput } from "./password-input";
 export function RegisterForm() {
+  const retry = useRetryAfter();
   const [pending, setPending] = useState(false);
   const [complete, setComplete] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -25,7 +28,7 @@ export function RegisterForm() {
   }, [complete]);
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (pending) return;
+    if (pending || retry.seconds > 0) return;
     const form = event.currentTarget;
     const data = new FormData(form);
     const email = String(data.get("email") ?? "").trim();
@@ -60,6 +63,7 @@ export function RegisterForm() {
       });
       setComplete(true);
     } catch (error) {
+      retry.fromError(error);
       setErrors(
         authFieldErrors(error, "register", [
           "email",
@@ -162,9 +166,14 @@ export function RegisterForm() {
             {message}
           </Notice>
         )}
+        <RetryAfterFeedback seconds={retry.seconds} id="register-retry-after" />
         <FormActions>
           <Button
             type="submit"
+            disabled={retry.seconds > 0}
+            aria-describedby={
+              retry.seconds ? "register-retry-after" : undefined
+            }
             loading={pending}
             loadingLabel="Creating account…"
           >

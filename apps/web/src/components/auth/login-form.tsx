@@ -1,4 +1,6 @@
 "use client";
+import { useRetryAfter } from "./use-retry-after";
+import { RetryAfterFeedback } from "./retry-after-feedback";
 import Link from "next/link";
 import { useEffect, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
@@ -19,6 +21,7 @@ import { useAuth } from "./auth-provider";
 import { PasswordInput } from "./password-input";
 
 export function LoginForm({ nextPath }: { nextPath: string }) {
+  const retry = useRetryAfter();
   const { state, acceptUser } = useAuth();
   const router = useRouter();
   const [email, setEmail] = useState("");
@@ -45,7 +48,7 @@ export function LoginForm({ nextPath }: { nextPath: string }) {
   }, [state.status, nextPath, router]);
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (pending) return;
+    if (pending || retry.seconds > 0) return;
     const form = event.currentTarget;
     const data = new FormData(form);
     const password = String(data.get("password") ?? "");
@@ -71,6 +74,7 @@ export function LoginForm({ nextPath }: { nextPath: string }) {
       }
       acceptUser(user);
     } catch (error) {
+      retry.fromError(error);
       if (error instanceof ApiError && error.details?.length) {
         setErrors(
           Object.fromEntries(
@@ -153,8 +157,15 @@ export function LoginForm({ nextPath }: { nextPath: string }) {
             {message}
           </Notice>
         )}
+        <RetryAfterFeedback seconds={retry.seconds} id="login-retry-after" />
         <FormActions>
-          <Button type="submit" loading={pending} loadingLabel="Signing in…">
+          <Button
+            type="submit"
+            disabled={retry.seconds > 0}
+            aria-describedby={retry.seconds ? "login-retry-after" : undefined}
+            loading={pending}
+            loadingLabel="Signing in…"
+          >
             Sign in
           </Button>
         </FormActions>
