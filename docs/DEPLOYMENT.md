@@ -1,43 +1,22 @@
-# Local setup and demonstration — not a production deployment guide
+# Local setup and MVP deployment limits
 
-## Requirements
+Use the current [README setup](../README.md) and [email authentication guide](EMAIL-AUTH-SESSIONS.md). Development uses Node.js 24, native PostgreSQL 18 at localhost:5433 and native Mailpit SMTP 1025/inbox 8025. No Docker is required. Keep credentials in ignored machine-local environment files. Preserve the committed initial migration; inspect migration status instead of recreating it. MinIO is a separate future media prerequisite.
 
-Node.js version in `.nvmrc` (24), npm, Docker Desktop/Compose, Git, and PowerShell or an equivalent shell.
+## MVP limiter and network model
 
-### Windows PowerShell
+The implemented in-memory rate limiter is MVP-only and supports one API process. Its counters reset on restart and are not shared across workers or instances. Do not describe it as multi-instance production abuse protection. This PR adds no Redis or distributed infrastructure.
 
-```powershell
-Copy-Item .env.example .env
-Copy-Item .env.example apps/api/.env
-# Update the example passwords and the matching DATABASE_URL in both files.
-docker compose --env-file .env -f infra/docker-compose.yml up -d
-# Mailpit: http://localhost:8025
-# MinIO Console: http://localhost:9001; create a private vera-private bucket.
-npm install
-npm run prisma:validate
-npm run prisma:generate
-npm run prisma:migrate
-```
+The API currently does not trust reverse-proxy forwarding headers. Direct requests use the socket client IP. Through a proxy, that proxy's socket address is the effective identity; many users may share its limit. Direct/proxy integration tests prove arbitrary forwarded headers cannot bypass this default, not that production real-client-IP handling is configured.
 
-Open two terminals in the project root:
+Before deployment behind a proxy, document the proxy topology and trusted peers/hops, replacement of client-supplied forwarding headers and prevention of direct-origin bypass. Configure only the agreed trust boundary and test actual distinct clients plus spoofed headers. Do not turn on unrestricted trust proxy. Before running multiple API processes, agree and verify shared rate limiting separately.
 
-```powershell
-npm run dev:api
-```
+## Endpoints
 
-```powershell
-npm run dev:web
-```
+- http://localhost:3000: public site and email-authentication UI; profiles, matching and private review remain separate features.
+- http://localhost:4000/api/health: process liveness.
+- http://localhost:4000/api/health/ready: PostgreSQL readiness.
+- http://localhost:8025: Mailpit test inbox; this is not external delivery.
 
-## Local endpoints and limitations
+## Before production
 
-- `http://localhost:4000/api/health`: basic API-process health, **not a database probe**.
-- `http://localhost:3000`: **starter landing page only**. Login, expert operations, and matching are not yet wired up.
-- `http://localhost:8025`: development mailbox (no real email delivery).
-- `http://localhost:9001`: MinIO console (credentials from local `.env`).
-
-The draft schema and full build/migration have not been confirmed to pass end-to-end. Fix observed errors before proceeding and record validation results accurately.
-
-## Requirements before production
-
-HTTPS; strong secrets and secret rotation; verified backups and recovery; privacy/legal retention and deletion rules; enforced MFA for staff; access reviews; threat modeling/penetration checks; security headers; private signed media URLs; production email service; rate limits; current CORS/cookie/CSRF configuration; and complete critical-path E2E evidence.
+Configure and verify HTTPS/Secure cookies, consistent web/API hostnames, exact CORS origin, secret management, authenticated TLS SMTP and real inbox delivery. Review the proxy/limiter gates above, inherited dependency advisories, backup/recovery, retention/deletion, staff access controls and feature-specific privacy/security acceptance. Local tests and successful CI do not establish production readiness.

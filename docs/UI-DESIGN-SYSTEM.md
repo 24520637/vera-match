@@ -1,6 +1,6 @@
 # VERA Match UI design system
 
-**Implementation: DONE. Design approval: PENDING Huong’s review.** Shared presentation components and interactive examples; authentication, persistence, consent enforcement, matching and review services remain planned. This PR must remain open until Huong approves the shared components and direction.
+**Implementation:** Shared UI foundation merged in PR #4. Email authentication now reuses these components; profile, consent, matching and review services remain separate features. PR merge status does not establish a specific person’s visual approval.
 
 ## Direction: a considered conversation
 
@@ -61,19 +61,19 @@ Decorative dividers do not identify controls: controls use the darker boundary t
 
 Components live under `apps/web/src/components/ui`. Native props and React 19 refs pass through. Do not fork a component for a feature; add a documented variant only when the interaction genuinely differs.
 
-| Component                         | Contract and use                                                                                                                                                                                                                                                                                                                                |
-| --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `Button`                          | `variant`: primary, secondary, quiet, danger; `size`: regular/small; defaults to `type="button"`. Explicit `type="submit"` in forms. `loading` sets disabled + `aria-busy`, with `loadingLabel`. Keep submit enabled until an actual request begins.                                                                                            |
-| `ButtonLink`                      | Same appearance, rendered as Next `Link` for navigation; preserves modifier-click/new-tab behavior. No disabled navigation variant.                                                                                                                                                                                                             |
-| `Input`, `Select`, `Textarea`     | Required `name` and visible `label`; optional `hint` and `error`; generated or caller-supplied unique ID. Error adds `aria-invalid` and a linked description. Native keyboard, input type, autocomplete and selection semantics are preserved.                                                                                                  |
-| `Checkbox`                        | One generous label/control hit target. Supports independent consent choices; default unchecked. Optional linked hint/error. Never use one checkbox to bundle permissions.                                                                                                                                                                       |
-| `Form`, `Fieldset`, `FormActions` | Native form, grouped fields with a legend, and wrapping action row. Application owns submit behavior and request state.                                                                                                                                                                                                                         |
-| `ErrorSummary`, `focusFirstError` | Summary links to caller-provided field IDs. After setting field errors, focus the first invalid control. Keep input values on validation/request failure.                                                                                                                                                                                       |
-| `Card`                            | `tone`: paper, sage or plum. A neutral container for one task; caller supplies semantic headings. No default shadow, click handler or fixed height.                                                                                                                                                                                             |
+| Component                         | Contract and use                                                                                                                                                                                                                                                                                                                                                                                     |
+| --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Button`                          | `variant`: primary, secondary, quiet, danger; `size`: regular/small; defaults to `type="button"`. Explicit `type="submit"` in forms. `loading` sets disabled + `aria-busy`, with `loadingLabel`. Keep submit enabled until an actual request begins.                                                                                                                                                 |
+| `ButtonLink`                      | Same appearance, rendered as Next `Link` for navigation; preserves modifier-click/new-tab behavior. No disabled navigation variant.                                                                                                                                                                                                                                                                  |
+| `Input`, `Select`, `Textarea`     | Required `name` and visible `label`; optional `hint` and `error`; generated or caller-supplied unique ID. Error adds `aria-invalid` and a linked description. Native keyboard, input type, autocomplete and selection semantics are preserved.                                                                                                                                                       |
+| `Checkbox`                        | One generous label/control hit target. Supports independent consent choices; default unchecked. Optional linked hint/error. Never use one checkbox to bundle permissions.                                                                                                                                                                                                                            |
+| `Form`, `Fieldset`, `FormActions` | Native form, grouped fields with a legend, and wrapping action row. Application owns submit behavior and request state.                                                                                                                                                                                                                                                                              |
+| `ErrorSummary`, `focusFirstError` | Summary links to caller-provided field IDs. After setting field errors, focus the first invalid control. Keep input values on validation/request failure.                                                                                                                                                                                                                                            |
+| `Card`                            | `tone`: paper, sage or plum. A neutral container for one task; caller supplies semantic headings. No default shadow, click handler or fixed height.                                                                                                                                                                                                                                                  |
 | `Modal`                           | Controlled `open` / `onOpenChange`; required title; optional description and initial focus ref. Native `<dialog>` makes the background inert; an explicit Tab/Shift+Tab boundary handler keeps keyboard focus inside. Escape/Close dismiss; closing restores the trigger and scrolling. Destructive confirmation focuses the safe action. Backdrop clicks do not discard work. Avoid nested dialogs. |
-| `Notice`                          | Info, success, error, warning. Error uses `role="alert"`; other feedback uses `role="status"`. Dynamic field errors use polite announcements. Success follows server confirmation in connected flows.                                                                                                                                           |
-| `Badge`                           | Neutral/success/warning workflow labels. Does not imply identity verification, expert qualification or verified character.                                                                                                                                                                                                                      |
-| `LoadingState`, `EmptyState`      | Named progress and a stable skeleton; or a clear explanation plus a relevant next action. Empty content is not an error.                                                                                                                                                                                                                        |
+| `Notice`                          | Info, success, error, warning. Error uses `role="alert"`; other feedback uses `role="status"`. Dynamic field errors use polite announcements. Success follows server confirmation in connected flows.                                                                                                                                                                                                |
+| `Badge`                           | Neutral/success/warning workflow labels. Does not imply identity verification, expert qualification or verified character.                                                                                                                                                                                                                                                                           |
+| `LoadingState`, `EmptyState`      | Named progress and a stable skeleton; or a clear explanation plus a relevant next action. Empty content is not an error.                                                                                                                                                                                                                                                                             |
 
 ```tsx
 <Input
@@ -150,20 +150,20 @@ Web audit source: [Vercel Web Interface Guidelines](https://raw.githubuserconten
 
 Results for this branch:
 
-| Verification | Result |
-| --- | --- |
-| Frontend TypeScript check | PASS |
-| Root build (NestJS + Next.js); final Next production build | PASS |
-| Existing API Jest suite | PASS — 1 test |
-| Playwright UI suite against production build | PASS — 16 tests, desktop and touch-mobile Chromium |
-| axe WCAG-tagged scans, both routes and open modal | PASS — no automated violations |
-| Responsive overflow checks at 320, 390, 768 and 1440px | PASS |
-| Keyboard / dialog / validation / reduced motion | PASS |
-| Visual inspection of desktop/mobile pages, controls and dialog | PASS — screenshots linked below |
-| Git diff whitespace and local Markdown links | PASS |
-| npm audit (repository dependency tree) | FAIL — 38 entries: 11 low, 12 moderate, 15 high; existing package versions unchanged by this PR |
-| Manual screen-reader, Safari and Firefox checks | NOT RUN |
-| Real authentication, DB persistence, private video and matching E2E | NOT RUN — those features remain unimplemented |
+| Verification                                                        | Result                                                                                          |
+| ------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| Frontend TypeScript check                                           | PASS                                                                                            |
+| Root build (NestJS + Next.js); final Next production build          | PASS                                                                                            |
+| Existing API Jest suite                                             | PASS — 1 test                                                                                   |
+| Playwright UI suite against production build                        | PASS — 16 tests, desktop and touch-mobile Chromium                                              |
+| axe WCAG-tagged scans, both routes and open modal                   | PASS — no automated violations                                                                  |
+| Responsive overflow checks at 320, 390, 768 and 1440px              | PASS                                                                                            |
+| Keyboard / dialog / validation / reduced motion                     | PASS                                                                                            |
+| Visual inspection of desktop/mobile pages, controls and dialog      | PASS — screenshots linked below                                                                 |
+| Git diff whitespace and local Markdown links                        | PASS                                                                                            |
+| npm audit (repository dependency tree)                              | FAIL — 38 entries: 11 low, 12 moderate, 15 high; existing package versions unchanged by this PR |
+| Manual screen-reader, Safari and Firefox checks                     | NOT RUN                                                                                         |
+| Real authentication, DB persistence, private video and matching E2E | NOT RUN — those features remain unimplemented                                                   |
 
 Observed contrast ratios: ink/canvas 12.78:1; muted/canvas 5.94:1; white/plum 10.13:1; forest/sage 6.46:1; control border/paper 3.39:1; focus/canvas 6.16:1. Token combinations outside this set require their own check.
 
@@ -197,3 +197,9 @@ Automated checks do not replace assistive-technology or cross-browser review. De
 5. Confirm future Vietnamese localization, dark theme and actual media/caption requirements in their own implementation tasks. Current copy is English; existing locale has not been changed.
 
 Do not merge this PR until Huong reviews the visual direction and components.
+
+## Implemented authentication patterns
+
+The public auth routes share AuthScaffold, existing Card/Form/Input/Checkbox/Button/Notice components and PasswordInput. Desktop uses a left-aligned editorial heading beside one task; mobile stacks the same content. Errors focus the first invalid field; successful registration/activation focuses its confirmation heading. No password or activation token is persisted in browser storage. Account access distinguishes checking, unauthenticated, denied and unavailable states. See EMAIL-AUTH-SESSIONS.md for tested behavior.
+
+Modal accepts optional dismissible (default true). Logout-all disables dismissal while its server request is pending and initially focuses Keep me signed in. Existing modal behavior is preserved for other callers.

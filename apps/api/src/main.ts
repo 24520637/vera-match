@@ -1,23 +1,15 @@
 import "reflect-metadata";
 import { NestFactory } from "@nestjs/core";
-import { ValidationPipe } from "@nestjs/common";
 import { SwaggerModule, DocumentBuilder } from "@nestjs/swagger";
 import { AppModule } from "./app.module";
 import { EnvironmentService } from "./config/environment.service";
+import { configureApplication } from "./configure-app";
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   const settings = app.get(EnvironmentService).values;
   app.enableShutdownHooks(["SIGINT", "SIGTERM"]);
-  app.setGlobalPrefix("api");
-  app.useGlobalPipes(
-    new ValidationPipe({
-      whitelist: true,
-      forbidNonWhitelisted: true,
-      transform: true,
-    }),
-  );
-  app.enableCors({ origin: settings.corsOrigin, credentials: true });
+  configureApplication(app);
   const config = new DocumentBuilder()
     .setTitle("VERA Match API — scaffold")
     .setVersion("0.1.0")

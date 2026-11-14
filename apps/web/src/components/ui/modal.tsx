@@ -17,6 +17,7 @@ type ModalProps = {
   description?: string;
   children: ReactNode;
   initialFocusRef?: RefObject<HTMLElement | null>;
+  dismissible?: boolean;
 };
 
 export function Modal({
@@ -26,6 +27,7 @@ export function Modal({
   description,
   children,
   initialFocusRef,
+  dismissible = true,
 }: ModalProps) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const headingRef = useRef<HTMLHeadingElement>(null);
@@ -91,7 +93,7 @@ export function Modal({
       onKeyDown={containTab}
       onCancel={(event) => {
         event.preventDefault();
-        onOpenChange(false);
+        if (dismissible) onOpenChange(false);
       }}
     >
       <div className="modal__heading">
@@ -103,6 +105,7 @@ export function Modal({
           size="small"
           onClick={() => onOpenChange(false)}
           aria-label="Close dialog"
+          disabled={!dismissible}
         >
           Close
         </Button>
