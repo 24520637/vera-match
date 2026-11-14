@@ -1,15 +1,21 @@
+import { redirect } from "next/navigation";
 import type { ReactNode } from "react";
-import { AuthLoadingBoundary } from "@/components/auth/auth-loading-boundary";
+import { getServerSession } from "@/lib/server-session";
+import {
+  SessionBoundary,
+  SessionUnavailable,
+} from "@/components/auth/session-boundary";
 
-// Structural foundation only. Session and role checks belong to auth integration.
-export default function ProtectedLayout({
+export default async function ProtectedLayout({
   children,
-}: Readonly<{ children: ReactNode }>) {
-  return (
-    <main id="main-content" tabIndex={-1}>
-      <div className="container">
-        <AuthLoadingBoundary>{children}</AuthLoadingBoundary>
-      </div>
-    </main>
-  );
+}: {
+  children: ReactNode;
+}) {
+  const session = await getServerSession();
+  if (session.status === "unauthenticated") redirect("/login?next=%2Faccount");
+  if (session.status !== "authenticated")
+    return (
+      <SessionUnavailable server denied={session.status === "forbidden"} />
+    );
+  return <SessionBoundary>{children}</SessionBoundary>;
 }

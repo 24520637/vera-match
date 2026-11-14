@@ -23,7 +23,15 @@ export function StateHarness() {
       <h1>Authentication boundary test fixture</h1>
       <p data-testid="hydration">{hydrated ? "Hydrated" : "Server rendered"}</p>
       <nav aria-label="Synthetic state controls" className="inline">
-        {(["pending", "authenticated", "unauthenticated", "forbidden", "error"] as const).map((value) => (
+        {(
+          [
+            "pending",
+            "authenticated",
+            "unauthenticated",
+            "forbidden",
+            "error",
+          ] as const
+        ).map((value) => (
           <Button key={value} onClick={() => setState(value)}>
             Show {value}
           </Button>

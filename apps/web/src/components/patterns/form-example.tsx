@@ -18,7 +18,9 @@ export function FormExample() {
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const value = String(new FormData(event.currentTarget).get("context") ?? "");
+    const value = String(
+      new FormData(event.currentTarget).get("context") ?? "",
+    );
     const nextError = value.trim() ? undefined : "Enter some example context.";
     setError(nextError);
     setChecked(!nextError);
