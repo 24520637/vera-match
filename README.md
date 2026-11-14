@@ -69,10 +69,38 @@ building (default `http://localhost:4000`). The value must be an HTTP(S) origin
 without credentials or a path. Root `.env` files are not automatically loaded
 by the web workspace; export this variable or use its local default. Next.js
 records rewrites at build time, so rebuild when changing the destination.
-`Run`npm run build`before the Playwright suite. Its managed services start the
-built NestJS API on port 4000 and Next.js on port 3100. The health proxy smoke
-test needs no database. Production verification uses`CI=1`in the environment
-when running`npm run test:ui --workspace apps/web`.
+`NEXT_PUBLIC_API_BASE_URL` is no longer used.
+
+Run `npm run build` before the shared Playwright suite. It starts Next.js on
+port 3100 and the isolated C010 fixture on port 3101, without starting the API.
+Set `CI=1` when running `npm run test:ui --workspace apps/web` to test the built
+web app without reusing existing servers; the C010 fixture still uses its
+isolated development server. These presentation/transport checks need no DB.
+
+Run `npm run test:auth --workspace apps/web` separately for real authentication,
+protected SSR and the same-origin health proxy. Its runner rebuilds the web app
+for the API on port 4100, starts an isolated test-schema API with `NODE_ENV=test`,
+and waits for `/api/health/ready`. Supply a local PostgreSQL 18 `DATABASE_URL`
+on port 5433 and a running Mailpit SMTP/API service; the runner cleans up only
+its generated test schema and synthetic mail. See the auth runbook before use.
+
+### C011 CI validation
+
+PRs into `develop` or `main` run `npm ci`, Prisma validation/generation, Jest
+unit tests, and API/web builds. CI then starts native PostgreSQL 18 on port
+5433 and Mailpit, applies existing migrations to a disposable database, runs API
+integration tests, and runs shared UI plus real-auth Playwright suites with
+synthetic test configuration. Reports
+are uploaded and PostgreSQL cleanup runs even after a failure. Docker is not a
+local prerequisite.
+
+`npm test` runs API unit tests; it does not run database integration or browser
+tests. Run `npm run test:integration --workspace apps/api` separately against
+configured local PostgreSQL 18 on port 5433, and run
+`npm run test:ui --workspace apps/web` separately for transport, UI, accessibility,
+and C010 presentation checks. The separate `test:auth` script runs real browser
+authentication and proxy checks. See [validation criteria](docs/TEST-PLAN.md).
+On Windows with restricted PowerShell script execution, use `npm.cmd`.
 
 `develop` is the integration branch; `main` contains reviewed releases. Start one task at a time from current `develop`, using your own branch prefix:
 
