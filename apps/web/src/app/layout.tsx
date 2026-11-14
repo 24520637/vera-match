@@ -4,6 +4,7 @@ import localFont from "next/font/local";
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { SiteHeader } from "@/components/layout/site-header";
+import { AuthProvider } from "@/components/auth/auth-provider";
 import "./globals.css";
 
 const editorial = localFont({
@@ -40,28 +41,30 @@ export default function RootLayout({
   return (
     <html lang="en" className={`${editorial.variable} ${body.variable}`}>
       <body>
-        <a className="skip-link" href="#main-content">
-          Skip to content
-        </a>
-        <SiteHeader />
-        <main id="main-content" tabIndex={-1}>
-          {children}
-        </main>
-        <footer className="site-footer">
-          <div className="container site-footer__inner">
-            <p>
-              <span translate="no">VERA Match</span>
-              <br />
-              Thoughtful introductions. Your choices, respected.
-            </p>
-            <p>
-              In development. Accounts, video reviews and matching are not
-              available yet.
-              <br />
-              <Link href="/design-system">Explore the design preview</Link>
-            </p>
-          </div>
-        </footer>
+        <AuthProvider>
+          <a className="skip-link" href="#main-content">
+            Skip to content
+          </a>
+          <SiteHeader />
+          <main id="main-content" tabIndex={-1}>
+            {children}
+          </main>
+          <footer className="site-footer">
+            <div className="container site-footer__inner">
+              <p>
+                <span translate="no">VERA Match</span>
+                <br />
+                Thoughtful introductions. Your choices, respected.
+              </p>
+              <p>
+                In development. Private video reviews and matching are not
+                available yet.
+                <br />
+                <Link href="/design-system">Explore the design preview</Link>
+              </p>
+            </div>
+          </footer>
+        </AuthProvider>
       </body>
     </html>
   );

@@ -27,10 +27,19 @@ export default defineConfig({
       },
     },
   ],
-  webServer: {
-    command: `npm exec next -- ${process.env.CI ? "start" : "dev"} --hostname 127.0.0.1 --port 3100`,
-    url: "http://127.0.0.1:3100",
-    reuseExistingServer: !process.env.CI,
-    timeout: 120_000,
-  },
+  webServer: [
+    {
+      command: `npm exec next -- ${process.env.CI ? "start" : "dev"} --hostname 127.0.0.1 --port 3100`,
+      url: "http://127.0.0.1:3100",
+      reuseExistingServer: !process.env.CI,
+      timeout: 120_000,
+    },
+    {
+      command:
+        "npm exec next -- dev tests/fixtures/auth-loading --hostname 127.0.0.1 --port 3101",
+      url: "http://127.0.0.1:3101",
+      reuseExistingServer: false,
+      timeout: 120_000,
+    },
+  ],
 });
