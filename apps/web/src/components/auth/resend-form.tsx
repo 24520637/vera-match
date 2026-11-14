@@ -42,8 +42,8 @@ export function ResendForm() {
       );
       setComplete(true);
       retry.start(
-        typeof result.retryAfterSeconds === "number"
-          ? Math.max(1, Math.min(3600, result.retryAfterSeconds))
+        typeof result?.retryAfterSeconds === "number"
+          ? Math.max(1, Math.min(3600, result?.retryAfterSeconds))
           : 60,
       );
     } catch (error) {

@@ -1,8 +1,8 @@
 "use client";
 import { useEffect, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
-import { Button, ButtonLink } from "../ui/button";
-import { LoadingState, Notice } from "../ui/status";
+import { ButtonLink } from "../ui/button";
+import { AuthLoadingBoundary } from "./auth-loading-boundary";
 import { useAuth } from "./auth-provider";
 
 export function SessionUnavailable({
@@ -17,27 +17,16 @@ export function SessionUnavailable({
   return (
     <div className="container page-heading">
       <h1>Account access</h1>
-      <Notice
-        tone={denied ? "warning" : "error"}
-        title={
-          denied
-            ? "This account cannot open this page."
-            : "We could not check your session."
-        }
+      <AuthLoadingBoundary
+        state={denied ? "forbidden" : "error"}
+        onRetry={() => {
+          void refresh();
+          if (server) router.refresh();
+        }}
       >
-        {denied
-          ? "Your account does not have permission for this page."
-          : "The service or connection is unavailable. This does not mean you have been signed out."}
-      </Notice>
+        <></>
+      </AuthLoadingBoundary>
       <div className="inline">
-        <Button
-          onClick={() => {
-            void refresh();
-            if (server) router.refresh();
-          }}
-        >
-          Try again
-        </Button>
         <ButtonLink variant="quiet" href="/">
           Back to home
         </ButtonLink>
@@ -54,11 +43,17 @@ export function SessionBoundary({ children }: { children: ReactNode }) {
   }, [state.status, router]);
   if (state.status === "checking" || state.status === "unauthenticated")
     return (
-      <div className="container page-heading">
-        <LoadingState label="Checking your session…" />
+      <div className="container">
+        <AuthLoadingBoundary
+          state={state.status === "checking" ? "pending" : "unauthenticated"}
+        >
+          {children}
+        </AuthLoadingBoundary>
       </div>
     );
   if (state.status === "unavailable" || state.status === "forbidden")
     return <SessionUnavailable denied={state.status === "forbidden"} />;
-  return children;
+  return (
+    <AuthLoadingBoundary state="authenticated">{children}</AuthLoadingBoundary>
+  );
 }

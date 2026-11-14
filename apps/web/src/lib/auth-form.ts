@@ -9,12 +9,15 @@ export function authFieldErrors(
     error.details
       .filter(
         (detail) =>
-          fields.includes(detail.field) && Array.isArray(detail.messages),
+          detail &&
+          typeof detail === "object" &&
+          fields.includes(detail.field) &&
+          Array.isArray(detail.messages),
       )
       .map((detail) => [
         `${prefix}-${detail.field}`,
         detail.messages
-          .filter((message) => typeof message === "string")
+          .filter((message: unknown) => typeof message === "string")
           .join(" "),
       ]),
   );

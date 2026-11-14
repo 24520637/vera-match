@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useEffect, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { ApiError, postAuth } from "@/lib/api";
+import { authFieldErrors } from "@/lib/auth-form";
 import { isAuthUser } from "@/lib/auth-types";
 import { readRememberedEmail, rememberEmail } from "@/lib/remember-email";
 import { Button } from "../ui/button";
@@ -75,19 +76,8 @@ export function LoginForm({ nextPath }: { nextPath: string }) {
       acceptUser(user);
     } catch (error) {
       retry.fromError(error);
-      if (error instanceof ApiError && error.details?.length) {
-        setErrors(
-          Object.fromEntries(
-            error.details
-              .filter((detail) => ["email", "password"].includes(detail.field))
-              .map((detail) => [
-                `login-${detail.field}`,
-                detail.messages.join(" "),
-              ]),
-          ),
-        );
-        focusFirstError(form);
-      }
+      setErrors(authFieldErrors(error, "login", ["email", "password"]));
+      focusFirstError(form);
       setMessage(
         error instanceof ApiError
           ? error.message

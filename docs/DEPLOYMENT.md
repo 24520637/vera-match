@@ -20,3 +20,7 @@ Before deployment behind a proxy, document the proxy topology and trusted peers/
 ## Before production
 
 Configure and verify HTTPS/Secure cookies, consistent web/API hostnames, exact CORS origin, secret management, authenticated TLS SMTP and real inbox delivery. Review the proxy/limiter gates above, inherited dependency advisories, backup/recovery, retention/deletion, staff access controls and feature-specific privacy/security acceptance. Local tests and successful CI do not establish production readiness.
+
+## Integrated same-origin web proxy
+
+C009 routes browser /api through Next.js to server-only API_INTERNAL_ORIGIN. Set this origin at web build/runtime; no public API URL is needed. SSR uses the same origin with explicit cookie forwarding. This proxy remains untrusted for client-IP forwarding until an actual deployment topology is approved and tested: default API limits use its socket IP and can be shared by clients. Do not enable arbitrary X-Forwarded-For trust.

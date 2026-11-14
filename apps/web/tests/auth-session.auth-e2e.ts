@@ -14,7 +14,7 @@ test("restores a real HttpOnly session after refresh and browser-context reopen"
   const email = `browser-${randomUUID()}@example.invalid`;
   const password = "synthetic-browser-password";
   const post = (path: string, data: object) =>
-    context.request.post(`http://localhost:4100/api/auth/${path}`, {
+    context.request.post(`http://localhost:3100/api/auth/${path}`, {
       headers: { Origin: "http://localhost:3100" },
       data,
     });
@@ -66,7 +66,7 @@ test("uses real sign-in, rejects external next targets and remembers only explic
   const email = `browser-${randomUUID()}@example.invalid`;
   const password = "synthetic-browser-password";
   const post = (path: string, data: object) =>
-    context.request.post(`http://localhost:4100/api/auth/${path}`, {
+    context.request.post(`http://localhost:3100/api/auth/${path}`, {
       headers: { Origin: "http://localhost:3100" },
       data,
     });
@@ -111,7 +111,7 @@ test("confirms logout-all and invalidates independently issued sessions in two b
   const password = "synthetic-browser-password";
   const second = await browser.newContext();
   const post = (path: string, data: object) =>
-    context.request.post(`http://localhost:4100/api/auth/${path}`, {
+    context.request.post(`http://localhost:3100/api/auth/${path}`, {
       headers: { Origin: "http://localhost:3100" },
       data,
     });
@@ -120,7 +120,7 @@ test("confirms logout-all and invalidates independently issued sessions in two b
     const activation = await readActivationEmail(email);
     await post("verify-email", { token: activation.token });
     await post("login", { email, password });
-    await second.request.post("http://localhost:4100/api/auth/login", {
+    await second.request.post("http://localhost:3100/api/auth/login", {
       headers: { Origin: "http://localhost:3100" },
       data: { email, password },
     });
