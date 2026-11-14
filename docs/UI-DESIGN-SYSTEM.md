@@ -59,6 +59,29 @@ Decorative dividers do not identify controls: controls use the darker boundary t
 
 ## Shared component contract
 
+### C008 adoption and form-state coverage
+
+Feature teams import existing controls from `@/components/ui/form`, actions from
+`@/components/ui/button`, and feedback from `@/components/ui/status`. Keep shared
+tokens in `apps/web/src/app/tokens.css`; do not copy controls or create a second
+palette. Huong retains ownership of the components and visual direction, and
+the design approval status above remains unchanged.
+
+Semantic tokens for danger hover, tap highlights, modal backdrops, and focus on
+dark surfaces preserve the existing color values. Global styles consume these
+tokens without changing the visual design.
+
+The form-state specimen at `/design-system` reuses `Textarea`, `Fieldset`,
+`ErrorSummary`, `FormActions`, `Button`, and `Notice`. It demonstrates required
+and disabled controls, combined caller descriptions/hints/errors, error-summary
+navigation, retained values, and validation feedback. It sends no requests and
+does not persist data. Feature code still owns validation rules, API requests,
+submission state, authorization, and confirmed persistence feedback. Shared
+controls supply labels, descriptions, native semantics, and visual states.
+
+Browser regression coverage exercises this specimen on desktop and mobile,
+including an automated accessibility scan while validation errors are visible.
+
 Components live under `apps/web/src/components/ui`. Native props and React 19 refs pass through. Do not fork a component for a feature; add a documented variant only when the interaction genuinely differs.
 
 | Component                         | Contract and use                                                                                                                                                                                                                                                                                                                                                                                     |
@@ -203,3 +226,9 @@ Do not merge this PR until Huong reviews the visual direction and components.
 The public auth routes share AuthScaffold, existing Card/Form/Input/Checkbox/Button/Notice components and PasswordInput. Desktop uses a left-aligned editorial heading beside one task; mobile stacks the same content. Errors focus the first invalid field; successful registration/activation focuses its confirmation heading. No password or activation token is persisted in browser storage. Account access distinguishes checking, unauthenticated, denied and unavailable states. See EMAIL-AUTH-SESSIONS.md for tested behavior.
 
 Modal accepts optional dismissible (default true). Logout-all disables dismissal while its server request is pending and initially focuses Keep me signed in. Existing modal behavior is preserved for other callers.
+
+## Integrated C010 session presentation
+
+AuthLoadingBoundary owns pending, guest, denied, unavailable and authenticated presentation. It never calls auth endpoints or creates a session. SessionBoundary adapts the single AuthProvider state and owns client redirects; protected/member server layouts share the same server session check. The root owns one main landmark and one global navigation/footer, so public/auth/protected groups do not duplicate them. Denied and unavailable states retain an optional retry action. Existing type, palette, labels, focus indicators and responsive controls are reused.
+
+The C010 isolated fixture supplies its own titled document and styles without importing the product AuthProvider. Fixture hydration/no-flash tests exercise presentation only; real-cookie/SSR/proxy behavior is checked in the native-stack auth suite.

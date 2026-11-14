@@ -5,8 +5,7 @@ const root = resolve(__dirname, "..");
 const env = {
   ...process.env,
   VERA_AUTH_E2E_RUN_ID: randomUUID(),
-  NEXT_PUBLIC_API_BASE_URL: "http://localhost:4100/api",
-  API_INTERNAL_BASE_URL: "http://localhost:4100/api",
+  API_INTERNAL_ORIGIN: "http://localhost:4100",
 };
 for (const [script, args, cwd] of [
   [

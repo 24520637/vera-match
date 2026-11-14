@@ -39,7 +39,7 @@ export default defineConfig({
       url: "http://localhost:3100",
       reuseExistingServer: false,
       timeout: 120000,
-      env: { API_INTERNAL_BASE_URL: "http://localhost:4100/api" },
+      env: { API_INTERNAL_ORIGIN: "http://localhost:4100" },
     },
   ],
 });

@@ -3,12 +3,20 @@ import { cookies } from "next/headers";
 import { isAuthUser } from "./auth-types";
 
 export async function getServerSession() {
-  const configured =
-    process.env.API_INTERNAL_BASE_URL ?? process.env.NEXT_PUBLIC_API_BASE_URL;
-  const base = configured?.startsWith("http")
-    ? configured
-    : "http://localhost:4000/api";
   try {
+    const origin = new URL(
+      process.env.API_INTERNAL_ORIGIN || "http://localhost:4000",
+    );
+    if (
+      !["http:", "https:"].includes(origin.protocol) ||
+      origin.username ||
+      origin.password ||
+      origin.pathname !== "/" ||
+      origin.search ||
+      origin.hash
+    )
+      return { status: "unavailable" } as const;
+    const base = origin.origin + "/api";
     const response = await fetch(`${base}/auth/me`, {
       headers: { Cookie: (await cookies()).toString() },
       cache: "no-store",

@@ -13,7 +13,7 @@ test("keeps outages distinct from logout and retries failed sign-out against the
   const email = `browser-${randomUUID()}@example.invalid`;
   const password = "synthetic-browser-password";
   const post = (path: string, data: object) =>
-    context.request.post(`http://localhost:4100/api/auth/${path}`, {
+    context.request.post(`http://localhost:3100/api/auth/${path}`, {
       headers: { Origin: "http://localhost:3100" },
       data,
     });
@@ -38,7 +38,7 @@ test("keeps outages distinct from logout and retries failed sign-out against the
       await expect(
         page.getByText(
           status === 403
-            ? "This account cannot open this page."
+            ? "Access is unavailable."
             : "We could not check your session.",
           { exact: true },
         ),
@@ -98,13 +98,13 @@ test("keeps outages distinct from logout and retries failed sign-out against the
     await expect(page).toHaveURL("/account");
     await expect(page.getByText(email, { exact: true })).toBeVisible();
     expect(
-      (await context.request.get("http://localhost:4100/api/auth/me")).status(),
+      (await context.request.get("http://localhost:3100/api/auth/me")).status(),
     ).toBe(200);
     await page.unroute("**/auth/logout");
     await page.getByRole("button", { name: "Sign out", exact: true }).click();
     await expect(page).toHaveURL(/\/login/);
     expect(
-      (await context.request.get("http://localhost:4100/api/auth/me")).status(),
+      (await context.request.get("http://localhost:3100/api/auth/me")).status(),
     ).toBe(401);
   } finally {
     await clearTestEmails(email);
@@ -119,7 +119,7 @@ test("real login throttling returns 429 without losing input or signing in", asy
   for (let index = 0; index < 10; index++)
     expect(
       (
-        await context.request.post("http://localhost:4100/api/auth/login", {
+        await context.request.post("http://localhost:3100/api/auth/login", {
           headers: { Origin: "http://localhost:3100" },
           data: { email },
         })
@@ -159,7 +159,7 @@ test("real login throttling returns 429 without losing input or signing in", asy
   });
   await expect(page).toHaveURL("/login");
   expect(
-    (await context.request.get("http://localhost:4100/api/auth/me")).status(),
+    (await context.request.get("http://localhost:3100/api/auth/me")).status(),
   ).toBe(401);
   expect(
     await page.evaluate(() => localStorage.length + sessionStorage.length),
