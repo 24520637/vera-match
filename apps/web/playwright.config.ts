@@ -30,8 +30,8 @@ export default defineConfig({
   webServer: [{
     command: "npm run start --workspace apps/api",
     cwd: "../..",
-    url: "http://localhost:4000/api/health",
-    env: { API_PORT: "4000" },
+    url: "http://localhost:4000/api/health/ready",
+    env: { API_PORT: "4000", NODE_ENV: "test" },
     reuseExistingServer: !process.env.CI,
     timeout: 60_000,
   }, {

@@ -19,6 +19,38 @@ Each feature needs valid inputs, invalid inputs, unauthorized access, state/race
 - `npm run test:integration --workspace apps/api`: explicit PostgreSQL 18 smoke on localhost:5433; reads the machine-local DATABASE_URL. All synthetic users/sessions are inserted in transactions that always roll back, with cleanup verification. No reset, truncation or migration is run by this suite.
 - Integration-only HTTP fixtures are absent from the production app. Real guard/Prisma behavior covers 200/401/403, changed account/session state, readiness and shutdown. DB failures stay 503 rather than masquerading as session expiry.
 
+## C011 CI validation
+
+C011 belongs to T02 (web foundation and CI). Its historical scope is recorded
+in `docs/COMMIT-PLAN.md` at commit `5deaf06`: validate API/web builds, Jest and
+Prisma on PRs; verify workflow YAML and an actual workflow run. The plan was
+later removed during documentation cleanup. There is no AI job to remove in
+the current workflow.
+
+| Check | Command / acceptance |
+| --- | --- |
+| Reproducible dependencies | `npm ci`; no package or lockfile changes |
+| Prisma | `npm run prisma:validate` then `npm run prisma:generate` before tests/builds |
+| Unit tests | `npm test`; configuration, password, session/role, health and mocked Prisma lifecycle checks; no running DB required |
+| Build | `npm run build`; both API and web must succeed |
+| Database integration | `npm run test:integration --workspace apps/api`; real PostgreSQL 18 on loopback port 5433, existing migration applied to a fresh CI database, synthetic fixtures rolled back and cleanup verified |
+| Playwright | Build first, then set `CI=1` and run `npm run test:ui --workspace apps/web`; desktop/mobile transport, real health proxy, UI/axe and synthetic C010 boundary checks |
+| Workflow | Validate `.github/workflows/ci.yml` with an Actions-aware checker such as `actionlint`; require a successful GitHub Actions run for the final revision |
+
+The Playwright API server uses `NODE_ENV=test` and waits for database readiness
+at `/api/health/ready`. It inherits `DATABASE_URL`, `MINIO_ROOT_USER`, and
+`MINIO_ROOT_PASSWORD`; CI supplies synthetic values on the UI step explicitly.
+The web app uses its production build in CI, while the isolated C010 fixture
+uses a development server on port 3101. Keep `API_INTERNAL_ORIGIN` consistent
+with the API address at web build time (default `http://localhost:4000`).
+
+Preserve the native PostgreSQL startup, migration deploy, T01 integration suite,
+Playwright reports and unconditional database cleanup. These checks do not
+require Docker, a live MinIO/SMTP service, or changes to authentication logic,
+Prisma schema or migrations. They do not establish full registration/media/
+matching E2E acceptance. Record each result as PASS, FAIL or NOT RUN; local
+build/unit success alone does not establish that CI or browser checks pass.
+
 ## Release gate
 
 - [ ] Prisma validation and migration apply plus a tested rollback/recovery procedure in a test database.
