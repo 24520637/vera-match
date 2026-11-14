@@ -1,4 +1,6 @@
 "use client";
+import { useRetryAfter } from "./use-retry-after";
+import { RetryAfterFeedback } from "./retry-after-feedback";
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ApiError, postAuth } from "@/lib/api";
@@ -8,6 +10,7 @@ import { Modal } from "../ui/modal";
 import { Notice } from "../ui/status";
 import { useAuth } from "./auth-provider";
 export function LogoutControls() {
+  const retry = useRetryAfter();
   const { clearUser } = useAuth();
   const router = useRouter();
   const safeAction = useRef<HTMLButtonElement>(null);
@@ -15,7 +18,7 @@ export function LogoutControls() {
   const [pending, setPending] = useState<"current" | "all" | null>(null);
   const [error, setError] = useState("");
   async function logout(all: boolean) {
-    if (pending) return;
+    if (pending || retry.seconds > 0) return;
     setPending(all ? "all" : "current");
     setError("");
     try {
@@ -24,6 +27,7 @@ export function LogoutControls() {
       router.replace("/login");
       router.refresh();
     } catch (failure) {
+      retry.fromError(failure);
       if (failure instanceof ApiError && failure.status === 401) {
         clearUser();
         router.replace("/login");
@@ -45,12 +49,16 @@ export function LogoutControls() {
           {error}
         </Notice>
       )}
+      {!confirm && (
+        <RetryAfterFeedback seconds={retry.seconds} id="logout-retry-after" />
+      )}
       <FormActions>
         <Button
           variant="secondary"
+          aria-describedby={retry.seconds ? "logout-retry-after" : undefined}
           loading={pending === "current"}
           loadingLabel="Signing out…"
-          disabled={!!pending}
+          disabled={!!pending || retry.seconds > 0}
           onClick={() => void logout(false)}
         >
           Sign out
@@ -80,6 +88,12 @@ export function LogoutControls() {
               {error}
             </Notice>
           )}
+          {confirm && (
+            <RetryAfterFeedback
+              seconds={retry.seconds}
+              id="logout-all-retry-after"
+            />
+          )}
           <FormActions>
             <Button
               ref={safeAction}
@@ -91,6 +105,10 @@ export function LogoutControls() {
             </Button>
             <Button
               variant="danger"
+              disabled={retry.seconds > 0}
+              aria-describedby={
+                retry.seconds ? "logout-all-retry-after" : undefined
+              }
               loading={pending === "all"}
               loadingLabel="Signing out…"
               onClick={() => void logout(true)}

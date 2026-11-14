@@ -1,10 +1,13 @@
 "use client";
+import { useRetryAfter } from "./use-retry-after";
+import { RetryAfterFeedback } from "./retry-after-feedback";
 import { useEffect, useRef, useState } from "react";
 import { ApiError, postAuth } from "@/lib/api";
 import { authErrorMessage } from "@/lib/auth-form";
 import { Button, ButtonLink } from "../ui/button";
 import { Notice, LoadingState } from "../ui/status";
 export function VerifyEmailPanel() {
+  const retry = useRetryAfter();
   const [token, setToken] = useState("");
   const [ready, setReady] = useState(false);
   const [pending, setPending] = useState(false);
@@ -26,7 +29,7 @@ export function VerifyEmailPanel() {
     if (complete) heading.current?.focus();
   }, [complete]);
   async function verify() {
-    if (pending) return;
+    if (pending || retry.seconds > 0) return;
     setPending(true);
     setMessage("");
     try {
@@ -34,6 +37,7 @@ export function VerifyEmailPanel() {
       setComplete(true);
       setToken("");
     } catch (error) {
+      retry.fromError(error);
       setInvalid(error instanceof ApiError && error.status === 400);
       setMessage(authErrorMessage(error));
     } finally {
@@ -82,12 +86,16 @@ export function VerifyEmailPanel() {
               {message}
             </Notice>
           )}
+          <RetryAfterFeedback seconds={retry.seconds} id="verify-retry-after" />
           <div>
             <Button
               loading={pending}
               loadingLabel="Verifying email…"
               onClick={() => void verify()}
-              disabled={invalid}
+              disabled={invalid || retry.seconds > 0}
+              aria-describedby={
+                retry.seconds ? "verify-retry-after" : undefined
+              }
             >
               Verify email
             </Button>
