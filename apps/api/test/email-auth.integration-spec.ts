@@ -1,3 +1,8 @@
+import {
+  createServer as createHttpServer,
+  request as httpRequest,
+} from "node:http";
+import { AuthRateLimiter } from "../src/auth/auth-request.guard";
 import { createServer } from "node:net";
 import { Test } from "@nestjs/testing";
 import { INestApplication } from "@nestjs/common";
@@ -430,9 +435,14 @@ describe("email authentication HTTP / PostgreSQL / native SMTP", () => {
       expect((await post("register", {})).status).toBe(400);
     const limited = await post("register", {});
     expect(limited.status).toBe(429);
+    expect(limited.headers.get("retry-after")).toMatch(/^\d+$/);
+    expect(limited.headers.get("access-control-expose-headers")).toContain(
+      "Retry-After",
+    );
+    expect(limited.headers.get("cache-control")).toBe("no-store");
     expect(await limited.json()).toMatchObject({
       code: "RATE_LIMITED",
-      retryAfterSeconds: expect.any(Number),
+      retryAfterSeconds: Number(limited.headers.get("retry-after")),
     });
     for (let count = 0; count < 10; count++)
       expect((await post("login", { email: "not-an-email" })).status).toBe(400);
@@ -521,6 +531,77 @@ describe("email authentication HTTP / PostgreSQL / native SMTP", () => {
     } finally {
       await new Promise<void>((resolve, reject) =>
         failingSmtp.close((error) => (error ? reject(error) : resolve())),
+      );
+    }
+  });
+  it("uses the socket IP directly and through a real untrusted proxy; forged forwarded IPs cannot reset limits", async () => {
+    const seen = jest.spyOn(app.get(AuthRateLimiter), "consume");
+    const proxy = createHttpServer((incoming, outgoing) => {
+      const upstream = httpRequest(
+        new URL(incoming.url ?? "/", base),
+        {
+          method: incoming.method,
+          headers: {
+            ...incoming.headers,
+            "x-forwarded-for":
+              incoming.headers["x-forwarded-for"] ?? "198.51.100.22",
+          },
+        },
+        (response) => {
+          outgoing.writeHead(response.statusCode ?? 502, response.headers);
+          response.pipe(outgoing);
+        },
+      );
+      upstream.on("error", () => {
+        outgoing.writeHead(502);
+        outgoing.end();
+      });
+      incoming.pipe(upstream);
+    });
+    await new Promise<void>((resolve) => proxy.listen(0, "127.0.0.1", resolve));
+    try {
+      expect(app.getHttpAdapter().getInstance().get("trust proxy")).toBe(false);
+      const address = proxy.address();
+      if (!address || typeof address === "string")
+        throw new Error("Proxy port unavailable");
+      for (let count = 0; count < 20; count++) {
+        const target = count % 2 ? "http://127.0.0.1:" + address.port : base;
+        const response = await fetch(target + "/api/auth/register", {
+          method: "POST",
+          headers: {
+            Origin: origin,
+            "Content-Type": "application/json",
+            "X-Forwarded-For": "203.0.113." + (count + 1),
+            "X-Real-IP": "192.0.2.99",
+            Forwarded: "for=192.0.2.99",
+          },
+          body: "{}",
+        });
+        expect(response.status).toBe(400);
+      }
+      expect(
+        seen.mock.calls
+          .filter((call) => call[0] === "register:ip")
+          .every((call) => call[1] === "127.0.0.1"),
+      ).toBe(true);
+      const limited = await fetch(
+        "http://127.0.0.1:" + address.port + "/api/auth/register",
+        {
+          method: "POST",
+          headers: {
+            Origin: origin,
+            "Content-Type": "application/json",
+            "X-Forwarded-For": "192.0.2.123",
+          },
+          body: "{}",
+        },
+      );
+      expect(limited.status).toBe(429);
+      expect(limited.headers.get("retry-after")).toMatch(/^\d+$/);
+    } finally {
+      seen.mockRestore();
+      await new Promise<void>((resolve, reject) =>
+        proxy.close((error) => (error ? reject(error) : resolve())),
       );
     }
   });

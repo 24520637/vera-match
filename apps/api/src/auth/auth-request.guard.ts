@@ -8,8 +8,9 @@ import {
 import type { Request } from "express";
 import { createHash } from "node:crypto";
 import { EnvironmentService } from "../config/environment.service";
+import { AuthRateLimitException } from "./auth-rate-limit.exception";
 
-/** Bounded single-process limiter for the modular-monolith deployment. Never stores raw IP/email. */
+/** MVP only: one API process, volatile counters. Never stores raw IP/email. */
 @Injectable()
 export class AuthRateLimiter {
   private readonly windows = new Map<
@@ -36,13 +37,8 @@ export class AuthRateLimiter {
       this.windows.set(key, entry);
     }
     if (entry.count >= limit)
-      throw new HttpException(
-        {
-          code: "RATE_LIMITED",
-          message: "Too many attempts. Try again later.",
-          retryAfterSeconds: Math.ceil((entry.expires - now) / 1000),
-        },
-        429,
+      throw new AuthRateLimitException(
+        Math.max(1, Math.ceil((entry.expires - now) / 1000)),
       );
     entry.count++;
   }

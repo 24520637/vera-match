@@ -2,13 +2,16 @@ import type { INestApplication } from "@nestjs/common";
 import type { Request, Response, NextFunction } from "express";
 import { EnvironmentService } from "./config/environment.service";
 import { createValidationPipe } from "./auth/auth-validation";
+import { AuthRateLimitFilter } from "./auth/auth-rate-limit.exception";
 
 export function configureApplication(app: INestApplication) {
   app.setGlobalPrefix("api");
   app.useGlobalPipes(createValidationPipe());
+  app.useGlobalFilters(new AuthRateLimitFilter());
   app.enableCors({
     origin: app.get(EnvironmentService).values.corsOrigin,
     credentials: true,
+    exposedHeaders: ["Retry-After"],
   });
   app.use((request: Request, response: Response, next: NextFunction) => {
     if (request.path.startsWith("/api/auth")) {
