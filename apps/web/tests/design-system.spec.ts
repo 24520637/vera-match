@@ -1,7 +1,9 @@
 import { expect, test } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 
-test("form states preserve descriptions, values and error-summary navigation", async ({ page }) => {
+test("form states preserve descriptions, values and error-summary navigation", async ({
+  page,
+}) => {
   const mutations: string[] = [];
   page.on("request", (request) => {
     if (["POST", "PUT", "PATCH", "DELETE"].includes(request.method()))
@@ -11,17 +13,22 @@ test("form states preserve descriptions, values and error-summary navigation", a
   const form = page.getByRole("form", { name: "Form states example" });
   const context = form.getByLabel("Example context");
   const disabled = form.getByLabel("Unavailable context");
-  const description = "Use fictional details in this preview. Up to 500 characters. This example stays on this page.";
+  const description =
+    "Use fictional details in this preview. Up to 500 characters. This example stays on this page.";
   await expect(context).toHaveAttribute("required", "");
   await expect(context).toHaveAccessibleDescription(description);
   await expect(disabled).toBeDisabled();
-  await expect(disabled).toHaveAccessibleDescription("Disabled example. This field is not submitted.");
+  await expect(disabled).toHaveAccessibleDescription(
+    "Disabled example. This field is not submitted.",
+  );
   await context.fill("   ");
   await form.getByRole("button", { name: "Check form states" }).click();
   await expect(context).toBeFocused();
   await expect(context).toHaveValue("   ");
   await expect(context).toHaveAttribute("aria-invalid", "true");
-  await expect(context).toHaveAccessibleDescription(`${description} Enter some example context.`);
+  await expect(context).toHaveAccessibleDescription(
+    `${description} Enter some example context.`,
+  );
   await form.getByRole("link", { name: "Enter some example context." }).click();
   await expect(page).toHaveURL(/#form-context$/);
   await expect(context).toBeFocused();
@@ -34,7 +41,9 @@ test("form states preserve descriptions, values and error-summary navigation", a
   await expect(context).not.toHaveAttribute("aria-invalid", "true");
   await expect(context).toHaveAccessibleDescription(description);
   await expect(context).toHaveValue("Fictional context for the form preview.");
-  await expect(form.getByRole("status")).toContainText("Nothing was sent or saved");
+  await expect(form.getByRole("status")).toContainText(
+    "Nothing was sent or saved",
+  );
   await context.fill("Changed example context.");
   await expect(form.getByRole("status")).toHaveCount(0);
   expect(mutations).toEqual([]);
@@ -50,7 +59,10 @@ test("public page is responsive and honest about product availability", async ({
     "A meaningful connection starts with you.",
   );
   await expect(
-    page.getByText("Registration is not open yet.", { exact: false }),
+    page.getByText(
+      "Private video reviews and matching are still taking shape.",
+      { exact: false },
+    ),
   ).toBeVisible();
   for (const width of [320, 390, 768, 1440]) {
     await page.setViewportSize({ width, height: 900 });
@@ -270,4 +282,18 @@ test("component page wraps at 320px and respects reduced motion", async ({
       (element) => element.scrollWidth <= element.clientWidth,
     ),
   ).toBe(true);
+});
+
+// Presentation checks use a guest failure fixture; real session acceptance runs in test:auth.
+test.beforeEach(async ({ page }) => {
+  await page.route("**/api/auth/me", (route) =>
+    route.fulfill({
+      status: 401,
+      contentType: "application/json",
+      body: JSON.stringify({
+        code: "UNAUTHENTICATED",
+        message: "Guest presentation fixture.",
+      }),
+    }),
+  );
 });

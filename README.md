@@ -2,13 +2,15 @@
 
 An adult matchmaking platform based on member profiles, questionnaires, reciprocal preferences, and consent-controlled expert review of private videos.
 
-**Current implementation:** Next.js landing page and shared UI design-system preview at `/design-system`; NestJS typed configuration, Prisma lifecycle/readiness, Argon2id helper and database-backed session/role guards; Prisma schema and initial migration; CI checks. The preview uses page-local examples. Registration/login endpoints, private video review, and matching remain planned. See [T01 foundation](docs/AUTH-FOUNDATION.md) for verified scope and limitations.
+**Current implementation:** Next.js landing page and shared UI design-system preview at `/design-system`; NestJS typed configuration, Prisma lifecycle/readiness, Argon2id helper and database-backed session/role guards; Prisma schema and initial migration; CI checks. The preview uses page-local examples. Registration, email activation, login, persistent sessions and protected account access are implemented; private video review and matching remain planned. See [email authentication](docs/EMAIL-AUTH-SESSIONS.md) for operation and limits. See [T01 foundation](docs/AUTH-FOUNDATION.md) for verified scope and limitations.
+
+The browser uses same-origin `/api` via the Next.js proxy. Configure server-only `API_INTERNAL_ORIGIN` (default `http://localhost:4000`) consistently at web build and runtime; SSR uses the same validated origin with explicit cookie forwarding.
 
 ## Stack
 
 - Next.js 15, React 19, TypeScript (`apps/web`)
 - NestJS 10 (`apps/api`)
-- PostgreSQL 16 and Prisma 6 (`apps/api/prisma`)
+- PostgreSQL 18 and Prisma 6 (`apps/api/prisma`)
 - Private S3-compatible media storage; MinIO and Mailpit for local development
 
 ## Local setup
@@ -42,15 +44,15 @@ npm run dev:api
 npm run dev:web
 ```
 
-| Service | Local address |
-| --- | --- |
-| Web | http://localhost:3000 |
-| API process health (no database probe) | http://localhost:4000/api/health |
-| Database readiness | http://localhost:4000/api/health/ready |
-| Mailpit | http://localhost:8025 |
-| MinIO console | http://localhost:9001 |
+| Service                                | Local address                          |
+| -------------------------------------- | -------------------------------------- |
+| Web                                    | http://localhost:3000                  |
+| API process health (no database probe) | http://localhost:4000/api/health       |
+| Database readiness                     | http://localhost:4000/api/health/ready |
+| Mailpit                                | http://localhost:8025                  |
+| MinIO console                          | http://localhost:9001                  |
 
-Mailpit and MinIO require separately installed native services for later email/media features; T01 does not start or depend on them. Create a private `vera-private` bucket before implementing uploads. Use synthetic test data until the relevant security and privacy controls work.
+Mailpit must run as a separately installed native process for registration, email activation and integration/browser auth tests. MinIO remains a separate native service for future media features. Create a private `vera-private` bucket before implementing uploads. Use synthetic test data until the relevant security and privacy controls work.
 
 ## Development workflow
 
@@ -69,23 +71,26 @@ by the web workspace; export this variable or use its local default. Next.js
 records rewrites at build time, so rebuild when changing the destination.
 `NEXT_PUBLIC_API_BASE_URL` is no longer used.
 
-Run `npm run build` before the Playwright suite. Its managed services start the
-built NestJS API on port 4000 and Next.js on port 3100, plus the isolated C010
-fixture on port 3101. The API runs with `NODE_ENV=test`; Playwright waits for
-`/api/health/ready`, so a configured, migrated PostgreSQL database is required
-even though the `/api/health` proxy assertion itself does not query it. Supply
-`DATABASE_URL`, `MINIO_ROOT_USER`, and `MINIO_ROOT_PASSWORD` in the invoking
-environment or the API's configured local environment files. No running MinIO
-or SMTP service is required by these foundation tests. Set `CI=1` when running
-`npm run test:ui --workspace apps/web` to test the built web app without reusing
-existing servers; the C010 fixture still uses its isolated development server.
+Run `npm run build` before the shared Playwright suite. It starts Next.js on
+port 3100 and the isolated C010 fixture on port 3101, without starting the API.
+Set `CI=1` when running `npm run test:ui --workspace apps/web` to test the built
+web app without reusing existing servers; the C010 fixture still uses its
+isolated development server. These presentation/transport checks need no DB.
+
+Run `npm run test:auth --workspace apps/web` separately for real authentication,
+protected SSR and the same-origin health proxy. Its runner rebuilds the web app
+for the API on port 4100, starts an isolated test-schema API with `NODE_ENV=test`,
+and waits for `/api/health/ready`. Supply a local PostgreSQL 18 `DATABASE_URL`
+on port 5433 and a running Mailpit SMTP/API service; the runner cleans up only
+its generated test schema and synthetic mail. See the auth runbook before use.
 
 ### C011 CI validation
 
 PRs into `develop` or `main` run `npm ci`, Prisma validation/generation, Jest
 unit tests, and API/web builds. CI then starts native PostgreSQL 18 on port
-5433, applies existing migrations to a disposable database, runs API integration
-tests, and runs Playwright with synthetic database/MinIO configuration. Reports
+5433 and Mailpit, applies existing migrations to a disposable database, runs API
+integration tests, and runs shared UI plus real-auth Playwright suites with
+synthetic test configuration. Reports
 are uploaded and PostgreSQL cleanup runs even after a failure. Docker is not a
 local prerequisite.
 
@@ -93,7 +98,8 @@ local prerequisite.
 tests. Run `npm run test:integration --workspace apps/api` separately against
 configured local PostgreSQL 18 on port 5433, and run
 `npm run test:ui --workspace apps/web` separately for transport, UI, accessibility,
-and C010 presentation checks. See [validation criteria](docs/TEST-PLAN.md).
+and C010 presentation checks. The separate `test:auth` script runs real browser
+authentication and proxy checks. See [validation criteria](docs/TEST-PLAN.md).
 On Windows with restricted PowerShell script execution, use `npm.cmd`.
 
 `develop` is the integration branch; `main` contains reviewed releases. Start one task at a time from current `develop`, using your own branch prefix:
@@ -110,19 +116,19 @@ Huong owns authentication, sessions, private video, safety, and privacy. Phuc ow
 
 ## Essential documentation
 
-| Document | Purpose |
-| --- | --- |
-| [Scope](docs/SCOPE-DECISIONS.md) | Required features and exclusions |
-| [Architecture](docs/ARCHITECTURE.md) | Components and trust boundaries |
-| [UI design system](docs/UI-DESIGN-SYSTEM.md) | Shared tokens, components, interaction patterns, and Huong’s design review |
-| [API contract](docs/API-CONTRACT.md) | Planned endpoints and access rules |
-| [Authentication](docs/AUTH-SPEC.md) | Sessions, account states, CSRF, and authorization |
-| [Authentication foundation](docs/AUTH-FOUNDATION.md) | Implemented T01 contracts, native setup, test evidence and review handoff |
-| [Database](docs/DATABASE.md) | Models and data invariants |
-| [Expert review](docs/EXPERT-REVIEW-WORKFLOW.md) | Assignment, observations, independent QA, and owner controls |
-| [Matching](docs/MATCHING-DESIGN.md) | Reciprocal rules and permitted factual claims |
-| [Test plan](docs/TEST-PLAN.md) | Acceptance scenarios and release gates |
-| [Deployment](docs/DEPLOYMENT.md) | Local operations and production prerequisites |
+| Document                                             | Purpose                                                                    |
+| ---------------------------------------------------- | -------------------------------------------------------------------------- |
+| [Scope](docs/SCOPE-DECISIONS.md)                     | Required features and exclusions                                           |
+| [Architecture](docs/ARCHITECTURE.md)                 | Components and trust boundaries                                            |
+| [UI design system](docs/UI-DESIGN-SYSTEM.md)         | Shared tokens, components, interaction patterns, and Huong’s design review |
+| [API contract](docs/API-CONTRACT.md)                 | Planned endpoints and access rules                                         |
+| [Authentication](docs/AUTH-SPEC.md)                  | Sessions, account states, CSRF, and authorization                          |
+| [Authentication foundation](docs/AUTH-FOUNDATION.md) | Implemented T01 contracts, native setup, test evidence and review handoff  |
+| [Database](docs/DATABASE.md)                         | Models and data invariants                                                 |
+| [Expert review](docs/EXPERT-REVIEW-WORKFLOW.md)      | Assignment, observations, independent QA, and owner controls               |
+| [Matching](docs/MATCHING-DESIGN.md)                  | Reciprocal rules and permitted factual claims                              |
+| [Test plan](docs/TEST-PLAN.md)                       | Acceptance scenarios and release gates                                     |
+| [Deployment](docs/DEPLOYMENT.md)                     | Local operations and production prerequisites                              |
 
 ## Quality and product rules
 

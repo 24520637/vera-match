@@ -34,21 +34,23 @@ the current workflow.
 | Unit tests | `npm test`; configuration, password, session/role, health and mocked Prisma lifecycle checks; no running DB required |
 | Build | `npm run build`; both API and web must succeed |
 | Database integration | `npm run test:integration --workspace apps/api`; real PostgreSQL 18 on loopback port 5433, existing migration applied to a fresh CI database, synthetic fixtures rolled back and cleanup verified |
-| Playwright | Build first, then set `CI=1` and run `npm run test:ui --workspace apps/web`; desktop/mobile transport, real health proxy, UI/axe and synthetic C010 boundary checks |
+| Shared Playwright | Build first, then set `CI=1` and run `npm run test:ui --workspace apps/web`; desktop/mobile transport, UI/axe and synthetic C010 boundary checks; no API/DB required |
+| Authentication Playwright | `npm run test:auth --workspace apps/web`; rebuilds for the test API, then verifies real registration/SMTP/sessions, protected SSR and the same-origin health proxy using PostgreSQL 18 and Mailpit |
 | Workflow | Validate `.github/workflows/ci.yml` with an Actions-aware checker such as `actionlint`; require a successful GitHub Actions run for the final revision |
 
-The Playwright API server uses `NODE_ENV=test` and waits for database readiness
-at `/api/health/ready`. It inherits `DATABASE_URL`, `MINIO_ROOT_USER`, and
-`MINIO_ROOT_PASSWORD`; CI supplies synthetic values on the UI step explicitly.
-The web app uses its production build in CI, while the isolated C010 fixture
-uses a development server on port 3101. Keep `API_INTERNAL_ORIGIN` consistent
-with the API address at web build time (default `http://localhost:4000`).
+The shared suite starts only the web app and C010 fixture. The authentication
+suite's API uses `NODE_ENV=test` on port 4100 and waits for `/api/health/ready`.
+Its runner supplies the matching `API_INTERNAL_ORIGIN` during web build/runtime
+and creates a UUID-scoped disposable schema. CI provides synthetic database,
+MinIO and SMTP configuration. The shared web app uses its production build in
+CI, while the isolated C010 fixture uses a development server on port 3101.
 
 Preserve the native PostgreSQL startup, migration deploy, T01 integration suite,
 Playwright reports and unconditional database cleanup. These checks do not
-require Docker, a live MinIO/SMTP service, or changes to authentication logic,
-Prisma schema or migrations. They do not establish full registration/media/
-matching E2E acceptance. Record each result as PASS, FAIL or NOT RUN; local
+require Docker, a live MinIO service, or changes to authentication logic,
+Prisma schema or migrations. Real email integration/auth browser tests require
+Mailpit; the shared UI suite does not. They do not establish full media/matching
+E2E acceptance. Record each result as PASS, FAIL or NOT RUN; local
 build/unit success alone does not establish that CI or browser checks pass.
 
 ## Release gate

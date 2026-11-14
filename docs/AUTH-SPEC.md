@@ -1,6 +1,6 @@
 # Authentication, session management, and authorization specification
 
-**Implementation status:** T01 provides typed configuration, Prisma lifecycle/readiness, an Argon2id helper and server-side session/role guard primitives, with real database smoke tests. Registration, login, session issuance/restoration endpoints and their UI remain PLANNED. See `AUTH-FOUNDATION.md` for the implemented boundary; the full acceptance journey below is not complete.
+**Implementation status:** T01 foundation and registration, SMTP activation, resend, login, session issuance/restoration, protected account routes and logout are implemented. See `EMAIL-AUTH-SESSIONS.md` for tested contracts and deployment limits. Password recovery and later account features remain planned.
 
 ## 1. Account state and roles
 
@@ -57,14 +57,14 @@ Browser request
 
 ## 6. Resource access policies
 
-| Resource/action | Required rules |
-| --- | --- |
-| Own profile or video | Authenticated MEMBER and `ownerId === currentUser.id` |
-| Assigned private video | Active EXPERT, eligible reviewer, active assignment, ready video, current owner consent |
-| Approve submitted review | MODERATOR/QA with appropriate access; must not be the review author |
-| Read review report | The owning member; review must be QA-approved |
-| Generate matches | Active adult MEMBER, current matching consent, no block, only appropriately shared facts |
-| Moderate reports | Authorized MODERATOR/ADMIN within assigned scope; record audited access |
+| Resource/action          | Required rules                                                                           |
+| ------------------------ | ---------------------------------------------------------------------------------------- |
+| Own profile or video     | Authenticated MEMBER and `ownerId === currentUser.id`                                    |
+| Assigned private video   | Active EXPERT, eligible reviewer, active assignment, ready video, current owner consent  |
+| Approve submitted review | MODERATOR/QA with appropriate access; must not be the review author                      |
+| Read review report       | The owning member; review must be QA-approved                                            |
+| Generate matches         | Active adult MEMBER, current matching consent, no block, only appropriately shared facts |
+| Moderate reports         | Authorized MODERATOR/ADMIN within assigned scope; record audited access                  |
 
 ## 7. Required safeguards and acceptance criteria
 
