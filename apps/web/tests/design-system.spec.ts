@@ -1,6 +1,45 @@
 import { expect, test } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 
+test("form states preserve descriptions, values and error-summary navigation", async ({ page }) => {
+  const mutations: string[] = [];
+  page.on("request", (request) => {
+    if (["POST", "PUT", "PATCH", "DELETE"].includes(request.method()))
+      mutations.push(request.url());
+  });
+  await page.goto("/design-system");
+  const form = page.getByRole("form", { name: "Form states example" });
+  const context = form.getByLabel("Example context");
+  const disabled = form.getByLabel("Unavailable context");
+  const description = "Use fictional details in this preview. Up to 500 characters. This example stays on this page.";
+  await expect(context).toHaveAttribute("required", "");
+  await expect(context).toHaveAccessibleDescription(description);
+  await expect(disabled).toBeDisabled();
+  await expect(disabled).toHaveAccessibleDescription("Disabled example. This field is not submitted.");
+  await context.fill("   ");
+  await form.getByRole("button", { name: "Check form states" }).click();
+  await expect(context).toBeFocused();
+  await expect(context).toHaveValue("   ");
+  await expect(context).toHaveAttribute("aria-invalid", "true");
+  await expect(context).toHaveAccessibleDescription(`${description} Enter some example context.`);
+  await form.getByRole("link", { name: "Enter some example context." }).click();
+  await expect(page).toHaveURL(/#form-context$/);
+  await expect(context).toBeFocused();
+  const audit = await new AxeBuilder({ page })
+    .withTags(["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"])
+    .analyze();
+  expect(audit.violations).toEqual([]);
+  await context.fill("Fictional context for the form preview.");
+  await form.getByRole("button", { name: "Check form states" }).click();
+  await expect(context).not.toHaveAttribute("aria-invalid", "true");
+  await expect(context).toHaveAccessibleDescription(description);
+  await expect(context).toHaveValue("Fictional context for the form preview.");
+  await expect(form.getByRole("status")).toContainText("Nothing was sent or saved");
+  await context.fill("Changed example context.");
+  await expect(form.getByRole("status")).toHaveCount(0);
+  expect(mutations).toEqual([]);
+});
+
 test("public page is responsive and honest about product availability", async ({
   page,
 }) => {

@@ -59,6 +59,29 @@ Decorative dividers do not identify controls: controls use the darker boundary t
 
 ## Shared component contract
 
+### C008 adoption and form-state coverage
+
+Feature teams import existing controls from `@/components/ui/form`, actions from
+`@/components/ui/button`, and feedback from `@/components/ui/status`. Keep shared
+tokens in `apps/web/src/app/tokens.css`; do not copy controls or create a second
+palette. Huong retains ownership of the components and visual direction, and
+the design approval status above remains unchanged.
+
+Semantic tokens for danger hover, tap highlights, modal backdrops, and focus on
+dark surfaces preserve the existing color values. Global styles consume these
+tokens without changing the visual design.
+
+The form-state specimen at `/design-system` reuses `Textarea`, `Fieldset`,
+`ErrorSummary`, `FormActions`, `Button`, and `Notice`. It demonstrates required
+and disabled controls, combined caller descriptions/hints/errors, error-summary
+navigation, retained values, and validation feedback. It sends no requests and
+does not persist data. Feature code still owns validation rules, API requests,
+submission state, authorization, and confirmed persistence feedback. Shared
+controls supply labels, descriptions, native semantics, and visual states.
+
+Browser regression coverage exercises this specimen on desktop and mobile,
+including an automated accessibility scan while validation errors are visible.
+
 Components live under `apps/web/src/components/ui`. Native props and React 19 refs pass through. Do not fork a component for a feature; add a documented variant only when the interaction genuinely differs.
 
 | Component                         | Contract and use                                                                                                                                                                                                                                                                                                                                |
