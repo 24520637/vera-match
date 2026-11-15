@@ -27,49 +27,87 @@
 
 The [Profile/Consent contract draft](PROFILE-CONSENT-CONTRACT.md) proposes API
 types for C019-C024. These are not generated Prisma types, implemented routes,
-approved schema changes or a completed C012 review. Existing tables and the
-initial migration must be reused; do not recreate them to satisfy task IDs.
+approved schema changes or a completed C012 review. Its matrix records Huong's
+conditional direction separately from concrete proposals still needing approval.
+Existing tables and the initial migration must be reused; do not recreate them
+to satisfy task IDs.
 
 | Proposed API type | Existing storage | Mapping and boundary |
 | --- | --- | --- |
-| `ProfilePatchDto` / `ProfileReadDto` | `Profile` | Scalar fields map by name; server supplies `userId` from CurrentUser. `visibilityEnabled` already defaults false. Birth date API date-only versus Prisma DateTime serialization needs D5 approval. Proposed string arrays for interests/values narrow `Json?` through validation, not a schema guarantee. |
+| `ProfilePatchDto` / `ProfileReadDto` | `Profile` | Scalar fields map by name; server supplies `userId` from CurrentUser. `visibilityEnabled` already defaults false. Optional draft birthDate, UTC-midnight/date-only and UTC age direction are conditionally accepted, not implemented; no reinterpretation of legacy timestamps. Catalog arrays still need approval. |
 | `PreferencesPatchDto` / `PreferencesReadDto` | `MatchPreference` | minAge/maxAge/relationshipGoal map directly. Proposed dealBreakers/priorities arrays require an agreed JSON shape/catalog; Int?/Json? alone do not enforce adult bounds, min <= max or allowed values. |
 | `QuestionnairePutDto` / `QuestionnaireReadDto` | `QuestionnaireAnswer[]` | Group rows by caller and questionnaireVersion. Existing composite unique key is `(userId, questionKey, questionnaireVersion)`; exactly three approved keys, ordering and version lifecycle require application/catalog validation. |
-| `ConsentPatchDto` / `ConsentStateDto` | `Consent` | Existing purpose enum has five values, unique `(userId,purpose)` and granted=false. Server-owned timestamps map to grantedAt/revokedAt/updatedAt. Missing row => OFF projection is proposed; it is not an existing API behavior. |
+| `ConsentPatchDto` / `ConsentReadDto` / `ConsentStateDto` | `Consent` plus proposed revision/event storage | Existing enum has five values, unique `(userId,purpose)` and granted=false. Missing row => OFF projection is accepted review direction, not an implemented API. Current schema has neither policyVersion nor aggregate version/expectedVersion enforcement; retained timestamp/policy rules are proposed. |
 | Auth `CurrentUser` / `AuthUser` | Safe selection from `User` | id/email/displayName/role only. User.displayName is not a Profile column. Do not return Prisma User/Session objects or mutate account fields through profile DTOs. |
 
 ### Existing schema gaps and review dependencies
 
-- **Nullable JSON mapping (D2/D6/D8), PENDING REVIEW:** interests/values and
-  dealBreakers/priorities use `Json?`. Database NULL and stored JSON null are
-  distinct and may have different domain meanings; neither is automatically
-  equivalent to an empty array. The draft's `string[] | null` DTOs do not decide
-  which storage value API null represents, how reads normalize existing rows,
-  or what PATCH null/[] persists. Huong must review these read/write semantics
-  before implementation. No conversion or migration rule is chosen here.
+- **Nullable JSON mapping (D2), conditionally accepted:** interests/values
+  and dealBreakers/priorities use `Json?`; database NULL and JSON null remain
+  distinct in storage. PATCH null writes database NULL, [] writes a
+  JSON empty array and omission leaves storage unchanged. GET projects
+  either null representation as API null without backfill. Legacy object/scalar/
+  invalid arrays are not silently rewritten or discarded; the draft proposes
+  sanitized 503 DATA_SHAPE_UNAVAILABLE. Huong must approve read compatibility,
+  invalid untouched fields on profile/preferences PATCH and any separately
+  reviewed remediation. Such malformed rows cannot be dependencies of withdrawal:
+  consent authorization/transactions must not load their API projections.
+  No conversion, migration or backfill is performed by this documentation.
 - **Consent policy/history (D9):** Consent has no policyVersion, policy text
   reference or append-only transition relation. Its timestamps represent current
   state, not a complete sequence of grants/withdrawals. C023 explicitly requires
   policyVersion and event history; an approved persistence design may need an
   incremental migration later. No design or migration is selected by this draft.
-- **Audit binding (D9/D10):** AuditLog currently has id, optional actorId,
-  action, subjectType, optional subjectId and createdAt. It has no structured
+- **Audit binding (D9/D10):** Atomic current-state + immutable-event persistence
+  is accepted review direction, but not implemented. AuditLog currently has id,
+  optional actorId, action, subjectType, optional subjectId and createdAt. It has no structured
   old/new-state or policy-version payload and does not guarantee typed,
   immutable consent transitions or foreign-key ownership. Review whether an
   extension or a dedicated event model is needed; enforce atomic state + audit
   persistence in the future feature. Do not claim the existing audit table
-  already stores the evidence required by C023.
+  already stores the evidence required by C023. Candidate evidence includes
+  old/new consent state, accepted policy, actor/member/purpose, server time,
+  operation kind and old/new aggregate consent version. Storage, immutability,
+  retention and access enforcement still require explicit approval.
 - **Catalogs and validation (D5-D8):** nullable strings/JSON and questionnaire
   uniqueness do not define three canonical questions, accepted vocabulary,
   limits, adult validation or age-range consistency. Add no duplicate models
   merely to express DTO validation; approve application versus DB enforcement.
-- **Concurrency (D11):** these four resource models have updatedAt but no
-  dedicated optimistic version. Do not describe timestamps as locking or invent
-  conflict safety. Agree transactions/version/ETag/idempotency before deciding
-  whether an additional constraint or migration is necessary.
+- **Concurrency/idempotency (D11), conditional direction / details pending:** these models have updatedAt
+  but no dedicated write-conflict revision. The draft proposes one per-member
+  aggregate consent version, virtual initial 0, required request expectedVersion
+  and transactional CAS of state/version/immutable events. Every accepted consent
+  mutation, including already-OFF reaffirmation, advances it to block stale grants;
+  stale versions propose 409 VERSION_CONFLICT. A unique per-member revision and
+  atomic conditional updates need a reviewed later persistence design; purpose
+  deletion must not reset it. Consent version is not questionnaireVersion.
+  Profile/preferences/questionnaire edit concurrency remains separately pending.
+- **Idempotency evidence (D11):** no model currently provides scoped
+  Idempotency-Key uniqueness, payload fingerprint, operation version/result or
+  replay semantics. Proposed result records expire after 24 hours but cannot
+  reset the aggregate version or duplicate audit events. Lookup/CAS/state/event/
+  result writes need one approved transactional design. Exact fields, retention
+  and replay contract remain pending; no new schema is created here.
+- **Catalog provenance (A):** current JSON/string/questionKey fields do not
+  store an approved product-catalog revision or canonical questionnaire prompts.
+  Candidate IDs/prompts are not existing product data. Retired questionnaire
+  versions must remain read-only; future catalog storage/validation and any
+  needed provenance migration require review, not duplication of current tables.
+- **Retention and deletion (B):** existing cascade FKs, Video.deletedAt and
+  account statuses are not a durable cleanup/retention implementation. There is
+  no job/outbox, retry/deadline/evidence model or backup deletion-suppression
+  ledger in the current schema. Candidate per-category schedules, audit
+  de-linking, idempotency purge and retention evidence need policy/privacy/legal
+  approval before later migrations. Immutable audit means no editing while
+  retained; any approved expiry purge is privileged, not ordinary event CRUD.
+- **Signed media capabilities (C):** Video has metadata, not per-URL revocation,
+  issued-capability tracking or guaranteed provider invalidation. The proposed
+  60-second playback TTL/cache/issuance controls are Huong-owned future media
+  work. Do not claim current DB flags instantly revoke outstanding object URLs.
 - **Defaults/lifecycle (D2/D10):** User relations do not automatically create
-  Profile/MatchPreference or five Consent rows. Decide lazy creation versus
-  provisioning without changing registration implicitly. Existing cascading
+  Profile/MatchPreference or five Consent rows. GET non-provisioning/defaults
+  are accepted direction; first-write lazy creation and virtual version behavior
+  are proposals, not registration changes. Existing cascading
   deletes do not establish an approved retention/audit-deletion policy.
 
 C019 should inspect and verify the already-present relations/indexes before

@@ -6,6 +6,22 @@ API prefix: `/api`. The browser uses a server-issued HttpOnly session cookie. Mu
 
 **C012 / T02: documentation draft, PENDING REVIEW by Huong.** This document records existing auth behavior without changing it. The [Profile/Consent contract draft](PROFILE-CONSENT-CONTRACT.md) proposes DTOs for C019-C024; those endpoints are not implemented. C012 is neither DONE nor FROZEN. Its historical scope at `5deaf06:docs/COMMIT-PLAN.csv` is to agree response envelopes/types with Huong, verified by completed contract review.
 
+The draft records both rounds of Huong's supplied PR #8 feedback: conditional
+acceptance is separate from outstanding product/policy approvals. New routes
+use resource wrappers, HTTP 400, dot/index paths (e.g. `consents.0.policyVersion`),
+visible `_form` whole-request errors, non-provisioning GET defaults and own
+active/verified MEMBER authorization. API null clears nullable values into
+database NULL; SQL/JSON null read as API null. Invalid profile/preferences must
+not block withdrawal. D4 requires independent revocation quotas; 429 includes
+Retry-After and cannot mean success. D11 requires CAS plus deduplication of
+idempotency keys, not automatic grant retries. These are future contracts;
+existing auth shapes, top-level formatter and code remain unchanged.
+
+Sections A/B/C of the draft propose exact catalogs/questionnaire, category
+retention/deletion schedules and 60-second signed playback URLs, all awaiting
+explicit approval. D4/D6/D7/D8/D11 are not fully approved in every detail, and
+no legal retention rule, media implementation or production guarantee is implied.
+
 | Method    | Route                              | Caller                  | Request, response, and authorization requirements                                                         |
 | --------- | ---------------------------------- | ----------------------- | --------------------------------------------------------------------------------------------------------- |
 | POST      | `/auth/register`                   | Guest                   | `{email,password,declaredAdult,displayName?}`; create PENDING_EMAIL, send activation link; do not log in automatically |
@@ -77,7 +93,7 @@ profile, consent, media or matching endpoints.
 
 1. Authenticate the cookie and authorize **resource ownership** at the API, never only in the UI or based on a caller-supplied user ID.
 2. `/auth/me` network/`5xx` failures should offer retry, not redirect to login. Only an actual invalid session (`401`) implies reauthentication; `403` means insufficient privileges.
-3. Keep review/QA/consent transitions atomic, prevent race conditions, and reject stale versions.
+3. Keep review/QA/consent transitions atomic, prevent race conditions, and reject stale versions. Consent CAS/version direction is conditionally accepted; exact `expectedVersion`/409/idempotency storage and replay details remain draft, not implemented. Explicit OFF advances version, and replays cannot duplicate events or versions.
 4. Keep stored videos private, use short-lived signed URLs, and revoke access when consent or assignments become invalid.
 5. Never expose private video, raw reviewer notes, biometric-like observations, or unapproved assessments in matching explanations.
 6. Only the routes identified as implemented above exist; remaining routes are a **plan**.
