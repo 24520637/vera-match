@@ -108,37 +108,6 @@ export class PasswordRecoveryService implements OnModuleDestroy {
     link.hash = new URLSearchParams({ token }).toString();
     try {
       await this.email.sendPasswordReset(issued.email, link.toString());
-      await this.prisma.$transaction(async (tx) => {
-        await tx.$queryRaw`SELECT id FROM "User" WHERE id = ${user.id} FOR UPDATE`;
-        const account = await tx.user.findUnique({ where: { id: user.id } });
-        const now = new Date();
-        if (
-          !account ||
-          account.status !== "ACTIVE" ||
-          !account.emailVerifiedAt ||
-          account.email !== issued.email
-        ) {
-          await tx.passwordResetToken.updateMany({
-            where: { id: issued.id, consumedAt: null },
-            data: { consumedAt: now },
-          });
-          return;
-        }
-        const current = await tx.passwordResetToken.findFirst({
-          where: { id: issued.id, consumedAt: null, expiresAt: { gt: now } },
-        });
-        // Reset or a newer confirmed delivery may already have consumed this row.
-        // Never reactivate it or invalidate a newer link after a delayed SMTP acknowledgement.
-        if (!current) return;
-        await tx.passwordResetToken.updateMany({
-          where: {
-            userId: user.id,
-            consumedAt: null,
-            createdAt: { lt: issued.createdAt },
-          },
-          data: { consumedAt: now },
-        });
-      });
     } catch (error) {
       await this.prisma.passwordResetToken.updateMany({
         where: { tokenHash, consumedAt: null },
@@ -146,6 +115,39 @@ export class PasswordRecoveryService implements OnModuleDestroy {
       });
       throw error;
     }
+    // SMTP accepted the email. A failed or ambiguous DB confirmation must not
+    // revoke its token; the existing reset transaction can safely consume all links.
+    await this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM "User" WHERE id = ${user.id} FOR UPDATE`;
+      const account = await tx.user.findUnique({ where: { id: user.id } });
+      const now = new Date();
+      if (
+        !account ||
+        account.status !== "ACTIVE" ||
+        !account.emailVerifiedAt ||
+        account.email !== issued.email
+      ) {
+        await tx.passwordResetToken.updateMany({
+          where: { id: issued.id, consumedAt: null },
+          data: { consumedAt: now },
+        });
+        return;
+      }
+      const current = await tx.passwordResetToken.findFirst({
+        where: { id: issued.id, consumedAt: null, expiresAt: { gt: now } },
+      });
+      // Reset or a newer confirmed delivery may already have consumed this row.
+      // Never reactivate it or invalidate a newer link after a delayed SMTP acknowledgement.
+      if (!current) return;
+      await tx.passwordResetToken.updateMany({
+        where: {
+          userId: user.id,
+          consumedAt: null,
+          createdAt: { lt: issued.createdAt },
+        },
+        data: { consumedAt: now },
+      });
+    });
   }
 
   async onModuleDestroy() {
