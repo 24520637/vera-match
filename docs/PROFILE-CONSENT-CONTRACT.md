@@ -1,97 +1,192 @@
-# C012 draft — Profile, Questionnaire, Preferences and Consent
+# C012 draft - Profile, Questionnaire, Preferences and Consent
 
-**PROPOSED / PENDING REVIEW by Huong. C012 is not DONE or FROZEN.**
+**DRAFT / PENDING HUONG REVIEW. C012 is not DONE or FROZEN.**
 
-This is documentation for T02/C012 and future T04/C019-C024, not implemented
-DTO classes, routes or migrations. Auth behavior remains as documented in
-[API-CONTRACT.md](API-CONTRACT.md). The historical plan at
-`5deaf06:docs/COMMIT-PLAN.csv` requires agreement on response envelopes/types
-and a completed contract review. Every new shape/semantic choice below is a
-proposal until its decision ID is approved; examples are synthetic and do not
-establish product vocabulary, numeric limits or legal policy.
+**All unapproved concrete product/policy choices below are PROPOSED / PENDING
+HUONG APPROVAL.** Shorter "proposed" or "pending approval" labels have the same
+meaning; conditional acceptance of direction does not finalize those choices.
 
-## Existing constraints and proposed common rules
+Documentation only for T02/C012 and future C019-C024, not implemented DTOs,
+routes, seeds or migrations. [Auth contracts](API-CONTRACT.md) remain unchanged.
+Historical scope: `5deaf06:docs/COMMIT-PLAN.csv`, agree response envelopes/types
+with Huong and complete contract review.
 
-Existing scope requires own-member data, three versioned questionnaire answers,
-preferences, and five independently controlled consent purposes, all OFF by
-default. Existing Prisma models are storage foundations, not validated API DTOs.
-See [database mappings and gaps](DATABASE.md).
+Review basis: both rounds of Huong's feedback supplied for Draft PR #8.
+**Conditionally accepted** records the second-round conditions, not a completed
+PR approval or implementation. Product vocabulary, retention schedules, URL TTL
+and remaining mechanism details labeled **PROPOSED / PENDING APPROVAL** need
+explicit confirmation. Examples use synthetic data and unapproved policy IDs.
 
-**PROPOSED (D1-D4):** all routes below live under `/api`, return JSON resource
-objects on 200, and use the current cookie session. Success payloads do not
-alter auth's flat `AuthUser` or empty 204 responses. DTO notation uses `?` for
-omitted request keys and `| null` for an explicitly nullable value; its mutation
-semantics are proposed below, with nullable-collection behavior still pending.
-Response keys are
-present. Non-nullable collections (`answers`, `consents`) are arrays; the proposed
-`interests`, `values`, `dealBreakers` and `priorities` types allow `string[] | null`.
-The meaning of `null` versus `[]` for these nullable collections is **PENDING
-REVIEW (D2/D6/D8)**; examples illustrate possible shapes, not approved semantics.
-Instants use ISO-8601 UTC strings; a birth date uses a date-only string (mapping pending D5).
-Server owns IDs, timestamps, consent history and policy acceptance evidence.
+## Decision matrix
 
-**PROPOSED validation:** reject unknown/privileged fields, invalid types,
-invalid dates, duplicate keys/purposes and oversized collections/text. Do not
-silently coerce strings to booleans/numbers or discard invalid array items.
-Numeric limits, text lengths and permitted vocabulary remain pending D5-D8;
-they must be approved before accepting arbitrary JSON in feature DTOs. PATCH
-omission means unchanged. Clearing nullable scalar fields with explicit null is
-proposed; nullable-collection null/empty-array behavior remains pending review.
-Arrays replace the field as a unit, never implicitly append. Reject empty
-mutations rather than writing audit/update timestamps with no requested change.
-These are proposed feature rules, not claims about existing auth validators.
-
-| Route | Proposed request | Proposed 200 response |
+| ID | Accepted review direction | Proposed detail / outstanding approval |
 | --- | --- | --- |
-| GET `/profile/me` | No body | `{profile: ProfileReadDto \| null}` |
-| PATCH `/profile/me` | `ProfilePatchDto` | `{profile: ProfileReadDto}` |
-| GET `/questionnaire/me` | No body | `QuestionnaireReadDto` for the current supported version |
-| PUT `/questionnaire/me` | `QuestionnairePutDto` | Saved `QuestionnaireReadDto` |
-| GET `/preferences/me` | No body | `{preferences: PreferencesReadDto \| null}` |
-| PATCH `/preferences/me` | `PreferencesPatchDto` | `{preferences: PreferencesReadDto}` |
-| GET `/consents/me` | No body | `{consents: ConsentStateDto[]}` containing exactly five purposes |
-| PATCH `/consents/me` | `ConsentPatchDto` | `{consents: ConsentStateDto[]}` after atomic mutation |
+| D1 | Preserve auth; separate resource wrappers; HTTP 400; dot/index paths; whole-request errors at _form; visible cross-field errors. | Proposed UI placement/unknown-path fallback below; exact new feature codes remain reviewable. Existing auth formatter is unchanged. |
+| D2 | GET never provisions; absent resources return null/empty/OFF; omission unchanged, null clears nullable values, [] empty; API null writes database NULL and reads SQL/JSON null as API null. | Legacy malformed data fails safely and cannot block withdrawal. Exact legacy error/remediation and first-write policy still proposed. |
+| D3 | Active verified MEMBER, own data, session-derived user ID; staff do not bypass. | No staff access expansion proposed. |
+| D4 | Previous MVP thresholds provisionally acceptable only with independent withdrawal capacity; 429 includes Retry-After and is never withdrawal success. | Separate revoke/member and revoke/IP quotas, mixed-batch separation and gateway reservation below need confirmation; no grant/profile bucket may drain them. |
+| D5 | Optional draft birthDate; UTC-midnight/date-only storage, UTC age, minimum 18, Feb 29 observed March 1; no matching without birthDate; declaredAdult not verified age. | Do not reinterpret legacy timestamps. Exact remediation and interaction with proposed MVP eligibility ceiling remain review items. |
+| D6 | displayName on User; occupation/city max 120 code points, bio max 2000; NFC/outer trim/newlines, whitespace-only rejected, internal bio newlines preserved. | Product catalogs/list caps in section A still await explicit approval. |
+| D7 | Version 1; response length 1-2000; stable catalog order; all three answers atomic; retired versions read-only. | Exact keys/prompts, retired-version read selector and catalog evolution in section A need approval; no PENDING_KEY_* product IDs. |
+| D8 | Selectable ages 18-120; null bounds unrestricted on that side within MVP eligibility; different goals hard-filter only if explicitly selected; validate merged state. | Exact catalog, priority comparison/defaults and proposed MVP eligibility ceiling in section A await approval. |
+| D9 | Server policy registry; valid policy for grants, no new policy for revoke; state/event one transaction; reaffirmation distinct from state change. | Event/storage details and idempotency retention proposed; data-retention policy in section B is NOT approved. |
+| D10 | Block new API-authorized access/matching contributions before success; async cleanup has retry/owner; issued-URL limitations explicit. | Proposed retention in B and 60-second URL TTL/enforcement in C await approval; outstanding bearer URLs are a stated residual risk. |
+| D11 | Aggregate version, virtual 0, CAS, explicit OFF advances version; idempotency cannot duplicate events/versions; conflicts require user action, no automatic grant retry. | Idempotency-Key format/replay/24-hour deduplication window and detailed storage/recovery below need approval. |
 
-GET returns 200 with null/empty/off defaults for data not yet created, without
-creating records or implying consent. First profile/preferences PATCH proposes
-an upsert with unchanged nullable fields initially null and visibility false;
-GET must not expose another member's data. This lazy-creation/default behavior
-is pending D2, not a requirement inferred from nullable schema columns.
+D4/D6/D7/D8/D11 are **not fully approved** merely because their directions are
+conditionally accepted. Record reviewer, decision/date and reference for the
+remaining values and mechanisms. Product/privacy/legal review of section B is
+required; no retention duration below is described as legally mandated.
 
-## Ownership, session and mutation authorization
+## Common contracts and ownership
 
-Existing auth exports `SessionAuthGuard`, `RolesGuard` and server-side
-`CurrentUser`. **PROPOSED (D3):** compose them with explicit MEMBER roles and
-resource ownership for all four resources. Derive userId from current context,
-never from a body/query/URL override. Reject `userId`, role, email, account
-status, verification flags and server timestamps in feature mutations. Do not
-grant staff cross-member access through `/me`; any such workflow needs separate
-scope and review. Require an active, verified session on every request.
+Existing scope requires own-member data, three versioned questionnaire answers
+and five separate consent purposes OFF by default. Models are storage, not DTOs.
+[Database mapping/gaps](DATABASE.md) distinguish existing fields from proposals.
 
-**PROPOSED (D4):** cookie-authenticated PATCH/PUT require the configured exact
-Origin and JSON, as auth POSTs do. Reuse the security policy, not blindly
-`AuthRequestGuard`: it combines auth-action naming and auth-specific limiter
-buckets. Agree feature throttling/guard composition with Huong before code.
-Do not disable Origin checks, trust proxy headers, create a second session
-provider/client, or add tokens to browser storage. Server authorization must
-precede fetching private data; client presentation is not an access boundary.
+| Route under /api | Request | Candidate 200 resource wrapper |
+| --- | --- | --- |
+| GET /profile/me | No body | {profile: ProfileReadDto or null} |
+| PATCH /profile/me | ProfilePatchDto | {profile: ProfileReadDto} |
+| GET /questionnaire/me | No body | {questionnaire: QuestionnaireReadDto} |
+| PUT /questionnaire/me | QuestionnairePutDto | {questionnaire: QuestionnaireReadDto} |
+| GET /preferences/me | No body | {preferences: PreferencesReadDto or null} |
+| PATCH /preferences/me | PreferencesPatchDto | {preferences: PreferencesReadDto} |
+| GET /consents/me | No body | ConsentReadDto |
+| PATCH /consents/me | ConsentPatchDto | ConsentReadDto |
 
-## Nullable JSON storage mapping — PENDING REVIEW (D2/D6/D8)
+The questionnaire wrapper refines the earlier unwrapped example; consent version
+fields follow D11's conditional direction. These are future resource contracts,
+not deployed routes or changes to auth response shapes.
 
-The four nullable collection fields are stored in Prisma `Json?` columns.
-Database NULL and a stored JSON null are distinct storage values and may have
-different domain meanings. This draft does not decide whether either maps to
-API `null`, whether they are normalized together, or what an explicit PATCH
-`null` or `[]` should persist. Approve the read/write mapping and treatment of
-existing rows with Huong before implementation. No conversion, defaulting or
-migration rule is implied by the DTO notation or synthetic examples. See
-[database review gaps](DATABASE.md).
+**Accepted D2/D3:** absent profile/preferences return null, absent answers an
+empty array and absent consent purposes OFF, without DB writes. GET must not
+create profile, consent, audit or version rows. PATCH omission is unchanged;
+[] means empty collection. Non-nullable answers/consents are arrays; interests,
+values, dealBreakers and priorities use string[] or null.
+Null clears only nullable values, writes database NULL and projects either
+database NULL or stored JSON null back as API null. Malformed legacy profile
+or preferences must never be read/validated as a prerequisite for withdrawal.
 
-## Profile DTOs — PROPOSED (D2, D5, D6)
+**Proposed details:** reject unknown/privileged fields, empty mutations,
+duplicate keys/purposes, invalid types and out-of-bound values. Arrays replace
+whole fields. No string-to-boolean/number coercion. First profile/preferences
+PATCH may upsert with other nullable fields unset and visibility false; no
+registration provisioning is implied. Server owns identity/timestamps; response
+instants use ISO-8601 UTC. No wrapper changes to current auth responses.
+
+Require current active verified MEMBER on every request, with explicit role and
+ownership checks using existing session context. Derive userId from the server,
+not browser body/query/URL. Reject userId, role, email, status, verification and
+timestamp injection. Staff role does not confer access through these /me routes.
+Keep one AuthProvider/client and server authorization before private data reads.
+displayName remains on User/AuthUser and is excluded from profile writes;
+any future account-name edit needs a separate approved contract/auth refresh.
+
+### Nested field errors - D1 conditional direction and UI placement
+
+New DTO failures use HTTP 400 and the existing VALIDATION_FAILED envelope.
+Use dot-separated property names, zero-based decimal array indices,
+no brackets or leading dot; e.g. consents.0.policyVersion. Paths use known DTO
+keys. Attach cross-field errors to a documented field, e.g. maxAge for an
+inverted range; whole-request errors use field _form, not empty details.
+**Proposed visible placement:** show maxAge error beside maxAge and in the form
+summary linked to it; show a multi-field consent error at _form and beside the
+consent group. Show _form at a focusable visible summary, never a hidden control.
+Unknown valid-looking paths fall back to that summary. Clients validate paths/
+details and never depend on exact message text or render it as HTML.
+
+```json
+{
+  "code": "VALIDATION_FAILED",
+  "message": "Check the submitted fields.",
+  "details": [
+    { "field": "consents.0.policyVersion", "messages": ["A current policy version is required to grant this purpose."] },
+    { "field": "_form", "messages": ["Review the consent choices before submitting."] }
+  ]
+}
+```
+
+This is proposed feature output, not today's auth formatter behavior. Auth
+currently produces top-level field names. Any future nested formatter/form
+integration needs tests and must preserve existing auth behavior.
+
+## Feature security and independent withdrawal quotas - D4 provisional
+
+Reuse exact configured Origin and application/json policy for PATCH/PUT.
+Do not copy auth-specific action buckets. Current AuthRequestGuard uses
+15-minute windows: register 20/IP, resend 10/IP, other auth actions 60/IP,
+plus login 10/normalized identity; its bounded map allows 10000 entries.
+Thresholds are hardcoded, not existing feature environment settings.
+Proxy trust stays disabled; use socket-derived IP, never untrusted forwarding.
+
+| Proposed feature bucket | Candidate limit/window | Key |
+| --- | --- | --- |
+| All four GET routes | 120 / 60 seconds | authenticated member ID, shared read bucket |
+| Profile PATCH | 20 / 60 seconds | member ID + profile mutation |
+| Preferences PATCH | 20 / 60 seconds | member ID + preferences mutation |
+| Questionnaire PUT | 10 / 60 seconds | member ID + questionnaire mutation |
+| Consent grants/re-consent | 60 / 60 seconds | member ID + consent-grant mutation |
+| Non-withdrawal feature ceiling | 600 / 60 seconds | socket IP, excluding revocation-only requests |
+| Revocation-only PATCH | Proposed 60 / 60 seconds, independent reserve | member ID + consent-revoke bucket |
+| Withdrawal IP ceiling | Proposed 600 / 60 seconds, independent reserve | socket IP + consent-revoke bucket |
+
+Original MVP thresholds are provisionally accepted, not production guarantees.
+The two separate reserve values are **PROPOSED / PENDING APPROVAL**. A valid
+revocation-only batch contains only granted=false entries (including already-OFF).
+It bypasses grant/profile/read/general-feature counters, uses its own member/IP
+quotas and still requires session/MEMBER/Origin/JSON checks. A grant never uses
+the withdrawal reserve. Proposed mixed grant/revoke batches fail 400 at _form;
+UI submits withdrawal separately, without automatically retrying either action.
+Confirm this classification and gateway-level reserved capacity before release;
+an upstream shared limiter must not defeat the separation. Shared proxy IPs can
+still share the dedicated IP quota, so verify realistic withdrawal load.
+
+429 always includes Retry-After for both lanes and this rejected attempt changes
+no state/version/success event. It must never be presented as withdrawal success;
+reconcile any earlier ambiguous attempt separately rather than inferring its
+outcome from a later 429. Bounded counters, guard
+order and restart/multi-process behavior need confirmation. Do not enable proxy
+trust or add Redis as part of this draft; no limiter implementation is changed.
+
+## JSON null and legacy rows - D2 conditional mapping
+
+Database NULL and JSON null differ in storage. Accepted mapping is API null as
+cleared/unset, distinct from [] as explicitly empty; apply this future contract:
+
+| Input/storage | Conditional mapping / safe legacy direction |
+| --- | --- |
+| PATCH key omitted | Leave stored value unchanged |
+| PATCH null | Write database NULL, not JSON null; use Prisma database-null handling when needed |
+| PATCH [] | Store JSON empty array |
+| Valid nonempty array | Store approved normalized array |
+| GET database NULL or JSON null | Return API null without backfill |
+| Legacy valid array | Return only if valid under approved read/catalog rules |
+| Legacy object/scalar/invalid array | Never silently coerce, filter, erase or rewrite |
+
+**Legacy proposal:** return sanitized 503 DATA_SHAPE_UNAVAILABLE on incompatible
+authorized reads rather than silently returning empty data. Preserve the row.
+Allow replacement only through an explicit valid member write. An unrelated
+PATCH must not silently normalize legacy JSON null or invalid fields. Whether
+an invalid untouched field blocks a profile/preferences write still needs approval.
+It cannot block consent withdrawal: that transaction loads only auth, consent,
+revision/idempotency/audit dependencies, not profile/preferences/questionnaire
+projections or catalogs. Cleanup projection failures are retried after access
+has been removed, never used to reject otherwise-valid withdrawal.
+Any bulk cleanup/backfill requires a separate reviewed plan, never a GET-side
+write. Neither conversion nor migration is authorized by this document.
+
+## A. Product catalog and questionnaire - vocabulary PENDING APPROVAL
+
+All vocabulary/compatibility/ranking choices in this section are concrete
+proposals for explicit Huong/product approval, not requirements found in code.
+The conditional numeric/date/normalization directions are labeled separately.
+
+### Profile DTOs, validation and candidate catalogs
 
 ```ts
 type ProfilePatchDto = {
-  birthDate?: string | null; // proposed YYYY-MM-DD, owner-only
+  birthDate?: string | null;
   occupation?: string | null;
   city?: string | null;
   bio?: string | null;
@@ -113,28 +208,45 @@ type ProfileReadDto = {
 };
 ```
 
-String-array interests/values narrow existing unconstrained Prisma JSON; this
-is a proposed API shape, not established vocabulary. Text trimming, blank-text
-handling, lengths, list deduplication/case handling and allowed goal values
-need D6 approval. Proposed validation rejects malformed/future birth dates;
-the exact adult boundary, time-zone calculation, requiredness and exposure of
-date versus derived age require D5 approval. Never describe declaredAdult as
-verified age. `visibilityEnabled` is non-null, explicitly set by the owner,
-defaults false and does not grant any consent or bypass matching consent.
+**Conditionally accepted D6 normalization:** free text NFC, trim surrounding whitespace, normalize
+CRLF/CR to LF, preserve internal whitespace. Reject blank strings; explicit null
+clears nullable scalar text. Count Unicode code points after normalization.
+Catalog IDs are exact case-sensitive ASCII; reject unknown/duplicate IDs rather
+than guessing aliases. Lists preserve supplied order except catalog-ordered
+questionnaire responses. None of this changes auth normalization.
 
-`displayName` belongs to `User`/`AuthUser`, not `Profile`. This draft excludes
-it from profile writes pending D6; do not silently update it or create a second
-display-name field. Any approved mutation later must define auth-context refresh.
+| Field | Conditional validation / candidate catalog |
+| --- | --- |
+| occupation / city | Accepted max 120 Unicode code points each; non-null whitespace-only text rejected |
+| bio | Accepted max 2000 Unicode code points, reject whitespace-only; preserve internal newlines |
+| relationshipGoal | Proposed: long-term (seeking a long-term relationship), exploring (exploring relationship intentions); null unset |
+| interests | Proposed max 7 distinct IDs: reading, music, cooking, outdoors, sport, travel, creative-arts |
+| values | Proposed max 7 distinct IDs: kindness, honesty, communication, family, independence, personal-growth, community |
+| visibilityEnabled | Non-null boolean, default false; never grants consent |
 
-Synthetic PATCH and response excerpt (proposed field values, not vocabulary):
+Goal IDs overlap UI preview examples, but are not approved product vocabulary.
+Catalogs and list caps remain proposals. Accepted text lengths do not approve
+the catalog values or future matching use of them.
+
+**Accepted D5:** birthDate may be absent while saving an incomplete draft.
+**Conditionally accepted D5 algorithm:** real Gregorian YYYY-MM-DD on the wire; store UTC
+midnight in existing DateTime and serialize UTC date components. Use server UTC
+calendar date, subtract birth year and subtract one if birthday has not occurred.
+For February 29 in a non-leap year, birthday is March 1. Reject future dates and
+supplied dates yielding age under 18. The MVP upper eligibility proposal below
+is still pending, not a universal upper birth-age rule. Ambiguous legacy
+timestamps need review, not silent timezone conversion.
+
+**Conditional matching direction:** missing/invalid/ambiguous age excludes the member on
+both sides until corrected; draft saving/owner access remain available. Never
+infer age from declaredAdult, preferences, video or questionnaire. Other
+active/verified, consent, visibility, block and reciprocal gates still apply.
+A birth date is self-reported; declaredAdult is not verified age or identity.
+
+Synthetic PATCH and response using candidate vocabulary:
 
 ```json
-{
-  "occupation": "Synthetic occupation",
-  "bio": "Synthetic profile text for contract review.",
-  "interests": ["sample-interest"],
-  "visibilityEnabled": false
-}
+{ "occupation": "Synthetic occupation", "interests": ["reading"], "visibilityEnabled": false }
 ```
 
 ```json
@@ -143,9 +255,9 @@ Synthetic PATCH and response excerpt (proposed field values, not vocabulary):
     "birthDate": null,
     "occupation": "Synthetic occupation",
     "city": null,
-    "bio": "Synthetic profile text for contract review.",
+    "bio": null,
     "relationshipGoal": null,
-    "interests": ["sample-interest"],
+    "interests": ["reading"],
     "values": null,
     "visibilityEnabled": false,
     "updatedAt": "2026-11-15T00:00:00.000Z"
@@ -153,7 +265,21 @@ Synthetic PATCH and response excerpt (proposed field values, not vocabulary):
 }
 ```
 
-## Questionnaire DTOs — PROPOSED (D7)
+### Questionnaire - exact vocabulary PENDING APPROVAL
+
+The plan establishes three answers, not their keys/prompts. **Conditionally
+accepted initial questionnaireVersion: 1**, with exactly three proposed entries:
+
+| Order | Proposed key | Proposed English prompt |
+| --- | --- | --- |
+| 1 | relationship-intention | What are you hoping to build in a relationship? |
+| 2 | everyday-life | What does a good ordinary day look like for you? |
+| 3 | values-and-boundaries | Which values and boundaries matter most to you in a relationship? |
+
+Conditionally accepted responseText length: 1-2000 characters; propose the same
+Unicode-code-point measurement/normalization as profile text. Blank is invalid.
+The keys/prompts still require explicit approval; do not seed them yet.
+PENDING_KEY_* from earlier examples are never product keys.
 
 ```ts
 type QuestionnairePutDto = {
@@ -166,35 +292,35 @@ type QuestionnaireReadDto = {
 };
 ```
 
-The plan requires three versioned answers; the actual keys/prompts, supported
-version and answer lengths are not defined. Proposed PUT submits all three
-distinct keys for one supported positive-integer version, validates all answers
-and writes atomically. Reject partial sets, duplicates, unknown keys/versions,
-blank answers and mixed versions. Omission is not deletion; draft/partial-save
-behavior would need an explicit alternative contract. Proposed GET before any
-save returns that version with `answers: []`; reads do not fabricate answers.
-Return stable catalog order, round-trip the approved normalized text, and retain
-other versions rather than overwriting them. Version retirement/conflict status
-and concurrency still require D7/D11.
-
-Illustrative PUT only: the following placeholder keys/version are **not** an
-approved questionnaire and must not be seeded as product data.
+**Accepted direction:** all three distinct answers for one supported version
+must validate and save in one transaction. Reject partial sets, unknown/
+duplicate keys, blank answers or mixed/unsupported versions. No partial success
+or implicit deletion. **Proposed GET:** wrapper questionnaire with current
+version and answers: [] before any save; saved answers in catalog order with
+server updatedAt and normalized text. Retain older-version rows; expose current
+version by default. Retired versions are read-only, not rewritten as version 1.
+Proposed read selector: GET /questionnaire/me?questionnaireVersion=<integer>
+returns that known current/retired catalog and only the caller's saved answers;
+unknown versions fail 400, PUT to a retired version fails 409
+QUESTIONNAIRE_VERSION_RETIRED with a visible _form error. Saved answers remain
+readable until their separately approved retention expiry. Stable catalog order
+is accepted; exact selector/status and concurrent-edit rules remain proposals.
+questionnaireVersion is a catalog version, not a write-conflict token.
 
 ```json
 {
   "questionnaireVersion": 1,
   "answers": [
-    { "questionKey": "PENDING_KEY_1", "responseText": "Synthetic answer one." },
-    { "questionKey": "PENDING_KEY_2", "responseText": "Synthetic answer two." },
-    { "questionKey": "PENDING_KEY_3", "responseText": "Synthetic answer three." }
+    { "questionKey": "relationship-intention", "responseText": "Synthetic intention." },
+    { "questionKey": "everyday-life", "responseText": "Synthetic routine." },
+    { "questionKey": "values-and-boundaries", "responseText": "Synthetic boundaries." }
   ]
 }
 ```
 
-Proposed response has the same version/answer texts and a server `updatedAt`
-for each answer; it never returns another user's answers or internal user IDs.
+Success wraps these saved fields in questionnaire, adding per-answer updatedAt.
 
-## Preferences DTOs — PROPOSED (D8)
+### Preferences, compatibility and priority ordering - catalog PENDING APPROVAL
 
 ```ts
 type PreferencesPatchDto = {
@@ -214,37 +340,90 @@ type PreferencesReadDto = {
 };
 ```
 
-The arrays are provisional identifiers, not unrestricted JSON, arbitrary
-executable filters or approved matching weights. Confirm their catalog,
-ordering/weight semantics and limits with Huong/product ownership. Proposed
-age validation accepts only integers in an approved adult range and requires
-minAge <= maxAge when both exist. Evaluate the merged persisted + PATCH values,
-not just submitted fields; reject the whole request on an invalid combination.
-Meaning of one-sided/null ranges and goal compatibility remains pending D8.
+**Conditionally accepted bounds:** selectable non-null ages are integers 18-120.
+Null bounds are unrestricted on that side within approved MVP eligibility.
+**Proposed MVP eligibility: known self-reported age 18-120 inclusive** on both
+sides, independent of whether either preference bound is null. This upper
+eligibility cutoff is a new product proposal, not a fact about human age or
+approval implied by selectable bounds. Confirm it explicitly. Unknown age
+remains ineligible. Validate merged persisted + PATCH values, including
+minAge <= maxAge when both exist, and write the whole change atomically.
 
-Synthetic PATCH example (the ages are examples, not proposed global limits):
+relationshipGoal uses the proposed profile catalog; null means no goal target.
+Different goals are NOT a hard exclusion by default, including when a goal
+preference is set. Proposed dealBreakers catalog contains only
+different-relationship-goal (max 1 distinct ID). Only when explicitly selected,
+require both members' non-null profile goals to be equal; missing goals then
+fail this selected condition. The member's desired relationshipGoal remains a
+soft ranking target and does not silently enable that hard filter. Under this
+candidate catalog, long-term and exploring are compatible without the selected
+filter, equal-only with it. No inferred traits or executable user filters.
+
+Proposed priorities: max 3 distinct IDs from relationship-goal, values, interests.
+Use descending lexicographic criterion order, not unspecified weights: compare
+the first criterion, then the next only on equality. Candidate criterion values:
+relationship-goal is 1 for a known exact match to the member's non-null target,
+otherwise 0; values/interests are Jaccard overlap of approved self-reported
+catalog-ID sets (intersection/union), 0 when missing or the union is empty.
+These are heuristic preference measures, never romantic-success probabilities.
+[] applies no optional ranking criteria; proposed null default order is
+relationship-goal, values, interests. Break final ties deterministically using
+an opaque recommendation key, not sensitive fields. Apply reciprocal hard
+eligibility first; this directional ranking does not finalize T14's reciprocal
+aggregation. All ordering/default/formula/catalog choices are PENDING APPROVAL
+and need Phuc/Huong matching review. They never override a hard constraint.
+Handling of legacy invalid ranges must be agreed, never silently repaired.
+
+### Catalog compatibility and versioning - PROPOSED / PENDING APPROVAL
+
+Propose a server-owned catalog revision named profile-catalog-v1 for the above
+goal/interest/value/dealbreaker/priority IDs. It is not a policy version, auth
+role or consent version. No approved registry or stored catalog revision exists
+today. IDs are exact, unique and case-sensitive; reject aliases, duplicates and
+unknown IDs. Prompts/labels may later be localized without changing meanings.
+Do not reuse an ID for changed meaning. Append new approved IDs in a new catalog
+revision; retired IDs remain readable under their original meaning but are not
+accepted in new writes. Legacy unsupported IDs follow safe legacy handling,
+not silent remapping. Review whether persisted catalog provenance needs new
+storage before C019-C024; do not add schema here.
+
+Questionnaire keys are scoped by questionnaireVersion; any prompt/meaning
+change creates a new approved version, preserving the old catalog/order.
+Version 1 has exactly the three candidate prompts above. Retired versions are
+read-only until retention expiry, and no automatic answer migration is implied.
 
 ```json
-{ "minAge": 25, "maxAge": 40, "dealBreakers": [], "priorities": null }
+{
+  "minAge": 25,
+  "maxAge": null,
+  "relationshipGoal": "long-term",
+  "dealBreakers": ["different-relationship-goal"],
+  "priorities": ["values", "interests"]
+}
 ```
 
-The proposed response wraps the complete merged values in `preferences`, with
-`relationshipGoal: null` if unset and a server `updatedAt`. Saving preferences
-does not activate profile visibility or matching consent.
+Response wraps the complete merged state in preferences with server updatedAt.
+Saving preferences never grants consent or activates visibility.
 
-## Consent DTOs and audit — PROPOSED (D9-D11)
+## Consent and immutable audit - D9/D10
 
-These five purpose identifiers already exist in Prisma:
+Proposed request header for consent mutations: Idempotency-Key, as specified in
+D11 below. This is a new feature contract, not an existing auth requirement.
+
+The existing purpose enum contains PROFILE_MATCHING, VIDEO_STORAGE,
+EXPERT_VIDEO_REVIEW, REPORT_SHARING, VIDEO_CLAIM_MATCHING. Each is independent,
+OFF by default; no auto-grant or bypass of claim QA/owner sharing.
 
 ```ts
 type ConsentPurpose =
   | "PROFILE_MATCHING" | "VIDEO_STORAGE" | "EXPERT_VIDEO_REVIEW"
   | "REPORT_SHARING" | "VIDEO_CLAIM_MATCHING";
 type ConsentPatchDto = {
+  expectedVersion: number; // proposed, not currently persisted
   consents: {
     purpose: ConsentPurpose;
     granted: boolean;
-    policyVersion?: string; // proposed required on grant; revoke must remain possible
+    policyVersion?: string; // grant requires current policy; revoke does not
   }[];
 };
 type ConsentStateDto = {
@@ -255,25 +434,53 @@ type ConsentStateDto = {
   policyVersion: string | null;
   updatedAt: string | null;
 };
+type ConsentReadDto = {
+  version: number; // proposed per-member aggregate consent revision
+  consents: ConsentStateDto[];
+};
 ```
 
-`policyVersion` in these DTOs is a **schema gap**, not an existing persisted
-field. Server must verify approved policy identifiers, not accept arbitrary
-strings as evidence. Policy text/version ownership, re-consent, event storage,
-idempotency and withdrawal behavior require Huong's review before implementation.
+**Conditionally accepted direction:** server validates policy version on grant; revocation is
+not blocked by missing policy. Save current state and immutable events atomically.
+Existing schema cannot yet hold all that evidence; no migration is made here.
 
-Proposed GET always returns all five states in enum order. A missing DB row
-projects `granted:false` with all timestamps/policyVersion null, without writing
-records. PATCH contains a nonempty set of distinct purposes; omission leaves
-others unchanged. `granted` must be a JSON boolean, never null/string. Validate
-the entire request and atomically persist changes plus audit events; server
-assigns actor, user, purpose, effective time, old/new state and applicable policy
-evidence. Never trust client timestamps/actor IDs or log tokens/raw private text.
+**Conditional policy direction:** server-controlled per-purpose current-policy registry.
+Grant requires exact current supported ID; absent/unknown/stale ID returns 400
+at consents.<index>.policyVersion. Revoke can omit it and ignores a supplied
+well-typed policy ID for eligibility; invalid DTO types/purposes still fail.
+Confirm treatment of stale supplied IDs independently and registry ownership/
+rollout/re-consent. PENDING_POLICY_VERSION below is not an approved policy.
 
-Synthetic grant/revoke examples, both **PENDING REVIEW**:
+GET returns five states in enum order; missing rows project false and null
+timestamps/policy, no writes. Proposed initial aggregate version is virtual 0.
+Current policyVersion retains last accepted grant policy after revoke; no
+accepted grant yields null. Proposed grantedAt retains last grant, revokedAt
+records latest revoke and is cleared on a new grant. These details need approval.
+
+PATCH has a nonempty distinct-purpose set, literal booleans and expectedVersion.
+Server assigns actor/member, timestamps and next version. Within one transaction,
+validate policy/state, compare revision, update state/revision and append events.
+Proposed immutable evidence: event ID, member ID, session-derived actor ID,
+purpose, old/new granted state, applicable accepted policy (or prior/null on
+revoke), server time, operation kind and old/new aggregate version.
+Do not store passwords, tokens, raw media or private profile text in events.
+Dedicated event model versus AuditLog extension, retention and access require review.
+Distinguish event kinds: proposed STATE_CHANGED for boolean changes,
+OFF_REAFFIRMED for explicit false when already false, GRANT_REAFFIRMED for an
+unchanged grant/policy, and POLICY_RECONSENT when true remains true but accepted
+policy changes. Reaffirmation must not be mislabeled as a state change.
+Exact event vocabulary remains proposed. Events are immutable while retained;
+approved expiry/deletion is a privileged retention action, not event editing.
+
+**New proposal replacing prior no-op rule:** every accepted consent mutation,
+including explicitly reaffirming already-OFF, consumes a version and records an
+event. OFF reaffirmation forms a barrier against stale grants. A repeated old
+request fails its version check rather than generating duplicate success events.
+Reaffirmation/event semantics remain PENDING APPROVAL under D9/D11.
 
 ```json
 {
+  "expectedVersion": 0,
   "consents": [
     { "purpose": "PROFILE_MATCHING", "granted": true, "policyVersion": "PENDING_POLICY_VERSION" }
   ]
@@ -281,15 +488,18 @@ Synthetic grant/revoke examples, both **PENDING REVIEW**:
 ```
 
 ```json
-{ "consents": [{ "purpose": "EXPERT_VIDEO_REVIEW", "granted": false }] }
+{
+  "expectedVersion": 1,
+  "consents": [{ "purpose": "PROFILE_MATCHING", "granted": false }]
+}
 ```
 
-The placeholder policy is not a valid accepted policy. A full proposed response
-contains five `ConsentStateDto` objects. One response item after revocation:
+After this illustrative grant/revoke, success would return aggregate version 2
+and five states; one example item is:
 
 ```json
 {
-  "purpose": "EXPERT_VIDEO_REVIEW",
+  "purpose": "PROFILE_MATCHING",
   "granted": false,
   "grantedAt": "2026-11-14T00:00:00.000Z",
   "revokedAt": "2026-11-15T00:00:00.000Z",
@@ -298,59 +508,268 @@ contains five `ConsentStateDto` objects. One response item after revocation:
 }
 ```
 
-Whether current state retains the previous accepted policy/grant timestamp,
-as illustrated, must be decided in D9; historical evidence must remain in the
-approved audit mechanism regardless. Do not infer audit history from these
-current-state timestamps alone. Proposed repeated no-op updates do not create
-duplicate transition events; decide separate request-attempt auditing explicitly.
+### Withdrawal guarantees
 
-Existing privacy requirements demand current-consent checks and timely loss of
-dependent access. Proposed withdrawal updates the authoritative consent before
-success is acknowledged; media/review/matching must deny newly unauthorized
-access even if asynchronous cleanup is pending. Do not promise instantaneous
-revocation of already-issued signed URLs without a supported mechanism. No
-purpose auto-grants another; approval/sharing of individual claims remains a
-separate gate. Decide how invalid purpose combinations, retention/deletion,
-assignment cancellation and revoked policy versions interact in D9/D10.
+**Accepted D10:** once revoke succeeds, block new unauthorized access and remove
+the affected contribution from matching. Read current authoritative consent;
+invalidate/exclude stale recommendation/explanation data. Physical deletion,
+assignment closure and retention cleanup may run asynchronously with tracked
+server-side retry, but failure must not restore access or issue new signed URLs.
 
-## Proposed error and concurrency behavior — PENDING REVIEW (D1, D11)
+Previously issued signed URLs may remain usable until expiry unless supported
+enforcement can revoke them. Do not promise instant byte erasure, revocation
+of downloaded copies or stronger URL invalidation than the system supports.
+Agree expiry/enforcement, in-flight operations and cleanup/retention duties
+before private-media release.
 
-| Status | Proposed feature meaning |
+## Optimistic concurrency and idempotency - D11 conditional design
+
+Use one persisted, monotonically increasing aggregate consent version per
+member, separate from updatedAt and questionnaireVersion. GET returns version
+and all states from a consistent snapshot; PATCH supplies a nonnegative safe integer
+expectedVersion. Server owns next version; no GET writes. Initial virtual 0
+is materialized only during the first mutation, uniquely per member.
+
+Transaction: recheck account/ownership, initialize revision safely if needed,
+compare-and-swap where stored version equals expectedVersion, update purposes,
+increment once and append immutable events. Any comparison/write/audit failure
+rolls back all changes. Purpose deletion/recreation cannot reset the aggregate
+revision in the account lifetime. Every accepted mutation, including already-OFF
+reaffirmation, advances the version, preventing that no-op from leaving a stale
+grant eligible.
+
+Proposed stale-write response is HTTP 409:
+```json
+{
+  "code": "VERSION_CONFLICT",
+  "message": "Consent changed. Reload before submitting again."
+}
+```
+
+Missing/invalid expectedVersion is 400. After a conflict, re-read and require a
+new explicit user action; never automatically replay grants with a new version.
+After network uncertainty, do not silently retry; a user-requested reconciliation
+may reuse the original idempotency key and identical payload as described below.
+Example: both tabs read version 4. Revoke (even reaffirming OFF) commits version 5.
+An older grant with expectedVersion 4 gets 409, changes nothing and adds no success
+event. A fresh explicit grant at latest version/current policy can still succeed.
+If the grant wins first, the stale revoke fails visibly and must be explicitly
+resubmitted after refresh; never claim unsuccessful withdrawal succeeded.
+
+This orders committed operations, not wall-clock age of unsent intentions.
+Revision storage, lifetime, events and recovery need explicit approval before
+C023. Current schema/code do not provide this safety. Concurrency for edits to
+profile/preferences/questionnaire remains separately pending; this token does
+not protect those resources.
+
+### Idempotency-Key proposal - exact details PENDING APPROVAL
+
+Require Idempotency-Key on each consent PATCH. Proposed format: 16-128 ASCII
+letters/digits/hyphen/underscore, with a fresh cryptographically random client
+key per explicit operation. Scope uniqueness by member + consent resource + key,
+not by tab or IP. Hash a canonical payload fingerprint including expectedVersion,
+purpose set, granted values and submitted policy IDs; no tokens or profile text.
+
+In the same transaction as CAS/state/events, insert an idempotency result record
+with unique scoped key, fingerprint, operation version and response snapshot.
+Concurrent identical requests must serialize on that uniqueness: exactly one
+commits a version/event set. Matching-key/matching-payload replays return the
+original committed result with proposed Idempotency-Replayed: true, without
+revalidating a grant into a new operation or incrementing anything. Authorize the
+current account/session on every replay; deletion/suspension cannot be bypassed.
+Same key with a different payload returns 409 IDEMPOTENCY_KEY_REUSED at _form,
+with no mutation. Uncommitted transaction failure must not leave a success record.
+
+Propose result retention of 24 hours after commit (section B), not permanent
+key storage. After expiry, an old request's expectedVersion is still stale:
+CAS must reject it rather than create duplicate events/versions. Do not reset
+aggregate versions when idempotency records expire. A replay confirms the
+historical result, not the current consent state if a newer operation exists;
+the UI re-reads current state before claiming present access/consent. A new
+action after 409 uses refreshed state and a new key, never an automatic grant.
+Confirm canonicalization, storage/retention, replay headers and conflict UI.
+
+## B. Data retention and deletion - PROPOSED / PENDING POLICY APPROVAL
+
+**None of these periods is a legal requirement or an approved production policy.**
+They are concrete review candidates and operational targets, not an erasure SLA
+already implemented. Huong/product/privacy/legal reviewers must approve purpose,
+jurisdiction, retention notice, user rights, exceptions and backup constraints
+before real data use. Current cascading FKs are not a retention implementation.
+
+Authorization removal is synchronous and independent of physical deletion.
+Withdrawing one purpose disables that use; it does not automatically delete all
+profile data authorized for another purpose or grant another consent. Explicit
+data/account deletion is a separate trigger. No indefinite legal hold by default:
+an exceptional hold needs authorized scope/reason/expiry/access review and cannot
+restore matching or media privileges. Its lawful basis is unresolved.
+
+| Data category | Proposed active retention / deletion trigger | Immediate authorization effect | Proposed physical deletion target / owner |
+| --- | --- | --- | --- |
+| Profile | Current owner data while account active; field clear or account deletion triggers removal | Clear removes active value synchronously; matching consent withdrawal removes matching use, not unrelated owner access | Active cleared value removed in its write; full profile within 7 days of account deletion. Phuc owns domain cleanup; Huong coordinates account workflow |
+| Preferences | Current configuration while active; clear/account deletion | Stop affected matching use immediately; no stale recommendation/explanation serving | Cleared active fields in write; full row within 7 days of account deletion. Phuc |
+| Questionnaire | Current version while active; retired saved versions up to 90 days after retirement; explicit answer/account deletion | Deleted/expired answers not readable or matchable; retired versions read-only before expiry | Within 7 days of deletion request, account deletion or 90-day expiry. Phuc; no automatic answer migration |
+| Consent current state/revision | Keep while account exists, including OFF state/version to prevent stale grants; account deletion starts purge | Revoke applies before success; account deletion denies all sessions/access immediately | Purge within 7 days of account deletion after required audit/cleanup evidence is safely captured. Phuc + Huong; never reset active-account version |
+| Immutable consent audit | Proposed 365 days after each event solely for approved accountability purpose | Restricted audited access only; never input to matching or general member/staff browsing | Expire through privileged policy-controlled purge, not edits; account deletion de-links identifying fields where approved without inventing missing evidence. Huong privacy owner + Phuc event storage; final retention/pseudonymization unresolved |
+| Video metadata | While object exists/authorized workflow active; VIDEO_STORAGE withdrawal, video delete or account delete triggers removal | Deny new issuance/access first; cancel/close dependent work | Purge within 7 days of trigger, after object-deletion verification; retain only necessary cleanup locator until confirmed. Huong, coordinated with Phuc assignment/review ownership |
+| Video object files and versions | While VIDEO_STORAGE remains granted and owner has not deleted; storage withdrawal/delete/account delete triggers purge | Block new API-authorized access/URLs immediately; existing capability limitation in section C | Proposed within 24 hours of trigger for originals, derived copies, object versions and abandoned multipart data. Huong storage owner; verify provider behavior |
+| Expert reviews/observations/claims | While authorized private review/report purposes remain; source storage withdrawal/video/account deletion triggers review-data purge proposal | Review-consent withdrawal blocks new expert work; report/share/matching withdrawals independently remove only the affected use immediately | Proposed purge raw review/observations/claims within 7 days of source-video/storage/account deletion. Review-only withdrawal closes work without automatically deleting separately authorized owner report; retained-report scope still needs approval. Phuc + Huong privacy |
+| Account/User and auth records | Owner deletion request starts workflow, not an unapproved reversible grace period | Set account unavailable, revoke sessions, deny future access and matching immediately | Proposed hard deletion of User/email/password/token/session records within 7 days, coordinating cascades, objects and audit de-linking. Huong; never recreate a deleted account from stale cookies |
+| Consent idempotency records | Proposed 24 hours after committed result; only minimal consent snapshot/fingerprint, no credentials | Replay always checks current authorization; cannot create events/versions | Delete after 24 hours; aggregate revision remains. Phuc with Huong privacy review |
+| Cleanup evidence | Minimum non-content job/status evidence until verification; proposed 30 days after verified completion | Operational access only; never used for matching | Remove locators after verification; purge minimized completion evidence after 30 days. Domain owner, coordinated by Huong |
+
+**Backup proposal:** encrypted restricted backups roll off within 35 days after
+a record/object was deleted from active storage; no normal-user access. Audit
+retention expiry may therefore leave a backup copy for up to 35 additional days.
+Keep a deletion/revocation suppression ledger until the last affected backup
+expires, so restore re-applies restrictions/deletions before serving traffic.
+That ledger's exact minimal fields and retention need approval; do not erase it
+early because a live row was purged. No "fully erased" claim until active data,
+object versions, replicas and applicable backups are verified gone or explicitly
+reported as pending. Confirm actual provider versioning/backup capabilities.
+
+### Cleanup ownership, retries, failure and verification
+
+**PROPOSED:** persist a durable cleanup task in the same transaction that records
+withdrawal/deletion obligations, alongside consent/audit where applicable. The
+existing schema has no such outbox/job model. Use deterministic job identity
+and idempotent deletion; never enqueue solely in volatile process memory.
+For a deletion job attempt immediately, then after 1 minute, 5 minutes, 30
+minutes, 2 hours, 6 hours and every 6 hours thereafter. Retry intervals and
+retention targets need approval, not a new queue dependency today.
+
+Raise a privacy-owner alert by 24 hours of unresolved object cleanup (or sooner
+on permission/configuration failure), and escalate any missed category deadline.
+Keep failed jobs actionable for manual repair; never restore consent, hide the
+failure or discard the only locator needed to delete. Do not repeatedly log
+private URLs/content or copy data into error reports. A cleanup failure must
+not turn successful authorization withdrawal into restored access.
+
+Huong owns account/privacy/storage coordination; Phuc owns profile/questionnaire/
+preference and review/assignment domain effects. Each job has a named owner and
+audited status. Verify database row removal, inaccessible/deleted object and all
+versions/derived copies, canceled work, excluded claims/matches and cache removal.
+Distinguish DELETE acknowledgement from verified deletion; verify retries,
+restart recovery, backup restore suppression and failure alerts with synthetic
+fixtures. Do not promise production deletion until all stores are inventoried.
+
+## C. Signed video URL security - PROPOSED / PENDING APPROVAL
+
+**Candidate TTL: 60 seconds from issuance**, with server-generated expiresAt;
+renewal needs a fresh authorized API request. This is a short proposed MVP
+playback-URL lifetime, not implemented or approved provider behavior. Upload URL
+TTL is separate and must not be silently inferred from this playback proposal.
+
+Before issuing each private GET/HEAD/range capability, validate the current
+session/account and server-derived requester identity, exact video/object scope,
+non-deleted playable video state (proposed READY or UNDER_REVIEW), current
+VIDEO_STORAGE consent and owner authorization. An expert additionally needs
+EXPERT role, approved eligibility/training, required staff MFA, active assignment
+to this video and current EXPERT_VIDEO_REVIEW consent. Re-check on renewal;
+role alone, old assignment or a cached consent flag is insufficient. Owner
+access does not require granting expert-review consent. No public ACL, permanent
+URL, list permission or caller-selected bucket/key is accepted.
+
+Synchronize issuance authorization with withdrawal using the approved consent/
+resource revision/locking boundary. No authorization for a new URL may be
+created after withdrawal commits. A capability issued before that commit may
+arrive at the client later; it remains a previously issued capability subject
+to the limits below, not a reason to mint replacements after withdrawal.
+Document/check in-flight playback, signing and object-deletion races explicitly.
+
+Propose API response fields url and expiresAt, with no public object-key metadata.
+Both issuance responses and private object responses must use private, no-store,
+max-age=0 cache policy, including signed response cache overrides when supported.
+No CDN/shared-cache/service-worker persistence, localStorage or database storage
+of signed URLs. URLs are bearer secrets: redact query strings from logs,
+analytics, error reports and referrers; no-referrer on the player. HTTPS and
+private-bucket access are release gates. Browser-buffered bytes cannot be erased
+by a cache header; the UI stops/clears revoked playback but is not enforcement.
+
+### Existing-capability limitations and invalidation candidates
+
+A direct signed URL already issued may remain usable until expiry unless storage
+supports effective revocation. Expiry usually controls acceptance of subsequent
+requests, not guaranteed termination of an already-authorized stream; range
+requests/renewals must be checked according to actual provider semantics. Do not
+promise single-use URLs, immediate stream termination or erasure of downloads.
+New API issuance and matching access are denied before revoke success; residual
+previously issued capability access must be disclosed and approved as a risk.
+
+Possible later invalidation designs, each requiring testing/provider review:
+
+- Delete the exact object and all accessible versions/derived copies when policy
+  requires deletion; do not assume a versioned delete marker revokes every URL.
+- Use a provider-supported deny/revocation control with verified propagation.
+- Use an authenticated streaming proxy/gateway that checks current consent on
+  each new/range request and can terminate streams, if stronger immediate control
+  is required. This changes infrastructure and is not implemented by this draft.
+
+Do not rotate shared credentials or replace object keys as a supposed per-user
+revocation guarantee without assessing provider semantics, other users and copies.
+After VIDEO_STORAGE withdrawal or owner deletion, schedule object purge under B;
+EXPERT_VIDEO_REVIEW withdrawal blocks expert renewal/access and closes its work,
+but does not itself erase independently authorized owner storage. Report/claim
+sharing withdrawal stops those uses without creating a video-deletion promise.
+Choose TTL, enforcement model and in-flight limits before release; fail closed
+if the provider cannot meet the approved access model.
+
+## Implementation ownership and scope boundary
+
+C012 changes only documentation. C019 checks existing profile/questionnaire
+relations; C020-C022 implement owner profile/answers/preferences after approval;
+C023 later implements consent state/policy/version/idempotency/audit and durable
+withdrawal handoff; C024 implements UI/errors/recovery. Phuc owns those features.
+Huong owns session/auth maintenance, private video URL/storage/deletion and
+account privacy operations. Phuc owns assignment/review/matching exclusions with
+Huong coordinating withdrawal. Retention workers, backup suppression, legal
+policy, staff MFA and stronger URL enforcement are shared later release work,
+not silently added deliverables or completed features of C019-C024.
+
+## Future feature errors
+
+| Status | Accepted direction / concrete proposal |
 | --- | --- |
-| 400 | DTO validation failure using existing `VALIDATION_FAILED` envelope; agree nested field paths before feature validators |
-| 401 / 403 | Reuse session/role status meanings; missing/foreign Origin denied, no automatic logout on 403 |
-| 415 | JSON content type required for mutations |
-| 409 | Only for an approved stale-write/version/policy conflict design; do not claim locking/version fields currently exist |
-| 429 | Agreed feature rate limits, optional Retry-After; no automatic mutation retries |
-| 503 | Sanitized transient dependency failure; show retry/revalidation, do not assume persistence or logout |
+| 400 | Accepted validation status; proposed nested paths and policy validation above |
+| 401 / 403 | Existing auth meanings; no staff bypass or blanket logout on 401/403 |
+| 415 | Reuse JSON mutation policy |
+| 409 | Proposed VERSION_CONFLICT for stale consent expectedVersion |
+| 429 | Proposed feature limits and Retry-After; no automatic retry |
+| 503 | Dependency failures; proposed DATA_SHAPE_UNAVAILABLE for incompatible legacy JSON |
 
-No feature-specific machine codes beyond existing conventions are finalized.
-No 404 for a caller's never-created resource is proposed here; D2 must decide
-whether to keep 200 defaults or use an explicit not-created response instead.
-Atomic multi-field writes are proposed, but updatedAt alone is not an optimistic
-lock. Decide last-write-wins versus version/ETag conflict handling, especially
-for simultaneous grant/revoke. Agree safe reconciliation/idempotency before
-retries; a transport error does not prove a mutation did not commit.
+No current auth code is changed. D1/D2/D4/D11 still require exact-format/value
+approval. A transport outage does not prove the write did not commit. Missing
+resource GET follows accepted defaults, not 404/provisioning.
 
-## Decision register — all PENDING REVIEW
+## Exact remaining questions for Huong
 
-| ID | Exact question for Huong's review |
-| --- | --- |
-| D1 | Preserve existing auth shapes/statuses and use these resource wrappers for new routes? Use 400 validation, and what nested field-path/error code convention is approved? |
-| D2 | Approve GET null/empty/off defaults without writes, lazy profile/preferences creation, PATCH omission/scalar clearing/array replacement, and rejection of empty mutations? What do null versus [] mean for nullable collections, and how should API null map to database NULL versus JSON null on reads/writes and existing rows? |
-| D3 | Restrict these `/me` routes to active verified MEMBER accounts with server-derived ownership, including denial to staff roles without separate scope? |
-| D4 | Which shared Origin/JSON guard composition and feature rate limits should protect PATCH/PUT without reusing auth-specific action buckets? |
-| D5 | Is birthDate optional, what adult/date/time-zone rule applies, and does owner response include date-only birthDate or another projection? |
-| D6 | Approve field lengths, goal/interest/value catalogs, array and text normalization, visibility/consent separation, and exclusion of User.displayName from profile writes? If name editing is needed, how does auth refresh? |
-| D7 | What are the three canonical question keys/prompts, initial version and answer limits; approve whole-version atomic PUT, empty GET and version retention/retirement behavior? |
-| D8 | What adult age bounds, null/one-sided-range meanings, goal catalog and dealBreakers/priorities shapes/order/limits are approved? |
-| D9 | Who owns policy text/version identifiers; require current policy on grant but allow withdrawal without it? What state/history is retained, where are audit events stored, and how are no-op requests handled? |
-| D10 | How must withdrawals affect video storage/review, signed access, assignments, claims/matching and retention/deletion; which synchronous guarantees can API success promise? |
-| D11 | Which stale-write/idempotency strategy prevents unsafe concurrent consent changes and defines 409 versus validation behavior? |
+1. D1/D2: Confirm the exact new wrappers, visible _form/cross-field fallback,
+   legacy 503 DATA_SHAPE_UNAVAILABLE/remediation, first-write defaults and empty
+   mutation rejection. Auth shapes/formatter remain unchanged.
+2. D4: Approve the dedicated withdrawal 60/member/minute and 600/socket-IP/minute
+   reserve, exclusion from general quotas, separate mixed-batch submissions,
+   gateway reservation, guard ordering and bounded counter behavior?
+3. D5/D8: Approve the additional proposed MVP matching eligibility ceiling of
+   120 and legacy timestamp/range remediation? Conditional date/age rules and
+   selected age bounds do not approve that new eligibility ceiling implicitly.
+4. A/D6-D8: Approve every exact catalog ID/label, max-7/max-1/max-3 list cap,
+   goal compatibility rule, lexicographic/Jaccard priority interpretation and
+   null-default order? Approve profile-catalog-v1 evolution/provenance rules?
+5. A/D7: Approve the three full question prompts/keys and Unicode-code-point
+   measurement, retired-version selector/status/retention and concurrent-edit
+   behavior? Version 1/atomicity/order/length direction is already conditional.
+6. D9/D11: Approve grant/revoke policy-registry handling, retained timestamps,
+   distinct event kinds, Idempotency-Key format/fingerprint/replay, 409 codes,
+   24-hour result retention and the later atomic revision/event/outbox design?
+7. B: Approve all candidate retention/deletion periods, triggers and category
+   ownership, backup suppression, audit de-linking/purge, legal exceptions and
+   member notices? Which privacy/legal approval governs them? No period is
+   represented as legally mandated or production-approved.
+8. B/D10: Approve cleanup retries (1m/5m/30m/2h/6h then every 6h), escalation and
+   verification targets, retained-report scope and deletion failure reporting?
+9. C/D10: Approve 60-second playback URL TTL, exact provider/cache/range semantics
+   and outstanding-capability risk, or require a stronger proxy/revocation model?
+   Who verifies storage versions, propagation and in-flight races before release?
 
-Huong reviews shared auth/privacy boundaries; Phuc owns feature DTO design.
-Product vocabulary, consent wording and retention choices may need additional
-product/privacy approval. No approval is inferred from this draft. Record
-reviewer, decision/date and reference for each item; any unresolved item remains
-PROPOSED / PENDING REVIEW. Only an actual completed contract review can satisfy
-C012's verification; it does not mark C019-C024 implemented.
+C012 remains DRAFT / PENDING HUONG REVIEW until outstanding approvals are recorded.
+This review direction and these proposals do not implement or complete C019-C024.
