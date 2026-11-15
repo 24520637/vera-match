@@ -1,6 +1,6 @@
 # Authentication, session management, and authorization specification
 
-**Implementation status:** T01 foundation and registration, SMTP activation, resend, login, session issuance/restoration, protected account routes and logout are implemented. See `EMAIL-AUTH-SESSIONS.md` for tested contracts and deployment limits. Password recovery and later account features remain planned.
+**Implementation status:** T01 foundation and registration, SMTP activation, resend, login, session issuance/restoration, protected account routes and logout are implemented. See `EMAIL-AUTH-SESSIONS.md` for tested contracts and deployment limits. Password recovery is implemented; see [Authentication recovery](AUTH-RECOVERY.md) for token replacement, tested failure cases and explicit production release gates. Later account features remain planned.
 
 ## 1. Account state and roles
 

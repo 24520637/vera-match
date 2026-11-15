@@ -160,6 +160,9 @@ export function LoginForm({ nextPath }: { nextPath: string }) {
           </Button>
         </FormActions>
       </Form>
+      <p className="small">
+        <Link href="/forgot-password">Forgot password?</Link>
+      </p>
       <p className="small muted">
         Not activated yet?{" "}
         <Link href="/resend-verification">Request an activation email</Link>.

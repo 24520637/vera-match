@@ -22,7 +22,7 @@ describe("typed environment", () => {
     expect(config.smtp.port).toBe(1025);
     expect(new URL(config.databaseUrl).port).toBe("5433");
   });
-  it.each(["API_PORT", "SMTP_PORT", "SESSION_TTL_SECONDS"])(
+  it.each(["API_PORT", "SMTP_PORT", "SESSION_TTL_SECONDS", "PASSWORD_RESET_TTL_SECONDS", "PASSWORD_RESET_COOLDOWN_SECONDS"])(
     "rejects malformed %s",
     (key) => {
       for (const value of ["abc", "0", "-1", "1.5", "99999999", ""])

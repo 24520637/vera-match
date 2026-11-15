@@ -42,6 +42,22 @@ export class EmailService implements OnApplicationShutdown {
       });
     }
   }
+  async sendPasswordReset(email: string, link: string) {
+    try {
+      const result = await this.transport.sendMail({
+        from: this.environment.values.smtp.from,
+        to: email,
+        subject: "Reset your VERA Match password",
+        text: `You requested a password reset for VERA Match.\n\n${link}\n\nThis link expires in ${Math.floor(this.environment.values.recovery.ttlSeconds / 60)} minutes and can be used once. All existing sessions will end after a successful reset. If you did not request this, ignore this message.`,
+      });
+      if (!result.accepted?.length) throw new Error("Not accepted");
+    } catch {
+      throw new ServiceUnavailableException({
+        code: "EMAIL_DELIVERY_UNAVAILABLE",
+        message: "Email delivery is temporarily unavailable.",
+      });
+    }
+  }
   onApplicationShutdown() {
     this.transport.close();
   }

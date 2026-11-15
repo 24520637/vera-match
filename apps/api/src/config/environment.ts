@@ -1,4 +1,8 @@
 export interface AppConfiguration {
+  readonly recovery: {
+    readonly ttlSeconds: number;
+    readonly resendCooldownSeconds: number;
+  };
   readonly verification: {
     readonly ttlSeconds: number;
     readonly resendCooldownSeconds: number;
@@ -202,6 +206,15 @@ export function parseEnvironment(
   )
     issues.push("MINIO_BUCKET must be a valid bucket name");
   const config: AppConfiguration = {
+    recovery: {
+      ttlSeconds: integer("PASSWORD_RESET_TTL_SECONDS", 1800, 60, 3600),
+      resendCooldownSeconds: integer(
+        "PASSWORD_RESET_COOLDOWN_SECONDS",
+        60,
+        10,
+        3600,
+      ),
+    },
     verification: {
       ttlSeconds: integer("VERIFICATION_TTL_SECONDS", 1800, 60, 86400),
       resendCooldownSeconds: integer(
