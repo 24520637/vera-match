@@ -11,3 +11,9 @@ Eligible accounts must already be ACTIVE with verified email. Tokens contain 32 
 The existing in-memory limiter is MVP-only for one API process. Forgot requests additionally allow 10 attempts per socket client IP and three per normalized email in 15 minutes, including unknown addresses. Counters contain hashes, not raw addresses. Restart clears counters; multiple processes do not share them. Reverse-proxy deployments currently share the proxy's socket IP because trust proxy stays disabled. Do not enable arbitrary forwarded-header trust or deploy multiple instances without agreeing on a shared limiter and an explicit trusted-proxy topology.
 
 Machine-local `.env` files remain private. Optional non-secret settings: `PASSWORD_RESET_TTL_SECONDS` (60–3600) and `PASSWORD_RESET_COOLDOWN_SECONDS` (10–3600).
+
+## Consuming a link
+
+`POST /api/auth/reset-password` accepts `{ "token": "...", "newPassword": "..." }`. Passwords contain 12–128 characters and are never trimmed. A successful HTTP 200 response contains only a confirmation message; it does not activate an account or log it in. Invalid, expired, consumed and ineligible links share HTTP 400 `INVALID_RESET_LINK`. Database or hashing failures return sanitized HTTP 503 `RESET_UNAVAILABLE`.
+
+The existing Argon2id helper hashes the password. An account row lock serializes reset with issuance, login and logout-all. Token consumption, password replacement, invalidation of remaining recovery tokens, revocation of every session and a minimal PASSWORD_RESET_COMPLETED audit event commit atomically. The audit contains account IDs and action only; no password, token, email or content. A failure rolls back the entire transaction. Cookies belonging to another account are not blindly cleared. The account must sign in again; old cookies receive 401. No Prisma schema or migration change is required.
