@@ -14,7 +14,8 @@ export async function findTestEmails(email: string): Promise<{ ID: string }[]> {
   if (!response.ok) throw new Error("Native Mailpit API unavailable");
   return ((await response.json()) as { messages: { ID: string }[] }).messages;
 }
-export async function readActivationEmail(
+async function readLinkEmail(
+  path: "verify-email" | "reset-password",
   email: string,
   excludedIds: string[] = [],
 ) {
@@ -29,9 +30,9 @@ export async function readActivationEmail(
       if (!message.To.some((recipient) => recipient.Address === email))
         throw new Error("Unexpected recipient");
       const link = message.Text.match(
-        /https?:\/\/[^\s]+\/verify-email#[^\s]+/,
+        new RegExp(`https?://[^\\s]+/${path}#[^\\s]+`),
       )?.[0];
-      if (!link) throw new Error("Activation link missing");
+      if (!link) throw new Error("Requested link missing");
       return {
         id: message.ID,
         link,
@@ -52,3 +53,10 @@ export async function clearTestEmails(email: string) {
   });
   if (!response.ok) throw new Error("Unable to clean synthetic email fixture");
 }
+
+export const readActivationEmail = (
+  email: string,
+  excludedIds: string[] = [],
+) => readLinkEmail("verify-email", email, excludedIds);
+export const readResetEmail = (email: string, excludedIds: string[] = []) =>
+  readLinkEmail("reset-password", email, excludedIds);
