@@ -72,6 +72,12 @@ separate reaffirmation events and idempotent version/event writes. Catalogs,
 retention schedules, signed URL TTL and detailed mechanisms remain PENDING
 APPROVAL; C012 is not a completed product/privacy sign-off.
 
+Latest accepted technical direction adds separate profile/preferences/
+questionnaire expectedRevision checks and 409 stale-write handling, complete
+result validation with actionable legacy 503/remediation, append-only verifiable
+policy evidence and retention-safe audit survival of User deletion. These are
+future tests, not implementation or approval of policy durations.
+
 - [ ] Compare auth request DTOs, flat AuthUser responses, message/202 responses,
   empty 204 responses and cookie behavior against existing code. Preserve
   registration/login validation differences and current optional/null handling.
@@ -120,6 +126,13 @@ the following scenarios or schema tables exist.
   errors, explicit replacement and no silent backfill on reads/unrelated writes.
   Corrupt profile/preferences fixtures must not block consent withdrawal or its
   response projection, including policy-less explicit OFF.
+  A valid-field PATCH beside unrelated malformed legacy data must return 503
+  with no field/revision change. Details identify only allowlisted paths and
+  current revision, never raw data, arbitrary JSON keys, SQL/stack traces or
+  another member. Explicit corrections succeed only when the complete merged
+  state is valid; remaining bad fields still fail. Do not drop extra questionnaire
+  rows or backfill on GET. Test visible remediation/unsaved edits, explicit
+  confirmation and separately approved operator cases, not automatic repair.
 - D3/D4: staff cannot bypass MEMBER ownership; verify per-member/per-feature and
   socket-IP buckets at approved boundaries, independent of auth buckets. Test
   429/Retry-After and no automatic retry. Exhaust profile/grant/general-IP limits
@@ -140,6 +153,12 @@ the following scenarios or schema tables exist.
 - D9: grant rejects missing/stale policy at the correct path; revoke can omit
   policy; state/revision/immutable events commit or roll back together. Verify
   the approved policy/timestamp retention and reaffirmation event behavior.
+  Verify application roles cannot edit/delete append-only events or accepted
+  policy snapshots. Grants/re-consent bind version/purpose/locale to retained
+  content or digest plus corresponding recoverable snapshot. Changing a latest
+  policy entry cannot change historical proof; test digest verification, missing
+  evidence markers and no fabricated backfill. Missing legacy policy evidence
+  cannot block policy-less withdrawal.
 - D10: after successful revoke, deny new access/signed URLs and exclude withdrawn
   matching contributions, even while cleanup fails/retries. Verify cache and
   in-flight behavior and documented issued-URL limitations, not instant erasure.
@@ -154,6 +173,22 @@ the following scenarios or schema tables exist.
   POLICY_RECONSENT under approved event vocabulary; replayed historical success
   does not overwrite newer UI state without a fresh read.
 
+### Independent editing revisions - future C020-C024 checks
+
+- GET reports independent profile/preferences/questionnaire revisions, separate
+  from consent version. Missing resources return virtual 0 with no writes.
+- Every mutation requires expectedRevision: invalid/missing is 400; stale is
+  409 RESOURCE_REVISION_CONFLICT at visible _form. Two editors at revision 3
+  cannot both commit: one advances to 4, the other changes no state.
+- Concurrent first writes initialize once. Accepted mutation advances once;
+  malformed-result 503, stale CAS, DB or questionnaire failure advances nothing.
+  Clearing/recreating data must not reset an active-account revision.
+- questionnaireVersion selects a catalog only; questionnaire editing revision
+  covers that member's answers across versions. Test stale atomic PUT, retired
+  reads/read-only writes, and rejection of profile/consent tokens as substitutes.
+- Preserve edits after 409, fetch fresh data and require explicit reconciliation;
+  never silently merge/retry. Consent CAS/idempotency tests remain separate.
+
 ### Additional policy/media validation - NOT IMPLEMENTED by C012
 
 - Section B: with synthetic clocks/data, verify category triggers, deletion
@@ -162,6 +197,13 @@ the following scenarios or schema tables exist.
   retry sequence, durable restart recovery, owner alerts, partial object-version
   failures and backup restore suppression. Never mark erasure verified merely
   because DELETE returned success. Periods are proposed, not legal requirements.
+  Hard-delete a synthetic User/Consent graph and prove unexpired audit events,
+  policy snapshots/digests and ordering survive without cascades. Verify approved
+  separate mapping erasure/minimization, restrictive evidence references,
+  authorized expiry purge only after retention/holds and restore suppression.
+  Do not rewrite immutable events for de-identification or label pseudonymous
+  evidence anonymous. Missing retention policy is a release decision, not
+  authorization to invent indefinite legal holds.
 - Section C: verify authorization/consent/assignment/eligibility/MFA before every
   playback URL, renewal and supported range access; no issuance after withdrawal
   commit. Confirm proposed 60-second expiry on the actual provider, cache headers,
