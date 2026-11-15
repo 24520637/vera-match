@@ -53,30 +53,24 @@ Mailpit; the shared UI suite does not. They do not establish full media/matching
 E2E acceptance. Record each result as PASS, FAIL or NOT RUN; local
 build/unit success alone does not establish that CI or browser checks pass.
 
-## C012 contract draft review — PENDING REVIEW
+## C012 technical review record - MVP APPROVED / PRE-PRODUCTION OPEN
 
-This is a documentation review checklist, not executable feature coverage or a
-fresh PASS claim. C012/T02 historically requires agreement on auth/profile DTO
-envelopes/types with Huong and completed contract review. See
-[API contracts](API-CONTRACT.md) and the
-[proposed profile/consent contract](PROFILE-CONSENT-CONTRACT.md).
+Huong technically approved reviewed commit
+`b25e4d6d93823f560ae3fc8be443313902097abd` as the MVP implementation/testing
+contract, with no further technical corrections in this review round.
+Review evidence is the project owner's supplied Huong confirmation; no date or
+GitHub review timestamp was supplied. This is not fresh test execution, a
+production sign-off, or a claim that Draft PR #8 is merged.
 
-The revised decision matrix records both rounds of Huong's supplied PR #8 feedback,
-not blanket approval or implementation. Resource wrappers/400, read-only GET
-defaults, MEMBER ownership, optional draft birthDate, User-owned displayName,
-atomic three-answer PUT, policy-checked grants, unblocked policy-less revoke,
-atomic immutable audit and withdrawal enforcement are accepted direction.
-Conditional additions include _form whole-request paths, explicit null mapping,
-independent withdrawal quota, UTC age/normalization, retired read-only answers,
-separate reaffirmation events and idempotent version/event writes. Catalogs,
-retention schedules, signed URL TTL and detailed mechanisms remain PENDING
-APPROVAL; C012 is not a completed product/privacy sign-off.
+The [contract decision register](PROFILE-CONSENT-CONTRACT.md) records approved
+D1-D11, independent resource revisions/expectedRevision/409, safe legacy
+503/remediation, append-only verifiable policy evidence, exact catalogs/three
+prompts/limits, separate withdrawal quota, CAS/idempotency and 60-second URLs.
+Existing auth remains unchanged. C019-C024 and their executable tests are not
+implemented by this documentation.
 
-Latest accepted technical direction adds separate profile/preferences/
-questionnaire expectedRevision checks and 409 stale-write handling, complete
-result validation with actionable legacy 503/remediation, append-only verifiable
-policy evidence and retention-safe audit survival of User deletion. These are
-future tests, not implementation or approval of policy durations.
+Remaining checklist items below are implementation/handoff or PRE-PRODUCTION
+verification requirements, not requests to reapprove the agreed MVP vocabulary.
 
 - [ ] Compare auth request DTOs, flat AuthUser responses, message/202 responses,
   empty 204 responses and cookie behavior against existing code. Preserve
@@ -84,25 +78,25 @@ future tests, not implementation or approval of policy durations.
 - [ ] Confirm existing 400/401/403/415/429/503 behavior, validation details,
   Retry-After and non-JSON/framework fallbacks. Do not claim a universal response
   envelope, nested validation format or implemented auth 409/422 behavior.
-- [ ] Record accepted direction and resolve remaining questions D1-D11 with
-  Huong. Review proposed concrete values without treating them as finalized
-  product/privacy requirements; preserve explicit pending labels.
-- [ ] Approve feature request/response examples, GET-empty, PATCH/null/arrays,
-  questionnaire PUT/versioning, ownership and security/throttling composition.
+- [x] Record Huong's technical approval of D1-D11 and concrete MVP values at
+  the reviewed commit. Keep real-user production policy approvals separate.
+- [x] Record technical acceptance of feature request/response examples,
+  GET-empty, PATCH/null/arrays, questionnaire PUT/versioning, ownership and
+  security/throttling composition; executable verification remains future work.
 - [ ] Map feature DTOs to existing Prisma models; document policy/history and
   concurrency gaps without changing schema or promising a migration design.
 - [ ] Preserve one auth provider/client, server session validation and
   server-derived ownership. No frontend userId or role may authorize writes.
-- [ ] Record reviewer, date and review reference. No automatic approval: keep
-  C012 PROPOSED / PENDING REVIEW while any required decision remains open.
+- [x] Record reviewer Huong and reviewed commit above; no review date is invented.
+- [ ] Complete PRE-PRODUCTION approval/verification of real-user retention/legal,
+  storage/backup/restore policies and actual signed-URL provider enforcement.
 - [ ] Review documentation-only diff, links and `git diff --check`; no app,
   test, dependency, schema or migration changes belong to this draft.
 
-## C019-C024 future acceptance — PROPOSED / PENDING REVIEW
+## C019-C024 MVP acceptance - NOT IMPLEMENTED / NOT RUN
 
-These checks are a proposed test specification, not implemented or passing
-tests. Product-level invariants already in scope remain required; draft choices
-must be approved before feature implementation. Do not mark tasks DONE because
+These checks specify the agreed MVP contract, not implemented or passing
+tests. Real-user retention and other PRE-PRODUCTION gates remain separate. Do not mark tasks DONE because
 the following scenarios or schema tables exist.
 
 | Task | Acceptance scenarios and required evidence |
@@ -114,7 +108,7 @@ the following scenarios or schema tables exist.
 | C023 | Fresh member GET projects all five purposes OFF; each purpose can be independently granted/withdrawn. Validate boolean/purpose/policy input under D9. Commit state and approved audit event atomically; audit failure rolls back the state change. Verify repeated requests and concurrent grant/revoke under D11, policy-version evidence, no unauthorized actor/timestamp injection, and withdrawn data/access excluded under D10. |
 | C024 | Actual UI -> API -> DB save, browser refresh and withdrawal flow for profile, questionnaire, preferences and five separate consents. Cover loading/empty/error/success, field errors, keyboard/mobile/axe, failed-save input retention, 401 versus 403/outage, and approved conflict recovery. No opt-in defaults or page-local preview presented as account persistence. |
 
-### Review-specific future checks - details PENDING APPROVAL
+### Review-specific future checks - approved MVP baseline / NOT RUN
 
 - D1: future nested validation paths use the approved dot/index grammar, e.g.
   consents.0.policyVersion; no secret values in details and no regression to
@@ -146,10 +140,12 @@ the following scenarios or schema tables exist.
   approved version/length/order/retention, merged PATCH range validation,
   one-sided/null ranges, unknown/duplicate dealbreakers and priority ordering.
   Retired versions stay read-only and retain original prompt meanings/order;
-  proposed read selector/rejection codes and retention expiry need approval.
+  approved MVP read selector/rejection codes apply; real-data retention expiry
+  still requires policy approval.
   Different goals must not hard-exclude unless the breaker is explicitly set.
   Exercise candidate null/[] priority defaults and lexicographic/Jaccard ordering
-  only after product/T14 approval; do not infer approved catalog data from examples.
+  against the approved MVP catalogs/formulas; T14 aggregate matching remains
+  separate implementation/review work.
 - D9: grant rejects missing/stale policy at the correct path; revoke can omit
   policy; state/revision/immutable events commit or roll back together. Verify
   the approved policy/timestamp retention and reaffirmation event behavior.
@@ -162,7 +158,7 @@ the following scenarios or schema tables exist.
 - D10: after successful revoke, deny new access/signed URLs and exclude withdrawn
   matching contributions, even while cleanup fails/retries. Verify cache and
   in-flight behavior and documented issued-URL limitations, not instant erasure.
-- D11: under the proposed CAS, two tabs read version 4; revoke or already-OFF
+- D11: under the approved MVP CAS, two tabs read version 4; revoke or already-OFF
   reaffirmation commits 5; old grant at 4 fails 409 with no state/event changes.
   Also test reversed ordering, missing/invalid expectedVersion (400), atomic
   initial-version creation, no version reset after purpose recreation, audit
@@ -206,11 +202,11 @@ the following scenarios or schema tables exist.
   authorization to invent indefinite legal holds.
 - Section C: verify authorization/consent/assignment/eligibility/MFA before every
   playback URL, renewal and supported range access; no issuance after withdrawal
-  commit. Confirm proposed 60-second expiry on the actual provider, cache headers,
+  commit. Confirm approved MVP 60-second expiry on the actual provider, cache headers,
   URL/log redaction and no public ACL. Test previously issued URL and in-flight
   behavior explicitly; do not claim immediate revocation if expiry is the only
   enforcement. Provider invalidation/proxy choices require separate acceptance.
-- Scope: C019-C024 implement Phuc-owned domain features after approval; Huong
+- Scope: C019-C024 implement Phuc-owned domain features against the approved MVP contract; Huong
   owns private-media/account-privacy controls. Shared workers, backup/retention
   policy and stronger streaming enforcement are later release work, not evidence
   that profile implementation or C012 has completed them.
@@ -238,3 +234,15 @@ this C012 draft does not implement or execute C019-C024 tests.
 - [ ] No known private media/PII leakage. Session, `401`/`403`, withdrawal, and independent QA checks pass.
 - [ ] Cross-reviewed release PR, changelog, and known limitations are documented.
 - [ ] If any critical gate is not met: label the build **internal demonstration only**, not public production.
+
+### C019 design and PRE-PRODUCTION release gates
+
+- C019 chooses concrete schema/migration design after inspecting existing models
+  and migrations; reuse migration history and never recreate the initial migration.
+- Before real-user production: explicitly approve retention/legal basis, category
+  deletion deadlines, storage/backup/restore suppression and cleanup ownership.
+  Section B periods remain candidates, not approved production policy.
+- Verify the actual signed-URL provider enforces the 60-second MVP TTL and cache,
+  range/HEAD, expiry/race/in-flight behavior. Review residual pre-issued URL risk.
+- Execute and record implementation/security tests separately; documentation
+  approval does not establish PASS results or completion of C019-C024.
