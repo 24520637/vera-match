@@ -121,7 +121,8 @@ Huong owns authentication, sessions, private video, safety, and privacy. Phuc ow
 | [Scope](docs/SCOPE-DECISIONS.md)                     | Required features and exclusions                                           |
 | [Architecture](docs/ARCHITECTURE.md)                 | Components and trust boundaries                                            |
 | [UI design system](docs/UI-DESIGN-SYSTEM.md)         | Shared tokens, components, interaction patterns, and Huong’s design review |
-| [API contract](docs/API-CONTRACT.md)                 | Planned endpoints and access rules                                         |
+| [API contract](docs/API-CONTRACT.md)                 | Existing auth DTOs/responses and planned business endpoints                 |
+| [Profile/Consent contract draft](docs/PROFILE-CONSENT-CONTRACT.md) | C012 proposals for C019-C024; PROPOSED / PENDING REVIEW by Huong |
 | [Authentication](docs/AUTH-SPEC.md)                  | Sessions, account states, CSRF, and authorization                          |
 | [Authentication foundation](docs/AUTH-FOUNDATION.md) | Implemented T01 contracts, native setup, test evidence and review handoff  |
 | [Database](docs/DATABASE.md)                         | Models and data invariants                                                 |

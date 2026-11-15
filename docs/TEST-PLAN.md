@@ -53,6 +53,63 @@ Mailpit; the shared UI suite does not. They do not establish full media/matching
 E2E acceptance. Record each result as PASS, FAIL or NOT RUN; local
 build/unit success alone does not establish that CI or browser checks pass.
 
+## C012 contract draft review — PENDING REVIEW
+
+This is a documentation review checklist, not executable feature coverage or a
+fresh PASS claim. C012/T02 historically requires agreement on auth/profile DTO
+envelopes/types with Huong and completed contract review. See
+[API contracts](API-CONTRACT.md) and the
+[proposed profile/consent contract](PROFILE-CONSENT-CONTRACT.md).
+
+- [ ] Compare auth request DTOs, flat AuthUser responses, message/202 responses,
+  empty 204 responses and cookie behavior against existing code. Preserve
+  registration/login validation differences and current optional/null handling.
+- [ ] Confirm existing 400/401/403/415/429/503 behavior, validation details,
+  Retry-After and non-JSON/framework fallbacks. Do not claim a universal response
+  envelope, nested validation format or implemented auth 409/422 behavior.
+- [ ] Resolve and record every decision D1-D11 with Huong; identify additional
+  product/privacy decisions rather than filling them with invented requirements.
+- [ ] Approve feature request/response examples, GET-empty, PATCH/null/arrays,
+  questionnaire PUT/versioning, ownership and security/throttling composition.
+- [ ] Map feature DTOs to existing Prisma models; document policy/history and
+  concurrency gaps without changing schema or promising a migration design.
+- [ ] Preserve one auth provider/client, server session validation and
+  server-derived ownership. No frontend userId or role may authorize writes.
+- [ ] Record reviewer, date and review reference. No automatic approval: keep
+  C012 PROPOSED / PENDING REVIEW while any required decision remains open.
+- [ ] Review documentation-only diff, links and `git diff --check`; no app,
+  test, dependency, schema or migration changes belong to this draft.
+
+## C019-C024 future acceptance — PROPOSED / PENDING REVIEW
+
+These checks are a proposed test specification, not implemented or passing
+tests. Product-level invariants already in scope remain required; draft choices
+must be approved before feature implementation. Do not mark tasks DONE because
+the following scenarios or schema tables exist.
+
+| Task | Acceptance scenarios and required evidence |
+| --- | --- |
+| C019 | Reuse existing Profile/MatchPreference/QuestionnaireAnswer relations/indexes; Prisma validate/generate, reviewed migration only for confirmed gaps, FK/unique checks and no drift/loss of auth data in an isolated test database. Do not recreate the initial migration. |
+| C020 | Own-profile GET/PATCH against actual DB; approved absent/default and omission/null/array rules; server timestamps; reject unknown/privileged fields, invalid values and cross-user access. No implicit User.displayName/auth-state change. Success followed by GET/reload returns approved persisted values. |
+| C021 | Save three approved keys/texts for one supported version and reload identically under the approved normalization; reject duplicates/unknown keys, invalid version, missing answers and oversized text. Failed multi-answer write leaves no partial changes; another member's answers stay inaccessible; verify agreed version retention/conflict behavior. |
+| C022 | Validate effective persisted + PATCH age bounds; reject inverted/out-of-policy/noninteger ranges and invalid JSON/catalog entries. Verify approved null/one-sided rules, arrays, persistence and ownership. Preference save cannot grant consent or enable visibility. |
+| C023 | Fresh member GET projects all five purposes OFF; each purpose can be independently granted/withdrawn. Validate boolean/purpose/policy input under D9. Commit state and approved audit event atomically; audit failure rolls back the state change. Verify repeated requests and concurrent grant/revoke under D11, policy-version evidence, no unauthorized actor/timestamp injection, and withdrawn data/access excluded under D10. |
+| C024 | Actual UI -> API -> DB save, browser refresh and withdrawal flow for profile, questionnaire, preferences and five separate consents. Cover loading/empty/error/success, field errors, keyboard/mobile/axe, failed-save input retention, 401 versus 403/outage, and approved conflict recovery. No opt-in defaults or page-local preview presented as account persistence. |
+
+For protected feature endpoints, include pending/suspended/deleted account and
+expired/revoked session denial, valid MEMBER ownership, staff-role policy (D3),
+Origin/JSON mutation checks and agreed throttling. Where nested DTO errors are
+used, verify the reviewed field-path format reaches the matching UI control.
+On dependency or network failure do not assert logout or successful save;
+exercise revalidation before a retry that could repeat a committed mutation.
+
+Keep current auth and transport/loading regression coverage. Use synthetic
+fixtures and isolated/rollback test databases; do not reset development or
+production data. Full withdrawal effects involving media/review/matching need
+coordination with the owners of those features and cannot be certified by
+profile-only tests. Report PASS, FAIL or NOT RUN with actual execution evidence;
+this C012 draft does not implement or execute C019-C024 tests.
+
 ## Release gate
 
 - [ ] Prisma validation and migration apply plus a tested rollback/recovery procedure in a test database.
