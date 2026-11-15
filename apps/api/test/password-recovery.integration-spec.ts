@@ -1,3 +1,7 @@
+import {
+  createServer as createHttpServer,
+  request as httpRequest,
+} from "node:http";
 import { PrismaService } from "../src/database/prisma.service";
 import { EmailService } from "../src/auth/email.service";
 import { createServer } from "node:net";
@@ -467,5 +471,99 @@ describe("password recovery / real PostgreSQL / native Mailpit", () => {
       ).consumedAt,
     ).not.toBeNull();
     expect((await findTestEmails(user.email)).length).toBe(3);
+  });
+  it("separates real direct clients but exposes the documented shared-proxy quota without trusting forwarding headers", async () => {
+    const send = (
+      localAddress: string,
+      email: string,
+      target = base,
+      forwarded = "192.0.2.1",
+    ) =>
+      new Promise<{
+        status: number;
+        body: { code?: string; retryAfterSeconds?: number };
+        retry?: string;
+      }>((resolve, reject) => {
+        const req = httpRequest(
+          target + "/api/auth/forgot-password",
+          {
+            method: "POST",
+            localAddress,
+            headers: {
+              Origin: origin,
+              "Content-Type": "application/json",
+              "X-Forwarded-For": forwarded,
+              "X-Real-IP": forwarded,
+            },
+          },
+          (response) => {
+            let text = "";
+            response.on("data", (chunk) => (text += chunk));
+            response.on("end", () => {
+              try {
+                resolve({
+                  status: response.statusCode!,
+                  body: JSON.parse(text),
+                  retry: response.headers["retry-after"],
+                });
+              } catch (error) {
+                reject(error);
+              }
+            });
+          },
+        );
+        req.on("error", reject);
+        req.end(JSON.stringify({ email }));
+      });
+    const target = newEmail();
+    for (let i = 0; i < 3; i++)
+      expect((await send("127.0.0.2", target)).status).toBe(202);
+    expect((await send("127.0.0.2", target, base, "203.0.113.9")).status).toBe(
+      429,
+    );
+    expect((await send("127.0.0.3", target)).status).toBe(202);
+    const proxy = createHttpServer((incoming, outgoing) => {
+      const upstream = httpRequest(
+        new URL(incoming.url ?? "/", base),
+        { method: incoming.method, headers: incoming.headers },
+        (response) => {
+          outgoing.writeHead(response.statusCode ?? 502, response.headers);
+          response.pipe(outgoing);
+        },
+      );
+      upstream.on("error", () => {
+        outgoing.writeHead(502);
+        outgoing.end();
+      });
+      incoming.pipe(upstream);
+    });
+    await new Promise<void>((resolve) => proxy.listen(0, "127.0.0.1", resolve));
+    try {
+      expect(app.getHttpAdapter().getInstance().get("trust proxy")).toBe(false);
+      const proxyUrl =
+        "http://127.0.0.1:" + (proxy.address() as { port: number }).port;
+      const email = newEmail();
+      for (let i = 0; i < 3; i++)
+        expect(
+          (await send("127.0.0.2", email, proxyUrl, "192.0.2." + i)).status,
+        ).toBe(202);
+      // A second real browser-facing client still shares the API-facing proxy socket.
+      const shared = await send("127.0.0.3", email, proxyUrl, "203.0.113.8");
+      expect(shared.status).toBe(429);
+      expect(shared.retry).toBe(String(shared.body.retryAfterSeconds));
+      for (let i = 0; i < 6; i++)
+        expect((await send("127.0.0.3", newEmail(), proxyUrl)).status).toBe(
+          202,
+        );
+      const socketLimit = await send("127.0.0.2", newEmail(), proxyUrl);
+      expect(socketLimit.status).toBe(429);
+      expect(socketLimit.retry).toBe(
+        String(socketLimit.body.retryAfterSeconds),
+      );
+    } finally {
+      await new Promise<void>((resolve, reject) =>
+        proxy.close((error) => (error ? reject(error) : resolve())),
+      );
+    }
   });
 });

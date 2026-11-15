@@ -66,9 +66,10 @@ export class AuthRequestGuard implements CanActivate {
         415,
       );
     const action = context.getHandler().name;
+    const clientIp = request.ip ?? request.socket.remoteAddress ?? "unknown";
     this.limiter.consume(
       `${action}:ip`,
-      request.ip ?? request.socket.remoteAddress ?? "unknown",
+      clientIp,
       action === "resetPassword"
         ? 20
         : action === "forgotPassword"
@@ -85,8 +86,10 @@ export class AuthRequestGuard implements CanActivate {
           ? request.body.email.trim().toLowerCase().slice(0, 254)
           : "invalid";
       this.limiter.consume(
-        `${action}:identity`,
-        email,
+        action === "login"
+          ? "login:identity"
+          : "forgotPassword:client-identity",
+        action === "login" ? email : JSON.stringify([clientIp, email]),
         action === "login" ? 10 : 3,
       );
     }
