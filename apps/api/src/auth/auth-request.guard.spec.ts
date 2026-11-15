@@ -102,28 +102,56 @@ describe("auth request safety", () => {
       const limiter = new AuthRateLimiter();
       for (let i = 0; i < 3; i++)
         limiter.consume(
-          "forgotPassword:identity",
-          "normalized@example.invalid",
+          "forgotPassword:client-identity",
+          JSON.stringify(["192.0.2.10", "normalized@example.invalid"]),
           3,
         );
       clock.mockReturnValue(900999);
       expect(() =>
         limiter.consume(
-          "forgotPassword:identity",
-          "normalized@example.invalid",
+          "forgotPassword:client-identity",
+          JSON.stringify(["192.0.2.10", "normalized@example.invalid"]),
           3,
         ),
       ).toThrow(AuthRateLimitException);
       clock.mockReturnValue(901000);
       expect(() =>
         limiter.consume(
-          "forgotPassword:identity",
-          "normalized@example.invalid",
+          "forgotPassword:client-identity",
+          JSON.stringify(["192.0.2.10", "normalized@example.invalid"]),
           3,
         ),
       ).not.toThrow();
     } finally {
       clock.mockRestore();
     }
+  });
+  it("isolates forgot quotas by socket client and normalized identity, never forwarding headers", () => {
+    const guard = new AuthRequestGuard(
+      { values: { corsOrigin: "http://localhost:3000" } } as EnvironmentService,
+      new AuthRateLimiter(),
+    );
+    const request = {
+      headers: {
+        origin: "http://localhost:3000",
+        "x-forwarded-for": "192.0.2.1",
+      },
+      is: () => true,
+      ip: "192.0.2.10",
+      body: { email: " TARGET@example.invalid " },
+    };
+    const ctx = {
+      switchToHttp: () => ({ getRequest: () => request }),
+      getHandler: () => ({ name: "forgotPassword" }),
+    } as unknown as ExecutionContext;
+    for (let i = 0; i < 3; i++) expect(guard.canActivate(ctx)).toBe(true);
+    request.body.email = "target@example.invalid";
+    request.headers["x-forwarded-for"] = "203.0.113.99";
+    expect(() => guard.canActivate(ctx)).toThrow(AuthRateLimitException);
+    request.ip = "192.0.2.20";
+    expect(guard.canActivate(ctx)).toBe(true);
+    request.ip = "192.0.2.10";
+    request.body.email = "other@example.invalid";
+    expect(guard.canActivate(ctx)).toBe(true);
   });
 });
