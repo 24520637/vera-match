@@ -92,11 +92,8 @@ export class PasswordRecoveryService implements OnModuleDestroy {
         })) >= 3
       )
         return false;
-      await tx.passwordResetToken.updateMany({
-        where: { userId: user.id, consumedAt: null },
-        data: { consumedAt: now },
-      });
-      await tx.passwordResetToken.create({
+      // Keep the previous delivered link usable while SMTP is in flight.
+      const row = await tx.passwordResetToken.create({
         data: {
           userId: user.id,
           createdAt: now,
@@ -104,13 +101,44 @@ export class PasswordRecoveryService implements OnModuleDestroy {
           expiresAt: new Date(now.getTime() + config.ttlSeconds * 1000),
         },
       });
-      return true;
+      return { id: row.id, createdAt: row.createdAt, email: account.email };
     });
     if (!issued) return;
     const link = new URL("/reset-password", this.environment.values.appBaseUrl);
     link.hash = new URLSearchParams({ token }).toString();
     try {
-      await this.email.sendPasswordReset(address, link.toString());
+      await this.email.sendPasswordReset(issued.email, link.toString());
+      await this.prisma.$transaction(async (tx) => {
+        await tx.$queryRaw`SELECT id FROM "User" WHERE id = ${user.id} FOR UPDATE`;
+        const account = await tx.user.findUnique({ where: { id: user.id } });
+        const now = new Date();
+        if (
+          !account ||
+          account.status !== "ACTIVE" ||
+          !account.emailVerifiedAt ||
+          account.email !== issued.email
+        ) {
+          await tx.passwordResetToken.updateMany({
+            where: { id: issued.id, consumedAt: null },
+            data: { consumedAt: now },
+          });
+          return;
+        }
+        const current = await tx.passwordResetToken.findFirst({
+          where: { id: issued.id, consumedAt: null, expiresAt: { gt: now } },
+        });
+        // Reset or a newer confirmed delivery may already have consumed this row.
+        // Never reactivate it or invalidate a newer link after a delayed SMTP acknowledgement.
+        if (!current) return;
+        await tx.passwordResetToken.updateMany({
+          where: {
+            userId: user.id,
+            consumedAt: null,
+            createdAt: { lt: issued.createdAt },
+          },
+          data: { consumedAt: now },
+        });
+      });
     } catch (error) {
       await this.prisma.passwordResetToken.updateMany({
         where: { tokenHash, consumedAt: null },

@@ -566,4 +566,256 @@ describe("password recovery / real PostgreSQL / native Mailpit", () => {
       );
     }
   });
+  it("preserves the last delivered link through a native SMTP greeting timeout and waits for shutdown", async () => {
+    const user = await account();
+    const firstWorker = new PasswordRecoveryService(
+      app.get(PrismaService),
+      app.get(EnvironmentService),
+      app.get(EmailService),
+    );
+    firstWorker.request(user.email);
+    await firstWorker.onModuleDestroy();
+    const first = await readResetEmail(user.email);
+    await database.client.passwordResetToken.updateMany({
+      where: { userId: user.id },
+      data: { createdAt: new Date(Date.now() - 61000) },
+    });
+    const sockets = new Set<import("node:net").Socket>();
+    let connected!: () => void;
+    const connection = new Promise<void>((resolve) => {
+      connected = resolve;
+    });
+    const stalledSmtp = createServer((socket) => {
+      sockets.add(socket);
+      socket.on("close", () => sockets.delete(socket));
+      connected(); /* Intentionally no greeting: exercise the real transport timeout. */
+    });
+    await new Promise<void>((resolve) =>
+      stalledSmtp.listen(0, "127.0.0.1", resolve),
+    );
+    const original = app.get(EnvironmentService).values;
+    const environment = {
+      values: {
+        ...original,
+        smtp: {
+          ...original.smtp,
+          host: "127.0.0.1",
+          port: (stalledSmtp.address() as { port: number }).port,
+          secure: false,
+          requireTls: false,
+        },
+      },
+    } as EnvironmentService;
+    const mailer = new EmailService(environment);
+    const worker = new PasswordRecoveryService(
+      app.get(PrismaService),
+      environment,
+      mailer,
+    );
+    let timer: NodeJS.Timeout | undefined;
+    let stopped = false;
+    const accepted = worker.request(user.email);
+    const shutdown = worker.onModuleDestroy().then(() => {
+      stopped = true;
+    });
+    try {
+      await Promise.race([
+        connection,
+        new Promise((_, reject) => {
+          timer = setTimeout(
+            () => reject(new Error("Synthetic SMTP connection did not start")),
+            3000,
+          );
+        }),
+      ]);
+      clearTimeout(timer);
+      expect(stopped).toBe(false);
+      expect(accepted.message).toContain("Request received");
+      expect(accepted.message).not.toMatch(/sent|delivered/i);
+      await shutdown;
+      const rows = await database.client.passwordResetToken.findMany({
+        where: { userId: user.id },
+      });
+      expect(rows).toHaveLength(2);
+      expect(
+        rows.find((row) => row.tokenHash === hashResetToken(first.token))!
+          .consumedAt,
+      ).toBeNull();
+      expect(
+        rows.find((row) => row.tokenHash !== hashResetToken(first.token))!
+          .consumedAt,
+      ).not.toBeNull();
+      expect((await findTestEmails(user.email)).length).toBe(1);
+      expect(
+        (
+          await post("reset-password", {
+            token: first.token,
+            newPassword: "synthetic-timeout-recovery-password",
+          })
+        ).status,
+      ).toBe(200);
+    } finally {
+      clearTimeout(timer);
+      for (const socket of sockets) socket.destroy();
+      await shutdown;
+      mailer.onApplicationShutdown();
+      await new Promise<void>((resolve, reject) =>
+        stalledSmtp.close((error) => (error ? reject(error) : resolve())),
+      );
+    }
+  });
+
+  it("does not let an older delayed SMTP acknowledgement invalidate a newer delivered link", async () => {
+    const user = await account();
+    const realMailer = app.get(EmailService);
+    let release!: () => void;
+    let sent!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const received = new Promise<void>((resolve) => {
+      sent = resolve;
+    });
+    const delayedMailer = {
+      sendPasswordReset: async (email: string, link: string) => {
+        await realMailer.sendPasswordReset(email, link);
+        sent();
+        await gate;
+      },
+    } as EmailService;
+    const older = new PasswordRecoveryService(
+      app.get(PrismaService),
+      app.get(EnvironmentService),
+      delayedMailer,
+    );
+    older.request(user.email);
+    const olderDone = older.onModuleDestroy();
+    try {
+      await received;
+      const first = await readResetEmail(user.email);
+      await database.client.passwordResetToken.updateMany({
+        where: { userId: user.id },
+        data: { createdAt: new Date(Date.now() - 61000) },
+      });
+      const newer = new PasswordRecoveryService(
+        app.get(PrismaService),
+        app.get(EnvironmentService),
+        realMailer,
+      );
+      newer.request(user.email);
+      await newer.onModuleDestroy();
+      const second = await readResetEmail(user.email, [first.id]);
+      release();
+      await olderDone;
+      expect(
+        (
+          await post("reset-password", {
+            token: first.token,
+            newPassword: "synthetic-delayed-old-password",
+          })
+        ).status,
+      ).toBe(400);
+      expect(
+        (
+          await post("reset-password", {
+            token: second.token,
+            newPassword: "synthetic-confirmed-new-password",
+          })
+        ).status,
+      ).toBe(200);
+    } finally {
+      release();
+      await olderDone;
+    }
+  });
+
+  it("serializes resets from old and newly emailed links while SMTP confirmation is pending, without reactivation", async () => {
+    const user = await account();
+    const firstWorker = new PasswordRecoveryService(
+      app.get(PrismaService),
+      app.get(EnvironmentService),
+      app.get(EmailService),
+    );
+    firstWorker.request(user.email);
+    await firstWorker.onModuleDestroy();
+    const first = await readResetEmail(user.email);
+    await database.client.passwordResetToken.updateMany({
+      where: { userId: user.id },
+      data: { createdAt: new Date(Date.now() - 61000) },
+    });
+    let release!: () => void;
+    let sent!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const received = new Promise<void>((resolve) => {
+      sent = resolve;
+    });
+    const delayedMailer = {
+      sendPasswordReset: async (email: string, link: string) => {
+        await app.get(EmailService).sendPasswordReset(email, link);
+        sent();
+        await gate;
+      },
+    } as EmailService;
+    const worker = new PasswordRecoveryService(
+      app.get(PrismaService),
+      app.get(EnvironmentService),
+      delayedMailer,
+    );
+    worker.request(user.email);
+    const done = worker.onModuleDestroy();
+    try {
+      await received;
+      const second = await readResetEmail(user.email, [first.id]);
+      expect(
+        await database.client.passwordResetToken.count({
+          where: { userId: user.id, consumedAt: null },
+        }),
+      ).toBe(2);
+      const result = await Promise.all([
+        post("reset-password", {
+          token: first.token,
+          newPassword: "synthetic-old-link-winner",
+        }),
+        post("reset-password", {
+          token: second.token,
+          newPassword: "synthetic-new-link-winner",
+        }),
+      ]);
+      expect(result.map((response) => response.status).sort()).toEqual([
+        200, 400,
+      ]);
+      release();
+      await done;
+      expect(
+        await database.client.passwordResetToken.count({
+          where: { userId: user.id, consumedAt: null },
+        }),
+      ).toBe(0);
+      expect(
+        await database.client.auditLog.count({
+          where: { actorId: user.id, action: "PASSWORD_RESET_COMPLETED" },
+        }),
+      ).toBe(1);
+      const password =
+        result[0].status === 200
+          ? "synthetic-old-link-winner"
+          : "synthetic-new-link-winner";
+      expect(
+        (await post("login", { email: user.email, password })).status,
+      ).toBe(200);
+      expect(
+        (
+          await post("reset-password", {
+            token: second.token,
+            newPassword: "synthetic-replay-password",
+          })
+        ).status,
+      ).toBe(400);
+    } finally {
+      release();
+      await done;
+    }
+  });
 });
