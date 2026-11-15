@@ -2,25 +2,28 @@
 
 **Status:** Health/readiness and `/auth/register`, `/auth/verify-email`, `/auth/resend-verification`, `/auth/login`, `/auth/me`, `/auth/logout`, `/auth/logout-all` are implemented. All other business routes below remain DESIGN ONLY. See `EMAIL-AUTH-SESSIONS.md` for tested details.
 
-API prefix: `/api`. The browser uses a server-issued HttpOnly session cookie. Mutating cookie-authenticated endpoints require CSRF protection. Implemented auth behavior is described below; `{code, message, details?}` is not a guarantee that every framework error has this shape. Auth DTO validation uses `400`, not `422`. `409` conflict and `422` rules for future business endpoints remain design proposals.
+API prefix: `/api`. The browser uses a server-issued HttpOnly session cookie. Mutating cookie-authenticated endpoints require CSRF protection. Implemented auth behavior is described below; `{code, message, details?}` is not a guarantee that every framework error has this shape. Auth DTO validation uses `400`, not `422`. Future feature `409` rules are approved MVP contracts, not implemented routes;
+`422` is not introduced by this contract.
 
-**C012 / T02: documentation draft, PENDING REVIEW by Huong.** This document records existing auth behavior without changing it. The [Profile/Consent contract draft](PROFILE-CONSENT-CONTRACT.md) proposes DTOs for C019-C024; those endpoints are not implemented. C012 is neither DONE nor FROZEN. Its historical scope at `5deaf06:docs/COMMIT-PLAN.csv` is to agree response envelopes/types with Huong, verified by completed contract review.
+**C012 / T02: MVP TECHNICALLY APPROVED; PRE-PRODUCTION GATES OPEN.**
 
-The draft records both rounds of Huong's supplied PR #8 feedback: conditional
-acceptance is separate from outstanding product/policy approvals. New routes
-use resource wrappers, HTTP 400, dot/index paths (e.g. `consents.0.policyVersion`),
-visible `_form` whole-request errors, non-provisioning GET defaults and own
-active/verified MEMBER authorization. API null clears nullable values into
-database NULL; SQL/JSON null read as API null. Invalid profile/preferences must
-not block withdrawal. D4 requires independent revocation quotas; 429 includes
-Retry-After and cannot mean success. D11 requires CAS plus deduplication of
-idempotency keys, not automatic grant retries. These are future contracts;
-existing auth shapes, top-level formatter and code remain unchanged.
+Huong technically approved reviewed commit
+`b25e4d6d93823f560ae3fc8be443313902097abd` as the MVP implementation/testing
+contract, with no further technical corrections in this review round.
+The [Profile/Consent contract](PROFILE-CONSENT-CONTRACT.md) decision register
+records approved D1-D11, concrete catalogs/three prompts/limits, independent
+withdrawal quota, CAS/idempotency and 60-second playback URLs. Existing auth
+behavior is unchanged. Feature routes remain unimplemented; PR #8 is not
+represented as merged and production policies are not approved.
 
-Sections A/B/C of the draft propose exact catalogs/questionnaire, category
-retention/deletion schedules and 60-second signed playback URLs, all awaiting
-explicit approval. D4/D6/D7/D8/D11 are not fully approved in every detail, and
-no legal retention rule, media implementation or production guarantee is implied.
+New routes use resource wrappers, HTTP 400, nested dot/index field errors,
+visible `_form` errors, non-provisioning GET defaults and active verified MEMBER
+ownership. Null mapping, separate revocation capacity and 429 Retry-After are
+approved MVP rules. Real-user retention/legal, storage/backup policy and actual
+signed-URL provider enforcement remain PRE-PRODUCTION approval/verification
+gates; section B retention periods are still proposals. C019 chooses concrete
+schema/migration design using existing migrations, never recreating the initial
+migration. C019-C024 are future implementation, not delivered by C012.
 
 Latest technical review adds independent `revision` wrapper fields for Profile,
 Preferences and Questionnaire; mutations require `expectedRevision` and stale

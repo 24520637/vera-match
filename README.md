@@ -122,7 +122,7 @@ Huong owns authentication, sessions, private video, safety, and privacy. Phuc ow
 | [Architecture](docs/ARCHITECTURE.md)                 | Components and trust boundaries                                            |
 | [UI design system](docs/UI-DESIGN-SYSTEM.md)         | Shared tokens, components, interaction patterns, and Huong’s design review |
 | [API contract](docs/API-CONTRACT.md)                 | Existing auth DTOs/responses and planned business endpoints                 |
-| [Profile/Consent contract draft](docs/PROFILE-CONSENT-CONTRACT.md) | C012 resource revisions, safe legacy remediation and retained policy/audit evidence; catalogs, retention and signed-URL proposals remain policy-pending |
+| [MVP Profile/Consent contract](docs/PROFILE-CONSENT-CONTRACT.md) | C012 technically approved by Huong at b25e4d6; agreed MVP catalogs/prompts, revisions, legacy/audit and 60-second URL contract; real-user retention, storage/backup and provider enforcement remain PRE-PRODUCTION gates |
 | [Authentication](docs/AUTH-SPEC.md)                  | Sessions, account states, CSRF, and authorization                          |
 | [Authentication foundation](docs/AUTH-FOUNDATION.md) | Implemented T01 contracts, native setup, test evidence and review handoff  |
 | [Database](docs/DATABASE.md)                         | Models and data invariants                                                 |
@@ -140,3 +140,10 @@ Validate cookie sessions on the server, protect state-changing requests against 
 Only QA-approved, owner-confirmed, explicitly share-approved, unrevoked factual claims covered by current matching consent may affect matching. Human observations are contextual assessments. Automated personality inference, fake identity/deepfake verification, paid tiers, checkout, subscriptions, and concierge services are excluded.
 
 Never commit credentials, tokens, production personal data, or private user videos. Incomplete privacy, security, QA, or end-to-end acceptance means internal demonstration only.
+
+C012 technical approval covers reviewed commit
+`b25e4d6d93823f560ae3fc8be443313902097abd`, not production policy approval,
+implementation of C019-C024, or a claim that Draft PR #8 is merged. C019 will
+choose concrete schema/migration design, reusing existing migrations and never
+recreating the initial migration. See the contract's PRE-PRODUCTION register
+for remaining real-user policy approvals and provider verification.

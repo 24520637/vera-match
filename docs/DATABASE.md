@@ -1,6 +1,9 @@
 # Data model — PostgreSQL and Prisma
 
-> `apps/api/prisma/schema.prisma` is a **draft**. Run `prisma validate`, generate a migration, and review foreign keys, indexes, security constraints, and data-lifecycle behavior before using real user data.
+> Reuse the existing `apps/api/prisma/schema.prisma` and migration history.
+> C019 chooses concrete schema/migration design, validates existing structures,
+> and adds incremental migrations only for verified gaps. Never recreate the
+> initial migration. Production security/data-lifecycle approval remains separate.
 
 | Area | Models | Why they exist |
 | --- | --- | --- |
@@ -23,31 +26,33 @@
 
 **Draft model gap:** Staff credential/eligibility and some workflow audit details are described as planned work but may require additional migrations. Do not treat a role flag as proof of reviewer qualification.
 
-## C012 DTO-to-Prisma mapping — PENDING REVIEW
+## C012 DTO-to-Prisma mapping - approved MVP contract, not implemented
 
-The [Profile/Consent contract draft](PROFILE-CONSENT-CONTRACT.md) proposes API
-types for C019-C024. These are not generated Prisma types, implemented routes,
-approved schema changes or a completed C012 review. Its matrix records Huong's
-conditional direction separately from concrete proposals still needing approval.
-Existing tables and the initial migration must be reused; do not recreate them
-to satisfy task IDs.
+Huong technically approved reviewed commit
+`b25e4d6d93823f560ae3fc8be443313902097abd` as the MVP implementation/testing
+contract, with no further technical corrections in this review round.
+The [Profile/Consent contract](PROFILE-CONSENT-CONTRACT.md) separates that
+technical baseline from PRE-PRODUCTION retention/legal, storage/backup and
+signed-URL provider verification gates. These DTOs are not generated Prisma
+types or implemented routes. C019 selects concrete persistence design, reuses
+existing models/migrations and never recreates the initial migration.
 
 | Proposed API type | Existing storage | Mapping and boundary |
 | --- | --- | --- |
-| `ProfilePatchDto` / `ProfileReadDto` | `Profile` plus future independent revision storage | Fields map by name with server userId; visibility defaults false. Wrapper revision/request expectedRevision have no existing column/mechanism. Date/age direction is conditional, no silent legacy reinterpretation; catalogs pending. |
+| `ProfilePatchDto` / `ProfileReadDto` | `Profile` plus future independent revision storage | Fields map by name with server userId; visibility defaults false. Wrapper revision/request expectedRevision have no existing column/mechanism. Date/age and catalogs are approved MVP rules; no silent legacy reinterpretation. |
 | `PreferencesPatchDto` / `PreferencesReadDto` | `MatchPreference` plus future independent revision storage | expectedRevision gates the complete merged write, separately from profile/consent counters. Json?/Int? alone do not enforce catalogs/ranges. |
 | `QuestionnairePutDto` / `QuestionnaireReadDto` | `QuestionnaireAnswer[]` plus future independent questionnaire revision | Existing unique key is (userId,questionKey,questionnaireVersion). Catalog version is not editing revision; member questionnaire revision covers edits across catalogs. Atomic all-three PUT and retired read-only access still apply. No current revision/CAS mechanism exists. |
-| `ConsentPatchDto` / `ConsentReadDto` / `ConsentStateDto` | `Consent` plus proposed revision/event storage | Existing enum has five values, unique `(userId,purpose)` and granted=false. Missing row => OFF projection is accepted review direction, not an implemented API. Current schema has neither policyVersion nor aggregate version/expectedVersion enforcement; retained timestamp/policy rules are proposed. |
+| `ConsentPatchDto` / `ConsentReadDto` / `ConsentStateDto` | `Consent` plus proposed revision/event storage | Existing enum has five values, unique `(userId,purpose)` and granted=false. Missing row => OFF projection is accepted review direction, not an implemented API. Current schema has neither policyVersion nor aggregate version/expectedVersion enforcement; retained timestamp/policy rules are approved MVP contracts. |
 | Auth `CurrentUser` / `AuthUser` | Safe selection from `User` | id/email/displayName/role only. User.displayName is not a Profile column. Do not return Prisma User/Session objects or mutate account fields through profile DTOs. |
 
 ### Existing schema gaps and review dependencies
 
-- **Nullable JSON mapping (D2), conditionally accepted:** interests/values
+- **Nullable JSON mapping (D2), approved for MVP:** interests/values
   and dealBreakers/priorities use `Json?`; database NULL and JSON null remain
   distinct in storage. PATCH null writes database NULL, [] writes a
   JSON empty array and omission leaves storage unchanged. GET projects
   either null representation as API null without backfill. Legacy object/scalar/
-  invalid arrays are not silently rewritten or discarded; the draft proposes
+  invalid arrays are not silently rewritten or discarded; the MVP contract requires
   sanitized 503 DATA_SHAPE_UNAVAILABLE with only allowlisted affected field paths
   and current revision. Validate the complete resulting resource, not just
   submitted keys; untouched malformed fields fail atomically, never get silently
@@ -70,8 +75,8 @@ to satisfy task IDs.
   persistence in the future feature. Do not claim the existing audit table
   already stores the evidence required by C023. Candidate evidence includes
   old/new consent state, accepted policy, actor/member/purpose, server time,
-  operation kind and old/new aggregate consent version. Storage, immutability,
-  retention and access enforcement still require explicit approval.
+  operation kind and old/new aggregate consent version. Concrete storage/immutability enforcement needs implementation review;
+  real-data retention and production access/storage policy need explicit approval.
 - **Policy evidence and append-only enforcement (D9):** current schema has no
   immutable policy content/snapshot, versioned digest/algorithm/locale binding,
   protected event-to-evidence reference or append-only event permissions. A
@@ -93,12 +98,12 @@ to satisfy task IDs.
   uniqueness do not define three canonical questions, accepted vocabulary,
   limits, adult validation or age-range consistency. Add no duplicate models
   merely to express DTO validation; approve application versus DB enforcement.
-- **Concurrency/idempotency (D11), conditional direction / details pending:** these models have updatedAt
-  but no dedicated write-conflict revision. The draft proposes one per-member
+- **Concurrency/idempotency (D11), approved MVP contract / persistence design pending:** these models have updatedAt
+  but no dedicated write-conflict revision. The MVP contract requires one per-member
   aggregate consent version, virtual initial 0, required request expectedVersion
   and transactional CAS of state/version/immutable events. Every accepted consent
   mutation, including already-OFF reaffirmation, advances it to block stale grants;
-  stale versions propose 409 VERSION_CONFLICT. A unique per-member revision and
+  stale versions require 409 VERSION_CONFLICT. A unique per-member revision and
   atomic conditional updates need a reviewed later persistence design; purpose
   deletion must not reset it. Consent version is not questionnaireVersion.
   Separately, accepted technical direction requires independent member/resource
@@ -111,13 +116,13 @@ to satisfy task IDs.
   tables or schema changes are made here.
 - **Idempotency evidence (D11):** no model currently provides scoped
   Idempotency-Key uniqueness, payload fingerprint, operation version/result or
-  replay semantics. Proposed result records expire after 24 hours but cannot
+  replay semantics. MVP deduplication result records expire after 24 hours but cannot
   reset the aggregate version or duplicate audit events. Lookup/CAS/state/event/
-  result writes need one approved transactional design. Exact fields, retention
-  and replay contract remain pending; no new schema is created here.
+  result writes need one approved transactional design. Concrete fields/storage design remain C019 work; real-user retention needs
+  policy approval. Replay semantics are approved for MVP, not implemented here.
 - **Catalog provenance (A):** current JSON/string/questionKey fields do not
   store an approved product-catalog revision or canonical questionnaire prompts.
-  Candidate IDs/prompts are not existing product data. Retired questionnaire
+  Approved MVP IDs/prompts are not existing persisted product data. Retired questionnaire
   versions must remain read-only; future catalog storage/validation and any
   needed provenance migration require review, not duplication of current tables.
 - **Retention and deletion (B):** existing cascade FKs, Video.deletedAt and
@@ -132,16 +137,17 @@ to satisfy task IDs.
   The candidate 365-day audit period is not an approved expiry or lawful basis;
   do not invent an indefinite legal hold because policy sign-off is missing.
 - **Signed media capabilities (C):** Video has metadata, not per-URL revocation,
-  issued-capability tracking or guaranteed provider invalidation. The proposed
+  issued-capability tracking or guaranteed provider invalidation. The approved MVP
   60-second playback TTL/cache/issuance controls are Huong-owned future media
   work. Do not claim current DB flags instantly revoke outstanding object URLs.
 - **Defaults/lifecycle (D2/D10):** User relations do not automatically create
   Profile/MatchPreference or five Consent rows. GET non-provisioning/defaults
   are accepted direction; first-write lazy creation and virtual version behavior
-  are proposals, not registration changes. Existing cascading
+  are approved MVP contracts, not registration changes. Existing cascading
   deletes do not establish an approved retention/audit-deletion policy.
 
-C019 should inspect and verify the already-present relations/indexes before
-proposing changes. C020-C024 remain responsible for API validation, permissions,
+C019 will choose concrete schema/migration design after inspecting and verifying
+already-present relations/indexes. Reuse existing migrations and never recreate
+the initial migration; add incremental changes only for verified gaps. C020-C024 remain responsible for API validation, permissions,
 atomic writes, UI and acceptance evidence. C012 documents gaps only; it changes
 neither Prisma schema/migrations nor Huong's authentication implementation.
