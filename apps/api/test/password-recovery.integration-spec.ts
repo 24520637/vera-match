@@ -818,4 +818,128 @@ describe("password recovery / real PostgreSQL / native Mailpit", () => {
       await done;
     }
   });
+  it.each(["rollback", "lost-commit-ack"] as const)(
+    "keeps an emailed token usable after post-SMTP finalization %s",
+    async (failure) => {
+      const user = await account();
+      const login = await post("login", {
+        email: user.email,
+        password: "synthetic-old-password",
+      });
+      expect(login.status).toBe(200);
+      const Cookie = login.headers.get("set-cookie")!.split(";")[0];
+      const prisma = app.get(PrismaService);
+      const firstWorker = new PasswordRecoveryService(
+        prisma,
+        app.get(EnvironmentService),
+        app.get(EmailService),
+      );
+      firstWorker.request(user.email);
+      await firstWorker.onModuleDestroy();
+      const first = await readResetEmail(user.email);
+      const oldHash = hashResetToken(first.token);
+      await database.client.passwordResetToken.update({
+        where: { tokenHash: oldHash },
+        data: { createdAt: new Date(Date.now() - 61000) },
+      });
+      // A real PostgreSQL error rolls back supersession; alternatively lose confirmation
+      // only after the real finalization transaction commits, to model an ambiguous outcome.
+      let transactionSpy: jest.SpyInstance | undefined;
+      let committedTransactions = 0;
+      if (failure === "rollback") {
+        await database.client.$executeRawUnsafe(
+          `CREATE FUNCTION fail_reset_finalization() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF OLD."tokenHash" = TG_ARGV[0] AND OLD."consumedAt" IS NULL AND NEW."consumedAt" IS NOT NULL THEN RAISE EXCEPTION 'Synthetic post-SMTP finalization failure'; END IF; RETURN NEW; END $$`,
+        );
+        await database.client.$executeRawUnsafe(
+          `CREATE TRIGGER fail_reset_finalization BEFORE UPDATE ON "PasswordResetToken" FOR EACH ROW EXECUTE FUNCTION fail_reset_finalization('${oldHash}')`,
+        );
+      } else {
+        const realTransaction = prisma.$transaction.bind(prisma);
+        transactionSpy = jest
+          .spyOn(prisma, "$transaction")
+          .mockImplementation(async (...args) => {
+            const result = await Reflect.apply(realTransaction, prisma, args);
+            if (++committedTransactions === 2)
+              throw new Error(
+                "Synthetic lost finalization commit acknowledgement",
+              );
+            return result;
+          });
+      }
+      let second!: Awaited<ReturnType<typeof readResetEmail>>;
+      try {
+        const unknown = await post("forgot-password", { email: newEmail() });
+        const response = await post("forgot-password", { email: user.email });
+        expect(response.status).toBe(202);
+        expect(response.headers.get("set-cookie")).toBeNull();
+        expect(await response.json()).toEqual(await unknown.json());
+        await app.get(PasswordRecoveryService).onModuleDestroy();
+        second = await readResetEmail(user.email, [first.id]);
+        const current =
+          await database.client.passwordResetToken.findUniqueOrThrow({
+            where: { tokenHash: hashResetToken(second.token) },
+          });
+        expect(current.consumedAt).toBeNull();
+        expect(current.expiresAt.getTime()).toBeGreaterThan(Date.now());
+        const previous =
+          await database.client.passwordResetToken.findUniqueOrThrow({
+            where: { tokenHash: oldHash },
+          });
+        if (failure === "rollback") expect(previous.consumedAt).toBeNull();
+        else {
+          expect(previous.consumedAt).not.toBeNull();
+          expect(committedTransactions).toBe(2);
+        }
+        expect(
+          (
+            await database.client.user.findUniqueOrThrow({
+              where: { id: user.id },
+            })
+          ).passwordHash,
+        ).toBe(user.passwordHash);
+        expect(
+          (await fetch(base + "/api/auth/me", { headers: { Cookie } })).status,
+        ).toBe(200);
+      } finally {
+        transactionSpy?.mockRestore();
+        if (failure === "rollback") {
+          await database.client.$executeRawUnsafe(
+            `DROP TRIGGER fail_reset_finalization ON "PasswordResetToken"`,
+          );
+          await database.client.$executeRawUnsafe(
+            `DROP FUNCTION fail_reset_finalization()`,
+          );
+        }
+      }
+      const newPassword = "synthetic-finalization-recovery-password";
+      const resets = await Promise.all([
+        post("reset-password", { token: second.token, newPassword }),
+        post("reset-password", { token: second.token, newPassword }),
+      ]);
+      expect(resets.map((response) => response.status).sort()).toEqual([
+        200, 400,
+      ]);
+      expect(
+        (await post("reset-password", { token: first.token, newPassword }))
+          .status,
+      ).toBe(400);
+      expect(
+        await database.client.passwordResetToken.count({
+          where: { userId: user.id, consumedAt: null },
+        }),
+      ).toBe(0);
+      expect(
+        (await fetch(base + "/api/auth/me", { headers: { Cookie } })).status,
+      ).toBe(401);
+      expect(
+        (await post("login", { email: user.email, password: newPassword }))
+          .status,
+      ).toBe(200);
+      expect(
+        await database.client.auditLog.count({
+          where: { actorId: user.id, action: "PASSWORD_RESET_COMPLETED" },
+        }),
+      ).toBe(1);
+    },
+  );
 });
