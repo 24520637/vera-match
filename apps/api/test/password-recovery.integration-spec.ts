@@ -1,3 +1,6 @@
+import { PrismaService } from "../src/database/prisma.service";
+import { EmailService } from "../src/auth/email.service";
+import { createServer } from "node:net";
 import { Test } from "@nestjs/testing";
 import { INestApplication } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
@@ -271,7 +274,10 @@ describe("password recovery / real PostgreSQL / native Mailpit", () => {
       { "X-Forwarded-For": "203.0.113.200" },
     );
     expect(limited.status).toBe(429);
-    const body = await limited.json() as { code: string; retryAfterSeconds: number };
+    const body = (await limited.json()) as {
+      code: string;
+      retryAfterSeconds: number;
+    };
     expect(body.code).toBe("RATE_LIMITED");
     expect(body.retryAfterSeconds).toBeGreaterThan(0);
     expect(limited.headers.get("retry-after")).toBe(
@@ -293,7 +299,173 @@ describe("password recovery / real PostgreSQL / native Mailpit", () => {
     });
     expect(reset.status).toBe(429);
     expect(reset.headers.get("retry-after")).toBe(
-      String(((await reset.json()) as { retryAfterSeconds: number }).retryAfterSeconds),
+      String(
+        ((await reset.json()) as { retryAfterSeconds: number })
+          .retryAfterSeconds,
+      ),
     );
+  });
+  it("rolls back token consumption, password and sessions when the audit insert fails", async () => {
+    const user = await account();
+    const loggedIn = await post("login", {
+      email: user.email,
+      password: "synthetic-old-password",
+    });
+    const Cookie = loggedIn.headers.get("set-cookie")!.split(";")[0];
+    await post("forgot-password", { email: user.email });
+    const mail = await readResetEmail(user.email);
+    // This entire database is a guarded disposable synthetic schema, never public or application data.
+    await database.client.$executeRawUnsafe(
+      `CREATE FUNCTION fail_recovery_audit() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.action = 'PASSWORD_RESET_COMPLETED' THEN RAISE EXCEPTION 'Synthetic audit failure'; END IF; RETURN NEW; END $$`,
+    );
+    await database.client.$executeRawUnsafe(
+      `CREATE TRIGGER fail_recovery_audit BEFORE INSERT ON "AuditLog" FOR EACH ROW EXECUTE FUNCTION fail_recovery_audit()`,
+    );
+    try {
+      const response = await post("reset-password", {
+        token: mail.token,
+        newPassword: "synthetic-replacement-password",
+      });
+      expect(response.status).toBe(503);
+      expect(await response.json()).toEqual({
+        code: "RESET_UNAVAILABLE",
+        message: "Password reset is temporarily unavailable. Try again later.",
+      });
+      expect(
+        (
+          await database.client.user.findUniqueOrThrow({
+            where: { id: user.id },
+          })
+        ).passwordHash,
+      ).toBe(user.passwordHash);
+      expect(
+        (
+          await database.client.passwordResetToken.findUniqueOrThrow({
+            where: { tokenHash: hashResetToken(mail.token) },
+          })
+        ).consumedAt,
+      ).toBeNull();
+      expect(
+        (await fetch(base + "/api/auth/me", { headers: { Cookie } })).status,
+      ).toBe(200);
+      expect(
+        await database.client.auditLog.count({ where: { actorId: user.id } }),
+      ).toBe(0);
+    } finally {
+      await database.client.$executeRawUnsafe(
+        `DROP TRIGGER fail_recovery_audit ON "AuditLog"`,
+      );
+      await database.client.$executeRawUnsafe(
+        `DROP FUNCTION fail_recovery_audit()`,
+      );
+    }
+    expect(
+      (
+        await post("reset-password", {
+          token: mail.token,
+          newPassword: "synthetic-replacement-password",
+        })
+      ).status,
+    ).toBe(200);
+    expect(
+      (await fetch(base + "/api/auth/me", { headers: { Cookie } })).status,
+    ).toBe(401);
+  });
+  it("invalidates an undelivered token without leaking the SMTP failure through the request response", async () => {
+    const user = await account();
+    const server = createServer();
+    await new Promise<void>((resolve) =>
+      server.listen(0, "127.0.0.1", resolve),
+    );
+    const port = (server.address() as { port: number }).port;
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
+    const original = app.get(EnvironmentService).values;
+    const environment = {
+      values: {
+        ...original,
+        smtp: { ...original.smtp, host: "127.0.0.1", port },
+      },
+    } as EnvironmentService;
+    const mailer = new EmailService(environment);
+    const recovery = new PasswordRecoveryService(
+      app.get(PrismaService),
+      environment,
+      mailer,
+    );
+    try {
+      const accepted = recovery.request(user.email);
+      expect(accepted.message).toContain("If this address is eligible");
+      await recovery.onModuleDestroy();
+      expect(
+        (
+          await database.client.passwordResetToken.findFirstOrThrow({
+            where: { userId: user.id },
+          })
+        ).consumedAt,
+      ).not.toBeNull();
+      expect(await findTestEmails(user.email)).toEqual([]);
+    } finally {
+      await recovery.onModuleDestroy();
+      mailer.onApplicationShutdown();
+    }
+  });
+  it("supersedes old links after the persisted cooldown and limits issuance across worker restarts", async () => {
+    const user = await account();
+    const issue = async () => {
+      const worker = new PasswordRecoveryService(
+        app.get(PrismaService),
+        app.get(EnvironmentService),
+        app.get(EmailService),
+      );
+      worker.request(user.email);
+      await worker.onModuleDestroy();
+    };
+    await issue();
+    const first = await readResetEmail(user.email);
+    await issue();
+    expect(
+      await database.client.passwordResetToken.count({
+        where: { userId: user.id },
+      }),
+    ).toBe(1);
+    await database.client.passwordResetToken.updateMany({
+      where: { userId: user.id },
+      data: { createdAt: new Date(Date.now() - 61000) },
+    });
+    await issue();
+    const second = await readResetEmail(user.email, [first.id]);
+    expect(
+      (
+        await post("reset-password", {
+          token: first.token,
+          newPassword: "synthetic-new-password",
+        })
+      ).status,
+    ).toBe(400);
+    await database.client.passwordResetToken.updateMany({
+      where: { userId: user.id },
+      data: { createdAt: new Date(Date.now() - 61000) },
+    });
+    await issue();
+    await database.client.passwordResetToken.updateMany({
+      where: { userId: user.id },
+      data: { createdAt: new Date(Date.now() - 61000) },
+    });
+    await issue();
+    expect(
+      await database.client.passwordResetToken.count({
+        where: { userId: user.id },
+      }),
+    ).toBe(3);
+    expect(
+      (
+        await database.client.passwordResetToken.findUniqueOrThrow({
+          where: { tokenHash: hashResetToken(second.token) },
+        })
+      ).consumedAt,
+    ).not.toBeNull();
+    expect((await findTestEmails(user.email)).length).toBe(3);
   });
 });

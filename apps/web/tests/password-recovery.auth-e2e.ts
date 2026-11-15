@@ -1,6 +1,6 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import {
   clearTestEmails,
   readActivationEmail,
@@ -99,6 +99,17 @@ test("recovers through real SMTP and forms, revokes two independent browser sess
       .getByRole("button", { name: "Sign in", exact: true })
       .click();
     await expect(page).toHaveURL("/account");
+    await page.goto(mail.link);
+    await page.getByLabel(/^New password/).fill(newPassword);
+    await page.getByLabel(/^Confirm new password/).fill(newPassword);
+    await page.getByRole("button", { name: "Update password" }).click();
+    await expect(
+      page.getByText("This link cannot be used.", { exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("link", { name: "Request a new reset link" }),
+    ).toBeVisible();
+
     expect(
       await page.evaluate(() => ({
         local: localStorage.length,
@@ -208,4 +219,66 @@ test("rejects forged origins and cross-site recovery requests through the actual
       ).status(),
     ).toBe(403);
   }
+});
+
+test("preserves recovery inputs after network failure and handles reset 429 without storing secrets", async ({
+  page,
+  context,
+}) => {
+  const email = `recovery-network-${randomUUID()}@example.invalid`;
+  await page.goto("/forgot-password");
+  await page.getByLabel("Email address").fill(email);
+  await page.route("**/api/auth/forgot-password", (route) =>
+    route.abort("failed"),
+  );
+  await page.getByRole("button", { name: "Request reset link" }).click();
+  await expect(
+    page.getByText("The request could not be completed.", { exact: true }),
+  ).toBeVisible();
+  await expect(page.getByLabel("Email address")).toHaveValue(email);
+  await expect(
+    page.getByRole("button", { name: "Request reset link" }),
+  ).toBeEnabled();
+  await page.unroute("**/api/auth/forgot-password");
+  // The shared test process also exercises the real global IP quota in both viewports.
+  // Network failure must preserve an explicit retry action; no automatic email resubmission.
+  const token = randomBytes(32).toString("base64url");
+  const newPassword = "synthetic-network-new-password";
+  await page.goto(`/reset-password#token=${token}`);
+  await expect(page).toHaveURL("/reset-password");
+  await page.getByLabel(/^New password/).fill(newPassword);
+  await page.getByLabel(/^Confirm new password/).fill(newPassword);
+  await page.route("**/api/auth/reset-password", (route) =>
+    route.abort("failed"),
+  );
+  await page.getByRole("button", { name: "Update password" }).click();
+  await expect(
+    page.getByText("The update could not be confirmed.", { exact: true }),
+  ).toBeVisible();
+  await expect(page.getByLabel(/^New password/)).toHaveValue(newPassword);
+  await expect(page.getByLabel(/^Confirm new password/)).toHaveValue(
+    newPassword,
+  );
+  await page.unroute("**/api/auth/reset-password");
+  for (let i = 0; i < 5; i++)
+    expect(
+      (
+        await context.request.post("/api/auth/reset-password", {
+          headers: { Origin: "http://localhost:3100" },
+          data: { token, newPassword },
+        })
+      ).status(),
+    ).toBe(400);
+  await page.getByRole("button", { name: "Update password" }).click();
+  await expect(page.getByText(/You can try again in/)).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Update password" }),
+  ).toBeDisabled();
+  await expect(page.getByLabel(/^New password/)).toHaveValue(newPassword);
+  expect(
+    await page.evaluate(() => ({
+      local: localStorage.length,
+      session: sessionStorage.length,
+    })),
+  ).toEqual({ local: 0, session: 0 });
 });
