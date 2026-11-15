@@ -1,3 +1,4 @@
+import { PasswordRecoveryService } from "./password-recovery.service";
 import {
   Body,
   Controller,
@@ -32,12 +33,20 @@ export const REGISTRATION_RESPONSE = {
 @Controller("auth")
 export class AuthController {
   constructor(
+    private readonly recovery: PasswordRecoveryService,
     private readonly registration: RegistrationService,
     private readonly verification: VerificationService,
     private readonly loginService: LoginService,
     private readonly environment: EnvironmentService,
     private readonly logoutService: LogoutService,
   ) {}
+  @Post("forgot-password")
+  @HttpCode(202)
+  @UseGuards(AuthRequestGuard)
+  forgotPassword(@Body() input: EmailDto) {
+    return this.recovery.request(input.email);
+  }
+
   @Post("logout")
   @HttpCode(204)
   @UseGuards(AuthRequestGuard)
