@@ -1,3 +1,6 @@
+import { ResetPasswordDto } from "./reset-password.dto";
+import { PasswordResetService } from "./password-reset.service";
+import { PasswordRecoveryService } from "./password-recovery.service";
 import {
   Body,
   Controller,
@@ -32,12 +35,28 @@ export const REGISTRATION_RESPONSE = {
 @Controller("auth")
 export class AuthController {
   constructor(
+    private readonly resetService: PasswordResetService,
+    private readonly recovery: PasswordRecoveryService,
     private readonly registration: RegistrationService,
     private readonly verification: VerificationService,
     private readonly loginService: LoginService,
     private readonly environment: EnvironmentService,
     private readonly logoutService: LogoutService,
   ) {}
+  @Post("reset-password")
+  @HttpCode(200)
+  @UseGuards(AuthRequestGuard)
+  resetPassword(@Body() input: ResetPasswordDto) {
+    return this.resetService.reset(input);
+  }
+
+  @Post("forgot-password")
+  @HttpCode(202)
+  @UseGuards(AuthRequestGuard)
+  forgotPassword(@Body() input: EmailDto) {
+    return this.recovery.request(input.email);
+  }
+
   @Post("logout")
   @HttpCode(204)
   @UseGuards(AuthRequestGuard)

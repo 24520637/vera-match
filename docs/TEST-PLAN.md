@@ -246,3 +246,15 @@ this C012 draft does not implement or execute C019-C024 tests.
   range/HEAD, expiry/race/in-flight behavior. Review residual pre-issued URL risk.
 - Execute and record implementation/security tests separately; documentation
   approval does not establish PASS results or completion of C019-C024.
+
+## T13 password recovery regression
+
+- Unit: bounded background acceptance without synchronous account lookup, typed recovery TTL/cooldown, password/token validation, Unicode and whitespace policy, origin/Fetch Metadata checks and exact rate-window boundaries.
+- Native PostgreSQL/Mailpit integration: generic known/unknown/ineligible responses, actual SMTP fragment link and hash-only storage, persisted cooldown across worker restarts, superseded/expired/used tokens, concurrent consumption, all target sessions revoked, unrelated sessions preserved, old/new password login, audit failure rollback and SMTP failure invalidation. All data is synthetic in disposable schemas; cleanup removes only owned schemas and recipient messages.
+- Actual Next proxy/browser: full recovery and subsequent login, two independently issued browser sessions, used-link recovery, keyboard validation focus, WCAG axe checks, desktop/mobile/320px layout, Origin/Fetch Metadata failures, real 429 headers/countdown and input preservation after network failure. Negative network interception aborts requests; authentication success uses the real API and SMTP. No secret-bearing traces are recorded.
+- Commands: `npm test`, `npm run test:integration --workspace apps/api`, `npm run test:auth --workspace apps/web`, `npm run test:ui --workspace apps/web`, `npm run lint`, `npm run build`, `npm run prisma:validate`, `npm run prisma:generate`, `prisma migrate status` and read-only `prisma migrate diff`.
+- Production SMTP, deployed proxy topology, crash-durable delivery and shared multi-instance throttling are deployment gates, not verified by local Mailpit tests. Dependency audit findings inherited from the unchanged lockfile must be reported separately.
+
+### T13 security/reliability review
+
+Recovery regressions additionally cover independent real loopback clients, shared native proxy socket quotas, forged forwarding headers, pair-quota isolation and exact boundaries. Native SMTP greeting timeout preserves the previous delivered link and waits for worker shutdown. Actual Mailpit deliveries with controlled acknowledgement ordering verify late-ack safety and concurrent old/new-token reset atomicity. Queue tests cover active-job saturation, draining accepted work during shutdown and redacted failure continuation. No production proxy, multi-instance limiter or crash-durable outbox is claimed by these tests.
