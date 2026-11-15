@@ -229,4 +229,71 @@ describe("password recovery / real PostgreSQL / native Mailpit", () => {
         .consumedAt,
     ).toBeNull();
   });
+  it("rejects foreign/missing origins, cross-site metadata and non-JSON before recovery, while same-origin JSON works", async () => {
+    for (const [path, body] of [
+      ["forgot-password", { email: newEmail() }],
+      [
+        "reset-password",
+        { token: "a".repeat(43), newPassword: "synthetic-password" },
+      ],
+    ] as const) {
+      for (const Origin of ["", "null", "https://attacker.invalid"])
+        expect((await post(path, body, { Origin })).status).toBe(403);
+      expect(
+        (await post(path, body, { "Sec-Fetch-Site": "cross-site" })).status,
+      ).toBe(403);
+      expect(
+        (await post(path, body, { "Content-Type": "text/plain" })).status,
+      ).toBe(415);
+      expect(
+        (await post(path, body, { "Sec-Fetch-Site": "same-origin" })).status,
+      ).toBe(path === "forgot-password" ? 202 : 400);
+    }
+    expect(
+      (await post("forgot-password", { email: newEmail(), role: "ADMIN" }))
+        .status,
+    ).toBe(400);
+  });
+  it("returns consistent 429 feedback and ignores forged forwarded IPs under direct access", async () => {
+    for (let i = 0; i < 10; i++)
+      expect(
+        (
+          await post(
+            "forgot-password",
+            { email: newEmail() },
+            { "X-Forwarded-For": "192.0.2." + (i + 1) },
+          )
+        ).status,
+      ).toBe(202);
+    const limited = await post(
+      "forgot-password",
+      { email: newEmail() },
+      { "X-Forwarded-For": "203.0.113.200" },
+    );
+    expect(limited.status).toBe(429);
+    const body = await limited.json() as { code: string; retryAfterSeconds: number };
+    expect(body.code).toBe("RATE_LIMITED");
+    expect(body.retryAfterSeconds).toBeGreaterThan(0);
+    expect(limited.headers.get("retry-after")).toBe(
+      String(body.retryAfterSeconds),
+    );
+    expect(limited.headers.get("set-cookie")).toBeNull();
+    for (let i = 0; i < 5; i++)
+      expect(
+        (
+          await post("reset-password", {
+            token: "a".repeat(43),
+            newPassword: "synthetic-password",
+          })
+        ).status,
+      ).toBe(400);
+    const reset = await post("reset-password", {
+      token: "a".repeat(43),
+      newPassword: "synthetic-password",
+    });
+    expect(reset.status).toBe(429);
+    expect(reset.headers.get("retry-after")).toBe(
+      String(((await reset.json()) as { retryAfterSeconds: number }).retryAfterSeconds),
+    );
+  });
 });

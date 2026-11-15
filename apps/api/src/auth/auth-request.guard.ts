@@ -52,7 +52,10 @@ export class AuthRequestGuard implements CanActivate {
   ) {}
   canActivate(context: ExecutionContext) {
     const request = context.switchToHttp().getRequest<Request>();
-    if (request.headers.origin !== this.environment.values.corsOrigin)
+    if (
+      request.headers.origin !== this.environment.values.corsOrigin ||
+      request.headers["sec-fetch-site"] === "cross-site"
+    )
       throw new ForbiddenException({
         code: "ORIGIN_DENIED",
         message: "This request origin is not allowed.",
@@ -66,13 +69,15 @@ export class AuthRequestGuard implements CanActivate {
     this.limiter.consume(
       `${action}:ip`,
       request.ip ?? request.socket.remoteAddress ?? "unknown",
-      action === "forgotPassword"
-        ? 10
-        : action === "register"
-          ? 20
-          : action === "resend"
-            ? 10
-            : 60,
+      action === "resetPassword"
+        ? 20
+        : action === "forgotPassword"
+          ? 10
+          : action === "register"
+            ? 20
+            : action === "resend"
+              ? 10
+              : 60,
     );
     if (action === "login" || action === "forgotPassword") {
       const email =
@@ -84,6 +89,15 @@ export class AuthRequestGuard implements CanActivate {
         email,
         action === "login" ? 10 : 3,
       );
+    }
+    if (action === "resetPassword") {
+      // Bound attempts against one bearer credential without retaining the raw token.
+      const token =
+        typeof request.body?.token === "string" &&
+        /^[A-Za-z0-9_-]{43}$/.test(request.body.token)
+          ? request.body.token
+          : "invalid";
+      this.limiter.consume("resetPassword:token", token, 5);
     }
     return true;
   }

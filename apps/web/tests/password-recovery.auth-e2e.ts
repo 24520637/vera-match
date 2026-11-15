@@ -141,3 +141,71 @@ test("recovery pages are accessible and responsive, with an explicit missing-lin
     page.getByRole("link", { name: "Request a new reset link" }),
   ).toBeVisible();
 });
+
+test("shows real proxy 429 feedback without trusting X-Forwarded-For, preserving form input", async ({
+  page,
+  context,
+}) => {
+  const email = `recovery-limit-${randomUUID()}@example.invalid`;
+  await page.clock.install();
+  for (let i = 0; i < 3; i++)
+    expect(
+      (
+        await context.request.post("/api/auth/forgot-password", {
+          headers: {
+            Origin: "http://localhost:3100",
+            "X-Forwarded-For": "192.0.2." + (i + 1),
+          },
+          data: { email },
+        })
+      ).status(),
+    ).toBe(202);
+  await page.goto("/forgot-password");
+  await page.getByLabel("Email address").fill(email);
+  const response = page.waitForResponse(
+    (r) => r.url().endsWith("/api/auth/forgot-password") && r.status() === 429,
+  );
+  await page.getByRole("button", { name: "Request reset link" }).click();
+  const limited = await response;
+  expect(limited.headers()["retry-after"]).toMatch(/^\d+$/);
+  await expect(page.getByText(/You can try again in/)).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Request reset link" }),
+  ).toBeDisabled();
+  await expect(page.getByLabel("Email address")).toHaveValue(email);
+  await page.clock.fastForward(901000);
+  await expect(
+    page.getByRole("button", { name: "Request reset link" }),
+  ).toBeEnabled();
+});
+
+test("rejects forged origins and cross-site recovery requests through the actual Next proxy", async ({
+  context,
+}) => {
+  for (const path of ["forgot-password", "reset-password"]) {
+    const data =
+      path === "forgot-password"
+        ? { email: `recovery-csrf-${randomUUID()}@example.invalid` }
+        : { token: "a".repeat(43), newPassword: "synthetic-password" };
+    for (const Origin of ["https://attacker.invalid", "null"])
+      expect(
+        (
+          await context.request.post(`/api/auth/${path}`, {
+            headers: { Origin, "X-Forwarded-For": "192.0.2.55" },
+            data,
+          })
+        ).status(),
+      ).toBe(403);
+    expect(
+      (
+        await context.request.post(`/api/auth/${path}`, {
+          headers: {
+            Origin: "http://localhost:3100",
+            "Sec-Fetch-Site": "cross-site",
+          },
+          data,
+        })
+      ).status(),
+    ).toBe(403);
+  }
+});
