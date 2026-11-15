@@ -11,7 +11,8 @@ routes, seeds or migrations. [Auth contracts](API-CONTRACT.md) remain unchanged.
 Historical scope: `5deaf06:docs/COMMIT-PLAN.csv`, agree response envelopes/types
 with Huong and complete contract review.
 
-Review basis: both rounds of Huong's feedback supplied for Draft PR #8.
+Review basis: Huong's supplied PR #8 feedback, including the latest technical
+review on resource revisions, legacy remediation and retained policy/audit evidence.
 **Conditionally accepted** records the second-round conditions, not a completed
 PR approval or implementation. Product vocabulary, retention schedules, URL TTL
 and remaining mechanism details labeled **PROPOSED / PENDING APPROVAL** need
@@ -22,16 +23,16 @@ explicit confirmation. Examples use synthetic data and unapproved policy IDs.
 | ID | Accepted review direction | Proposed detail / outstanding approval |
 | --- | --- | --- |
 | D1 | Preserve auth; separate resource wrappers; HTTP 400; dot/index paths; whole-request errors at _form; visible cross-field errors. | Proposed UI placement/unknown-path fallback below; exact new feature codes remain reviewable. Existing auth formatter is unchanged. |
-| D2 | GET never provisions; absent resources return null/empty/OFF; omission unchanged, null clears nullable values, [] empty; API null writes database NULL and reads SQL/JSON null as API null. | Legacy malformed data fails safely and cannot block withdrawal. Exact legacy error/remediation and first-write policy still proposed. |
+| D2 | GET/default/null rules preserved; validate complete resulting state; never implicitly repair unrelated legacy fields; safe actionable 503; legacy profile/preferences cannot block withdrawal. | Error/remediation steps below specify technical direction; operator escalation and any destructive repair still need separate approval. |
 | D3 | Active verified MEMBER, own data, session-derived user ID; staff do not bypass. | No staff access expansion proposed. |
 | D4 | Previous MVP thresholds provisionally acceptable only with independent withdrawal capacity; 429 includes Retry-After and is never withdrawal success. | Separate revoke/member and revoke/IP quotas, mixed-batch separation and gateway reservation below need confirmation; no grant/profile bucket may drain them. |
 | D5 | Optional draft birthDate; UTC-midnight/date-only storage, UTC age, minimum 18, Feb 29 observed March 1; no matching without birthDate; declaredAdult not verified age. | Do not reinterpret legacy timestamps. Exact remediation and interaction with proposed MVP eligibility ceiling remain review items. |
 | D6 | displayName on User; occupation/city max 120 code points, bio max 2000; NFC/outer trim/newlines, whitespace-only rejected, internal bio newlines preserved. | Product catalogs/list caps in section A still await explicit approval. |
 | D7 | Version 1; response length 1-2000; stable catalog order; all three answers atomic; retired versions read-only. | Exact keys/prompts, retired-version read selector and catalog evolution in section A need approval; no PENDING_KEY_* product IDs. |
 | D8 | Selectable ages 18-120; null bounds unrestricted on that side within MVP eligibility; different goals hard-filter only if explicitly selected; validate merged state. | Exact catalog, priority comparison/defaults and proposed MVP eligibility ceiling in section A await approval. |
-| D9 | Server policy registry; valid policy for grants, no new policy for revoke; state/event one transaction; reaffirmation distinct from state change. | Event/storage details and idempotency retention proposed; data-retention policy in section B is NOT approved. |
+| D9 | Server registry, policy-checked grants, policy-less revoke; append-only events, atomic state/evidence; immutable policy content or verifiable hash with corresponding snapshot; retention-safe user deletion. | Technical evidence/de-identification constraints below do not approve retention duration, lawful basis, mapping retention or storage technology. Section B is policy-pending. |
 | D10 | Block new API-authorized access/matching contributions before success; async cleanup has retry/owner; issued-URL limitations explicit. | Proposed retention in B and 60-second URL TTL/enforcement in C await approval; outstanding bearer URLs are a stated residual risk. |
-| D11 | Aggregate version, virtual 0, CAS, explicit OFF advances version; idempotency cannot duplicate events/versions; conflicts require user action, no automatic grant retry. | Idempotency-Key format/replay/24-hour deduplication window and detailed storage/recovery below need approval. |
+| D11 | Separate Profile/Preferences/Questionnaire revisions, expectedRevision and stale-write 409; questionnaireVersion is catalog-only. Preserve separate aggregate consent version/CAS, explicit OFF version advance and idempotent events. | Accepted technical direction is not implemented; physical revision schema and detailed idempotency storage/replay/retention remain reviewable. |
 
 D4/D6/D7/D8/D11 are **not fully approved** merely because their directions are
 conditionally accepted. Record reviewer, decision/date and reference for the
@@ -46,18 +47,20 @@ and five separate consent purposes OFF by default. Models are storage, not DTOs.
 
 | Route under /api | Request | Candidate 200 resource wrapper |
 | --- | --- | --- |
-| GET /profile/me | No body | {profile: ProfileReadDto or null} |
-| PATCH /profile/me | ProfilePatchDto | {profile: ProfileReadDto} |
-| GET /questionnaire/me | No body | {questionnaire: QuestionnaireReadDto} |
-| PUT /questionnaire/me | QuestionnairePutDto | {questionnaire: QuestionnaireReadDto} |
-| GET /preferences/me | No body | {preferences: PreferencesReadDto or null} |
-| PATCH /preferences/me | PreferencesPatchDto | {preferences: PreferencesReadDto} |
+| GET /profile/me | No body | {revision: number, profile: ProfileReadDto or null} |
+| PATCH /profile/me | ProfilePatchDto with expectedRevision | {revision: number, profile: ProfileReadDto} |
+| GET /questionnaire/me | No body; optional catalog selector below | {revision: number, questionnaire: QuestionnaireReadDto} |
+| PUT /questionnaire/me | QuestionnairePutDto with expectedRevision | {revision: number, questionnaire: QuestionnaireReadDto} |
+| GET /preferences/me | No body | {revision: number, preferences: PreferencesReadDto or null} |
+| PATCH /preferences/me | PreferencesPatchDto with expectedRevision | {revision: number, preferences: PreferencesReadDto} |
 | GET /consents/me | No body | ConsentReadDto |
 | PATCH /consents/me | ConsentPatchDto | ConsentReadDto |
 
 The questionnaire wrapper refines the earlier unwrapped example; consent version
 fields follow D11's conditional direction. These are future resource contracts,
 not deployed routes or changes to auth response shapes.
+Each profile/preferences/questionnaire wrapper revision is independent; it is
+not the aggregate consent version. Existing auth responses gain no revision.
 
 **Accepted D2/D3:** absent profile/preferences return null, absent answers an
 empty array and absent consent purposes OFF, without DB writes. GET must not
@@ -68,7 +71,8 @@ Null clears only nullable values, writes database NULL and projects either
 database NULL or stored JSON null back as API null. Malformed legacy profile
 or preferences must never be read/validated as a prerequisite for withdrawal.
 
-**Proposed details:** reject unknown/privileged fields, empty mutations,
+**Proposed details:** reject unknown/privileged fields, empty mutations
+(expectedRevision alone is not a resource edit),
 duplicate keys/purposes, invalid types and out-of-bound values. Arrays replace
 whole fields. No string-to-boolean/number coercion. First profile/preferences
 PATCH may upsert with other nullable fields unset and visibility false; no
@@ -164,17 +168,106 @@ cleared/unset, distinct from [] as explicitly empty; apply this future contract:
 | Legacy valid array | Return only if valid under approved read/catalog rules |
 | Legacy object/scalar/invalid array | Never silently coerce, filter, erase or rewrite |
 
-**Legacy proposal:** return sanitized 503 DATA_SHAPE_UNAVAILABLE on incompatible
-authorized reads rather than silently returning empty data. Preserve the row.
-Allow replacement only through an explicit valid member write. An unrelated
-PATCH must not silently normalize legacy JSON null or invalid fields. Whether
-an invalid untouched field blocks a profile/preferences write still needs approval.
-It cannot block consent withdrawal: that transaction loads only auth, consent,
-revision/idempotency/audit dependencies, not profile/preferences/questionnaire
-projections or catalogs. Cleanup projection failures are retried after access
-has been removed, never used to reject otherwise-valid withdrawal.
-Any bulk cleanup/backfill requires a separate reviewed plan, never a GET-side
-write. Neither conversion nor migration is authorized by this document.
+**Accepted technical direction:** an authorized read or a mutation whose complete
+result remains malformed fails safely with 503 DATA_SHAPE_UNAVAILABLE. Do not
+return a partial resource as success, silently repair an unrelated field, drop
+unknown legacy keys, normalize omitted storage or delete malformed rows. Merge
+only explicitly submitted fields, preserving untouched values, then validate the
+entire candidate resource before committing any state/revision change. Invalid
+new request fields are 400; malformed persisted data still present in the result
+is 503. A stale revision is 409, not permission to overwrite/repair.
+
+This check addresses one resource, not the whole account. Consent withdrawal
+must not load/validate profile/preferences/questionnaire projections or catalogs;
+their errors cannot block or contaminate a withdrawal response.
+
+### Safe legacy error and explicit remediation workflow
+
+For the authorized owner only, return a generic message, resource name, current
+resource revision and allowlisted field paths identifying what needs attention:
+
+```json
+{
+  "code": "DATA_SHAPE_UNAVAILABLE",
+  "message": "Stored profile data needs review before this change can be saved.",
+  "resource": "profile",
+  "revision": 3,
+  "details": [
+    { "field": "interests", "messages": ["Explicitly replace or clear this field before saving."] }
+  ],
+  "remediation": { "action": "EXPLICIT_REPLACEMENT_REQUIRED", "fields": ["interests"] }
+}
+```
+
+No raw stored/submitted values, unknown JSON property names, other user IDs,
+SQL/stack traces, policy text, tokens or private content appear in this error.
+Use schema-known paths; use _form if a malformed shape cannot be located safely.
+The revision is a concurrency token, not disclosure of another member's state.
+This is future feature output, not an implemented auth error. Do not add a
+Retry-After unless a real temporary recovery deadline is known; blind retry
+cannot fix malformed data.
+
+1. Reject the write atomically; keep original data and revision unchanged. Show
+   visible affected-field/_form errors and preserve the user's unsaved edits.
+2. Let the owner explicitly choose replacement or permitted null/[] clearing
+   for each affected field. Never preselect destructive clearing or send a
+   default-filled full PATCH that overwrites valid fields the UI cannot read.
+3. Submit precise corrections with the reported expectedRevision after explicit
+   confirmation. Re-read storage in the transaction, merge only submitted keys
+   and validate the complete result. Commit all changes/revision together only
+   when valid; remaining malformed fields still yield 503.
+4. Questionnaire PUT still supplies all three approved answers, but cannot
+   silently delete malformed/unknown legacy rows outside the submitted catalog
+   scope. Cases normal DTOs cannot safely express need a separately reviewed
+   owner-assisted/operator remediation plan, not a generic repair API.
+5. That plan names exact rows/fields, authorization, dry-run findings, owner/
+   policy approval, rollback and verification. Any quarantine/backup needs
+   retention approval. Record minimal repair evidence without raw text; review
+   does not grant staff a /me bypass. No automatic destructive migration,
+   background repair or GET-side backfill is authorized by this document.
+
+The UI keeps independent withdrawal available throughout remediation. Cleanup
+projection failures are retried after access removal, never used to undo an
+otherwise-valid successful withdrawal.
+
+## Resource editing revisions - accepted technical direction, not implemented
+
+Profile, Preferences and Questionnaire each have a server-owned nonnegative safe
+integer revision scoped to member + resource. GET returns it in the wrapper;
+PATCH/PUT must send expectedRevision. Missing/invalid expectedRevision is HTTP
+400 at that field. A stale value is HTTP 409 RESOURCE_REVISION_CONFLICT at _form,
+with no write, partial questionnaire save or revision increment.
+
+No resource shares another's counter: editing a profile cannot consume a
+preferences/questionnaire revision or any consent version. Questionnaire's one
+editing revision covers that member's questionnaire answer resource across
+catalog versions; questionnaireVersion selects the catalog, never authorizes an
+overwrite. A retired-version GET returns that resource's current editing revision
+with the requested saved catalog snapshot; retired versions stay read-only.
+
+Before creation, revision 0 is virtual and GET writes nothing. First write must
+enforce unique member/resource initialization and CAS with the data transaction.
+Later writes authorize, read current revision/data, compare expectedRevision,
+validate request and complete merged resource, apply the conditional write and
+increment exactly once. Any failed comparison/validation/write rolls back all
+changes. Clearing/removing a data row must not reset the resource revision during
+account lifetime. An accepted nonempty mutation consumes a revision even when
+submitted values equal current values; that equality is not idempotency.
+Existing-row initialization and the physical storage design require review
+before implementation; no write path may bypass CAS once enabled.
+
+```json
+{
+  "code": "RESOURCE_REVISION_CONFLICT",
+  "message": "This resource changed. Reload and review your edits before saving.",
+  "details": [{ "field": "_form", "messages": ["Reload before submitting again."] }]
+}
+```
+
+Keep unsaved edits after 409, fetch fresh data/revision and require explicit user
+review before resubmission. Never silently merge and retry a mutation. Consent
+expectedVersion/version/CAS/idempotency below remains separate; expectedRevision
+must not replace or reset that consent mechanism.
 
 ## A. Product catalog and questionnaire - vocabulary PENDING APPROVAL
 
@@ -186,6 +279,7 @@ The conditional numeric/date/normalization directions are labeled separately.
 
 ```ts
 type ProfilePatchDto = {
+  expectedRevision: number;
   birthDate?: string | null;
   occupation?: string | null;
   city?: string | null;
@@ -246,11 +340,12 @@ A birth date is self-reported; declaredAdult is not verified age or identity.
 Synthetic PATCH and response using candidate vocabulary:
 
 ```json
-{ "occupation": "Synthetic occupation", "interests": ["reading"], "visibilityEnabled": false }
+{ "expectedRevision": 0, "occupation": "Synthetic occupation", "interests": ["reading"], "visibilityEnabled": false }
 ```
 
 ```json
 {
+  "revision": 1,
   "profile": {
     "birthDate": null,
     "occupation": "Synthetic occupation",
@@ -283,6 +378,7 @@ PENDING_KEY_* from earlier examples are never product keys.
 
 ```ts
 type QuestionnairePutDto = {
+  expectedRevision: number;
   questionnaireVersion: number;
   answers: { questionKey: string; responseText: string }[];
 };
@@ -304,11 +400,13 @@ returns that known current/retired catalog and only the caller's saved answers;
 unknown versions fail 400, PUT to a retired version fails 409
 QUESTIONNAIRE_VERSION_RETIRED with a visible _form error. Saved answers remain
 readable until their separately approved retention expiry. Stable catalog order
-is accepted; exact selector/status and concurrent-edit rules remain proposals.
-questionnaireVersion is a catalog version, not a write-conflict token.
+is accepted; exact selector/status remains reviewable. Separate expectedRevision/
+revision rules above apply; questionnaireVersion is catalog-only, not a
+write-conflict token.
 
 ```json
 {
+  "expectedRevision": 0,
   "questionnaireVersion": 1,
   "answers": [
     { "questionKey": "relationship-intention", "responseText": "Synthetic intention." },
@@ -318,12 +416,14 @@ questionnaireVersion is a catalog version, not a write-conflict token.
 }
 ```
 
-Success wraps these saved fields in questionnaire, adding per-answer updatedAt.
+Success returns the advanced wrapper revision plus questionnaire containing
+saved catalog version/answers and per-answer updatedAt.
 
 ### Preferences, compatibility and priority ordering - catalog PENDING APPROVAL
 
 ```ts
 type PreferencesPatchDto = {
+  expectedRevision: number;
   minAge?: number | null;
   maxAge?: number | null;
   relationshipGoal?: string | null;
@@ -372,7 +472,8 @@ an opaque recommendation key, not sensitive fields. Apply reciprocal hard
 eligibility first; this directional ranking does not finalize T14's reciprocal
 aggregation. All ordering/default/formula/catalog choices are PENDING APPROVAL
 and need Phuc/Huong matching review. They never override a hard constraint.
-Handling of legacy invalid ranges must be agreed, never silently repaired.
+Malformed persisted ranges follow the 503/remediation workflow. Complete merged
+state validation never silently repairs an omitted bound.
 
 ### Catalog compatibility and versioning - PROPOSED / PENDING APPROVAL
 
@@ -394,6 +495,7 @@ read-only until retention expiry, and no automatic answer migration is implied.
 
 ```json
 {
+  "expectedRevision": 0,
   "minAge": 25,
   "maxAge": null,
   "relationshipGoal": "long-term",
@@ -402,7 +504,8 @@ read-only until retention expiry, and no automatic answer migration is implied.
 }
 ```
 
-Response wraps the complete merged state in preferences with server updatedAt.
+Response includes the advanced wrapper revision and complete valid merged state
+in preferences with server updatedAt.
 Saving preferences never grants consent or activates visibility.
 
 ## Consent and immutable audit - D9/D10
@@ -460,7 +563,8 @@ records latest revoke and is cleared on a new grant. These details need approval
 PATCH has a nonempty distinct-purpose set, literal booleans and expectedVersion.
 Server assigns actor/member, timestamps and next version. Within one transaction,
 validate policy/state, compare revision, update state/revision and append events.
-Proposed immutable evidence: event ID, member ID, session-derived actor ID,
+Proposed immutable evidence: event ID, retention-safe subject/actor references
+derived from server context (not client IDs or raw email),
 purpose, old/new granted state, applicable accepted policy (or prior/null on
 revoke), server time, operation kind and old/new aggregate version.
 Do not store passwords, tokens, raw media or private profile text in events.
@@ -471,6 +575,74 @@ unchanged grant/policy, and POLICY_RECONSENT when true remains true but accepted
 policy changes. Reaffirmation must not be mislabeled as a state change.
 Exact event vocabulary remains proposed. Events are immutable while retained;
 approved expiry/deletion is a privileged retention action, not event editing.
+
+### Append-only audit and immutable policy evidence - accepted technical direction
+
+Consent events are append-only: no application UPDATE/DELETE, replacement,
+rewriting on account deletion or mutation of old evidence during policy rollout.
+Corrections append a new linked event rather than editing the original. The
+approved expiry/erasure workflow is a separately authorized retention operation,
+not ordinary event CRUD. State, aggregate consent version, event and idempotent
+result commit atomically; failure rolls back the entire consent mutation.
+
+Every accepted grant/re-consent binds to immutable policy evidence: purpose,
+policyVersion, locale, effective policy identity, exact accepted content snapshot
+or verifiable content hash AND the corresponding retained policy snapshot.
+A version label, mutable URL, or hash without a recoverable matching snapshot is
+insufficient. Keep the presented policy/notice content and its encoding/
+canonicalization rules stable; proposed digest is SHA-256 over the documented
+UTF-8 snapshot bytes. Record algorithm/digest/snapshot reference and enough
+presentation context to identify what the member accepted, without storing raw
+profile/video content. Snapshot reads must verify the digest; no mutable latest
+policy lookup may substitute for evidence of an earlier grant.
+
+Policies are versioned, never edited in place. A material text/purpose/locale
+change creates new evidence, without rewriting previous grant events. Snapshot
+retention covers every referencing event's approved retention and relevant
+backup/hold obligations. Registry retirement can stop new grants but cannot
+delete evidence still required by retained events. Revoke requires no new policy;
+its event references prior evidence when available and must not depend on
+rendering or accepting a new policy. Do not fabricate evidence for legacy grants
+whose policy snapshot is missing: retain an explicit evidence-gap marker and
+require policy-reviewed handling/re-consent, without blocking withdrawal.
+
+Future implementation needs an immutable policy-evidence store, append-only
+event records/permissions and durable references with deletion restrictions, not
+cascade from User or policy registry entries. Current Consent/AuditLog do not
+provide this structure. A retained snapshot can be content in a protected record
+or a verified immutable artifact; exact storage technology is still reviewable.
+Retention duration, legal basis, access roles and exceptions remain PENDING
+HUONG/PRIVACY/LEGAL APPROVAL; technical append-only direction does not approve
+the candidate periods in section B.
+
+### Retention-aware account deletion and de-identification
+
+Before hard-deleting User, revoke sessions/access immediately and durably record
+cleanup obligations. Preserve required consent events, policy snapshots and
+unexpired audit evidence independent of deletable User/Consent rows. A cascading
+User -> Consent delete must not transitively erase audit events; future relations
+must prohibit that path and restrict premature deletion of referenced evidence.
+Audit retention cannot be implemented merely by leaving raw user IDs in logs.
+
+Use stable random audit-subject/actor references independent of the live User PK,
+with a separate tightly controlled identity mapping where a lawful approved need
+exists. Events contain no email, account name, session token or raw content.
+On approved deletion, erase or minimize the separate mapping and identity data
+according to policy rather than rewriting immutable events. Event order, consent
+version links and policy digests remain verifiable after User removal.
+Pseudonymous references may still be personal data; do not claim anonymity or
+legal compliance merely because direct identifiers were removed. Any retained
+link, re-identification access, timestamp granularity, mapping-key lifecycle and
+deletion/hold exception needs privacy/legal approval and access auditing.
+
+Production event creation needs an approved retention rule/expiry basis; the
+draft 365-day proposal is not that approval. Deletion must verify event/snapshot
+expiry/holds before any audit purge and explicitly surface policy uncertainty,
+not treat it as an indefinite default hold or declare full erasure. Backup
+restore must preserve approved mapping erasure and deletion suppression before
+traffic resumes. Legacy audit with direct identifiers needs a separately
+reviewed migration/de-identification plan; no automatic rewrite/delete here.
+No data retention schedule or legal right is decided by these technical rules.
 
 **New proposal replacing prior no-op rule:** every accepted consent mutation,
 including explicitly reaffirming already-OFF, consumes a version and records an
@@ -557,10 +729,10 @@ If the grant wins first, the stale revoke fails visibly and must be explicitly
 resubmitted after refresh; never claim unsuccessful withdrawal succeeded.
 
 This orders committed operations, not wall-clock age of unsent intentions.
-Revision storage, lifetime, events and recovery need explicit approval before
-C023. Current schema/code do not provide this safety. Concurrency for edits to
-profile/preferences/questionnaire remains separately pending; this token does
-not protect those resources.
+Revision storage, lifetime, events and recovery need implementation review before
+C023. Current schema/code do not provide this safety. Profile/preferences/
+questionnaire use the separate expectedRevision/revision contract above;
+consent's aggregate version does not protect or consume those resource revisions.
 
 ### Idempotency-Key proposal - exact details PENDING APPROVAL
 
@@ -610,11 +782,12 @@ restore matching or media privileges. Its lawful basis is unresolved.
 | Preferences | Current configuration while active; clear/account deletion | Stop affected matching use immediately; no stale recommendation/explanation serving | Cleared active fields in write; full row within 7 days of account deletion. Phuc |
 | Questionnaire | Current version while active; retired saved versions up to 90 days after retirement; explicit answer/account deletion | Deleted/expired answers not readable or matchable; retired versions read-only before expiry | Within 7 days of deletion request, account deletion or 90-day expiry. Phuc; no automatic answer migration |
 | Consent current state/revision | Keep while account exists, including OFF state/version to prevent stale grants; account deletion starts purge | Revoke applies before success; account deletion denies all sessions/access immediately | Purge within 7 days of account deletion after required audit/cleanup evidence is safely captured. Phuc + Huong; never reset active-account version |
-| Immutable consent audit | Proposed 365 days after each event solely for approved accountability purpose | Restricted audited access only; never input to matching or general member/staff browsing | Expire through privileged policy-controlled purge, not edits; account deletion de-links identifying fields where approved without inventing missing evidence. Huong privacy owner + Phuc event storage; final retention/pseudonymization unresolved |
+| Immutable consent audit | Proposed 365 days after each event solely for approved accountability purpose; not yet an approved expiry rule | Restricted audited access only; never input to matching or general member/staff browsing | No User/Consent cascade; privileged expiry purge only after approved retention/holds. Delete/minimize a separate identity mapping where approved, not immutable event fields. Huong privacy owner + Phuc event storage; final retention/de-identification unresolved |
+| Policy evidence/snapshots | Retain at least as long as all referencing events need them under approved retention/hold/backup rules; no new numeric duration proposed | Evidence access restricted; registry retirement cannot invalidate historical proof | Reject premature snapshot deletion; verify content/hash availability until all approved obligations expire. Huong policy/privacy + Phuc consent evidence; storage/retention approval pending |
 | Video metadata | While object exists/authorized workflow active; VIDEO_STORAGE withdrawal, video delete or account delete triggers removal | Deny new issuance/access first; cancel/close dependent work | Purge within 7 days of trigger, after object-deletion verification; retain only necessary cleanup locator until confirmed. Huong, coordinated with Phuc assignment/review ownership |
 | Video object files and versions | While VIDEO_STORAGE remains granted and owner has not deleted; storage withdrawal/delete/account delete triggers purge | Block new API-authorized access/URLs immediately; existing capability limitation in section C | Proposed within 24 hours of trigger for originals, derived copies, object versions and abandoned multipart data. Huong storage owner; verify provider behavior |
 | Expert reviews/observations/claims | While authorized private review/report purposes remain; source storage withdrawal/video/account deletion triggers review-data purge proposal | Review-consent withdrawal blocks new expert work; report/share/matching withdrawals independently remove only the affected use immediately | Proposed purge raw review/observations/claims within 7 days of source-video/storage/account deletion. Review-only withdrawal closes work without automatically deleting separately authorized owner report; retained-report scope still needs approval. Phuc + Huong privacy |
-| Account/User and auth records | Owner deletion request starts workflow, not an unapproved reversible grace period | Set account unavailable, revoke sessions, deny future access and matching immediately | Proposed hard deletion of User/email/password/token/session records within 7 days, coordinating cascades, objects and audit de-linking. Huong; never recreate a deleted account from stale cookies |
+| Account/User and auth records | Owner deletion request starts workflow, not an unapproved reversible grace period | Set account unavailable, revoke sessions, deny future access and matching immediately | Proposed hard deletion within 7 days, coordinating objects and removing approved identity mappings while protecting unexpired audit/snapshots from cascade. Surface policy/retention conflicts; no silent evidence loss or false erasure claim. Huong |
 | Consent idempotency records | Proposed 24 hours after committed result; only minimal consent snapshot/fingerprint, no credentials | Replay always checks current authorization; cannot create events/versions | Delete after 24 hours; aggregate revision remains. Phuc with Huong privacy review |
 | Cleanup evidence | Minimum non-content job/status evidence until verification; proposed 30 days after verified completion | Operational access only; never used for matching | Remove locators after verification; purge minimized completion evidence after 30 days. Domain owner, coordinated by Huong |
 
@@ -734,6 +907,7 @@ not silently added deliverables or completed features of C019-C024.
 | 401 / 403 | Existing auth meanings; no staff bypass or blanket logout on 401/403 |
 | 415 | Reuse JSON mutation policy |
 | 409 | Proposed VERSION_CONFLICT for stale consent expectedVersion |
+| 409 | RESOURCE_REVISION_CONFLICT for stale profile/preferences/questionnaire expectedRevision; questionnaireVersion is unrelated |
 | 429 | Proposed feature limits and Retry-After; no automatic retry |
 | 503 | Dependency failures; proposed DATA_SHAPE_UNAVAILABLE for incompatible legacy JSON |
 
@@ -743,9 +917,10 @@ resource GET follows accepted defaults, not 404/provisioning.
 
 ## Exact remaining questions for Huong
 
-1. D1/D2: Confirm the exact new wrappers, visible _form/cross-field fallback,
-   legacy 503 DATA_SHAPE_UNAVAILABLE/remediation, first-write defaults and empty
-   mutation rejection. Auth shapes/formatter remain unchanged.
+1. D1/D2/D11: Review resource revision storage/legacy initialization and the
+   precise safe 503/remediation UI, first-write defaults and empty-mutation rules.
+   Separate revisions, stale-write 409 and complete-result validation are now
+   accepted technical direction; no silent legacy repair or auth change.
 2. D4: Approve the dedicated withdrawal 60/member/minute and 600/socket-IP/minute
    reserve, exclusion from general quotas, separate mixed-batch submissions,
    gateway reservation, guard ordering and bounded counter behavior?
@@ -758,11 +933,13 @@ resource GET follows accepted defaults, not 404/provisioning.
 5. A/D7: Approve the three full question prompts/keys and Unicode-code-point
    measurement, retired-version selector/status/retention and concurrent-edit
    behavior? Version 1/atomicity/order/length direction is already conditional.
-6. D9/D11: Approve grant/revoke policy-registry handling, retained timestamps,
-   distinct event kinds, Idempotency-Key format/fingerprint/replay, 409 codes,
-   24-hour result retention and the later atomic revision/event/outbox design?
+6. D9/D11: Approve grant/revoke registry details, retained timestamps, event
+   vocabulary, Idempotency-Key format/fingerprint/replay, 24-hour result retention
+   and the later revision/event/outbox schema? Confirm policy snapshot format,
+   digest canonicalization and access roles; append-only/verifiable evidence is
+   accepted technical direction, not an approved retention/legal policy.
 7. B: Approve all candidate retention/deletion periods, triggers and category
-   ownership, backup suppression, audit de-linking/purge, legal exceptions and
+   ownership, backup suppression, identity mapping erasure/audit purge, legal exceptions and
    member notices? Which privacy/legal approval governs them? No period is
    represented as legally mandated or production-approved.
 8. B/D10: Approve cleanup retries (1m/5m/30m/2h/6h then every 6h), escalation and

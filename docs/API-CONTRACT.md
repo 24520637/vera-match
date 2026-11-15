@@ -22,6 +22,23 @@ retention/deletion schedules and 60-second signed playback URLs, all awaiting
 explicit approval. D4/D6/D7/D8/D11 are not fully approved in every detail, and
 no legal retention rule, media implementation or production guarantee is implied.
 
+Latest technical review adds independent `revision` wrapper fields for Profile,
+Preferences and Questionnaire; mutations require `expectedRevision` and stale
+writes return 409 `RESOURCE_REVISION_CONFLICT`. `questionnaireVersion` selects a
+catalog, not editing concurrency. Consent keeps its separate aggregate
+`version`/`expectedVersion` CAS/idempotency contract.
+
+Malformed persisted feature data returns safe actionable 503
+`DATA_SHAPE_UNAVAILABLE` with allowlisted affected paths/current resource revision,
+never private values or database internals. Validate the complete resulting
+resource before success; no automatic repair of unrelated fields. The contract
+defines explicit owner-assisted remediation and separately reviewed operator
+escalation. Legacy profile/preferences failures cannot block withdrawal.
+Append-only audit binds immutable policy content or a verifiable hash with its
+corresponding snapshot; User deletion must not cascade unexpired evidence away.
+Schema/storage implementation and retention/legal approvals remain future work,
+not changes to current auth.
+
 | Method    | Route                              | Caller                  | Request, response, and authorization requirements                                                         |
 | --------- | ---------------------------------- | ----------------------- | --------------------------------------------------------------------------------------------------------- |
 | POST      | `/auth/register`                   | Guest                   | `{email,password,declaredAdult,displayName?}`; create PENDING_EMAIL, send activation link; do not log in automatically |
@@ -93,7 +110,7 @@ profile, consent, media or matching endpoints.
 
 1. Authenticate the cookie and authorize **resource ownership** at the API, never only in the UI or based on a caller-supplied user ID.
 2. `/auth/me` network/`5xx` failures should offer retry, not redirect to login. Only an actual invalid session (`401`) implies reauthentication; `403` means insufficient privileges.
-3. Keep review/QA/consent transitions atomic, prevent race conditions, and reject stale versions. Consent CAS/version direction is conditionally accepted; exact `expectedVersion`/409/idempotency storage and replay details remain draft, not implemented. Explicit OFF advances version, and replays cannot duplicate events or versions.
+3. Keep transitions atomic and reject stale writes. Profile/preferences/questionnaire require separate `expectedRevision` checks with 409 on conflict. Consent separately uses aggregate `expectedVersion` CAS; explicit OFF advances that version and idempotent replays cannot duplicate events. No revision mechanism is implemented by this documentation update.
 4. Keep stored videos private, use short-lived signed URLs, and revoke access when consent or assignments become invalid.
 5. Never expose private video, raw reviewer notes, biometric-like observations, or unapproved assessments in matching explanations.
 6. Only the routes identified as implemented above exist; remaining routes are a **plan**.
