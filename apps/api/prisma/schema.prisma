@@ -26,6 +26,12 @@ enum ConsentPurpose {
   REPORT_SHARING
   VIDEO_CLAIM_MATCHING
 }
+// Editing revisions are independent of questionnaire catalog versions and consent.
+enum MemberResource {
+  PROFILE
+  PREFERENCES
+  QUESTIONNAIRE
+}
 enum VideoStatus {
   UPLOADING
   READY
@@ -87,6 +93,7 @@ model User {
   profile Profile?
   preferences MatchPreference?
   questionnaireAnswers QuestionnaireAnswer[]
+  resourceRevisions MemberResourceRevision[]
   consents Consent[]
   videos Video[]
   expertAssignments ExpertAssignment[] @relation("AssignedExpert")
@@ -138,6 +145,16 @@ model Profile {
   visibilityEnabled Boolean @default(false)
   updatedAt DateTime @updatedAt
 }
+// No FK to the optional data row: clearing data must not reset its revision.
+// Missing metadata projects virtual revision 0; reads must never create rows.
+model MemberResourceRevision {
+  userId String
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  resource MemberResource
+  // SQL enforces 0 <= revision <= Number.MAX_SAFE_INTEGER. Map explicitly at the API boundary.
+  revision BigInt @default(0)
+  @@id([userId, resource])
+}
 model MatchPreference {
   id String @id @default(cuid())
   userId String @unique
@@ -158,6 +175,7 @@ model QuestionnaireAnswer {
   responseText String @db.Text
   updatedAt DateTime @updatedAt
   @@unique([userId, questionKey, questionnaireVersion])
+  @@index([userId, questionnaireVersion])
 }
 model Consent {
   id String @id @default(cuid())
