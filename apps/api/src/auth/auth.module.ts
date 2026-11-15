@@ -1,3 +1,4 @@
+import { PasswordResetService } from "./password-reset.service";
 import { PasswordRecoveryService } from "./password-recovery.service";
 import { Module } from "@nestjs/common";
 import { EnvironmentModule } from "../config/environment.module";
@@ -19,6 +20,7 @@ import { LogoutService } from "./logout.service";
   controllers: [AuthController],
   providers: [
     PasswordRecoveryService,
+    PasswordResetService,
     PasswordService,
     SessionService,
     SessionAuthGuard,

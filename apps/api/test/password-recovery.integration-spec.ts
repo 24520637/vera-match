@@ -113,4 +113,120 @@ describe("password recovery / real PostgreSQL / native Mailpit", () => {
     expect(await database.client.passwordResetToken.count()).toBe(1);
     expect((await findTestEmails(user.email)).length).toBe(1);
   });
+  it("atomically consumes a link once, replaces the password and revokes every target session", async () => {
+    const user = await account();
+    const other = await account();
+    const login = async (email: string) => {
+      const result = await post("login", {
+        email,
+        password: "synthetic-old-password",
+      });
+      expect(result.status).toBe(200);
+      return result.headers.get("set-cookie")!.split(";")[0];
+    };
+    const cookies = await Promise.all([login(user.email), login(user.email)]);
+    const otherCookie = await login(other.email);
+    await post("forgot-password", { email: user.email });
+    const mail = await readResetEmail(user.email);
+    const results = await Promise.all([
+      post("reset-password", {
+        token: mail.token,
+        newPassword: "synthetic-new-password-a",
+      }),
+      post("reset-password", {
+        token: mail.token,
+        newPassword: "synthetic-new-password-b",
+      }),
+    ]);
+    expect(results.map((r) => r.status).sort()).toEqual([200, 400]);
+    expect(results[0].headers.get("set-cookie")).toBeNull();
+    const winner =
+      results[0].status === 200
+        ? "synthetic-new-password-a"
+        : "synthetic-new-password-b";
+    expect(
+      (
+        await post("reset-password", {
+          token: mail.token,
+          newPassword: "another-new-password",
+        })
+      ).status,
+    ).toBe(400);
+    for (const Cookie of cookies)
+      expect(
+        (await fetch(base + "/api/auth/me", { headers: { Cookie } })).status,
+      ).toBe(401);
+    expect(
+      (await fetch(base + "/api/auth/me", { headers: { Cookie: otherCookie } }))
+        .status,
+    ).toBe(200);
+    expect(
+      (
+        await post("login", {
+          email: user.email,
+          password: "synthetic-old-password",
+        })
+      ).status,
+    ).toBe(401);
+    expect(
+      (await post("login", { email: user.email, password: winner })).status,
+    ).toBe(200);
+    const updated = await database.client.user.findUniqueOrThrow({
+      where: { id: user.id },
+    });
+    expect(updated.passwordHash).toMatch(/^\$argon2id\$/);
+    expect(updated.passwordHash).not.toBe(user.passwordHash);
+    expect(
+      await database.client.auditLog.count({
+        where: { actorId: user.id, action: "PASSWORD_RESET_COMPLETED" },
+      }),
+    ).toBe(1);
+  });
+  it("rejects malformed, expired and ineligible links without changing a password or activating an account", async () => {
+    expect(
+      (
+        await post("reset-password", {
+          token: "bad",
+          newPassword: "synthetic-new-password",
+        })
+      ).status,
+    ).toBe(400);
+    const user = await account();
+    await post("forgot-password", { email: user.email });
+    const mail = await readResetEmail(user.email);
+    const where = { tokenHash: hashResetToken(mail.token) };
+    await database.client.passwordResetToken.update({
+      where,
+      data: { expiresAt: new Date(Date.now() - 1000) },
+    });
+    const expired = await post("reset-password", {
+      token: mail.token,
+      newPassword: "synthetic-new-password",
+    });
+    expect(expired.status).toBe(400);
+    await database.client.passwordResetToken.update({
+      where,
+      data: { expiresAt: new Date(Date.now() + 60000) },
+    });
+    for (const status of ["PENDING_EMAIL", "SUSPENDED", "DELETED"] as const) {
+      await database.client.user.update({
+        where: { id: user.id },
+        data: { status },
+      });
+      const denied = await post("reset-password", {
+        token: mail.token,
+        newPassword: "synthetic-new-password",
+      });
+      expect(denied.status).toBe(400);
+      expect(await denied.json()).toEqual(await expired.clone().json());
+    }
+    expect(
+      (await database.client.user.findUniqueOrThrow({ where: { id: user.id } }))
+        .passwordHash,
+    ).toBe(user.passwordHash);
+    expect(
+      (await database.client.passwordResetToken.findUniqueOrThrow({ where }))
+        .consumedAt,
+    ).toBeNull();
+  });
 });
