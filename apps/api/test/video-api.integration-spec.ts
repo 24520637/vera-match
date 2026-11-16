@@ -22,6 +22,7 @@ import { hashSessionToken } from "../src/auth/session-token";
 import { createAuthDatabase } from "./disposable-auth-database";
 import { VideoCleanupService } from "../src/video/video-cleanup.service";
 import { PrivateStorageService } from "../src/video/private-storage.service";
+import { configureIncomingExpiry } from "./video-storage-fixtures";
 
 class VideoTestPolicies extends ConsentPolicyRegistry {
   override current(purpose: ConsentPurpose): PolicySnapshot {
@@ -58,6 +59,7 @@ describe("Private video / real PostgreSQL / native MinIO", () => {
       },
     });
     await client.send(new CreateBucketCommand({ Bucket: bucket }));
+    await configureIncomingExpiry(client, bucket);
     const module = await Test.createTestingModule({ imports: [AppModule] })
       .overrideProvider(EnvironmentService)
       .useValue({ values })
@@ -145,6 +147,112 @@ describe("Private video / real PostgreSQL / native MinIO", () => {
     expect(result.status).toBe(200);
   }
   const valid = { mimeType: "video/mp4", sizeBytes: 12 };
+  it("never resurrects a withdrawn video on re-consent and never deletes a newly authorized generation", async () => {
+    const user = await member();
+    await grant(user.cookie);
+    const old = await intent(user.cookie);
+    await put(old.uploadUrl);
+    await request(user.cookie, `videos/${old.id}/confirm`);
+    expect(
+      (
+        await request(
+          user.cookie,
+          "consents/me",
+          {
+            expectedVersion: 1,
+            consents: [{ purpose: "VIDEO_STORAGE", granted: false }],
+          },
+          "PATCH",
+        )
+      ).status,
+    ).toBe(200);
+    expect(
+      (
+        await request(
+          user.cookie,
+          "consents/me",
+          {
+            expectedVersion: 2,
+            consents: [
+              {
+                purpose: "VIDEO_STORAGE",
+                granted: true,
+                policyVersion: "synthetic-video-v1",
+              },
+            ],
+          },
+          "PATCH",
+        )
+      ).status,
+    ).toBe(200);
+    expect(
+      (await request(user.cookie, `videos/${old.id}/playback`)).status,
+    ).toBe(409);
+    expect(
+      (await request(user.cookie, `videos/${old.id}/confirm`)).status,
+    ).toBe(409);
+    const fresh = await intent(user.cookie);
+    await put(fresh.uploadUrl);
+    await request(user.cookie, `videos/${fresh.id}/confirm`);
+    await app.get(VideoCleanupService).runOnce();
+    expect(
+      (await database.client.video.findUniqueOrThrow({ where: { id: old.id } }))
+        .status,
+    ).toBe("DELETED");
+    expect(
+      (
+        await database.client.video.findUniqueOrThrow({
+          where: { id: fresh.id },
+        })
+      ).status,
+    ).toBe("READY");
+    expect(
+      (await request(user.cookie, `videos/${fresh.id}/playback`)).status,
+    ).toBe(201);
+    const ledger = await database.client.consentLedger.findUniqueOrThrow({
+      where: { userId: user.id },
+    });
+    const task = await database.client.consentWithdrawalTask.findFirstOrThrow({
+      where: { subjectId: ledger.subjectId, purpose: "VIDEO_STORAGE" },
+    });
+    expect(task.status).toBe("PENDING"); // Other domain consumers still own their work.
+    expect(
+      await database.client.videoWithdrawalReceipt.findUnique({
+        where: { withdrawalTaskId: task.id },
+      }),
+    ).not.toBeNull();
+  });
+  it("reaps abandoned uploads and incoming bytes without deleting ready playback objects", async () => {
+    const user = await member();
+    await grant(user.cookie);
+    const abandoned = await intent(user.cookie);
+    await put(abandoned.uploadUrl);
+    const ready = await intent(user.cookie);
+    await put(ready.uploadUrl);
+    await request(user.cookie, `videos/${ready.id}/confirm`);
+    await database.client.video.updateMany({
+      where: { id: { in: [abandoned.id, ready.id] } },
+      data: { uploadExpiresAt: new Date(0) },
+    });
+    await app.get(VideoCleanupService).runOnce();
+    expect(
+      (
+        await database.client.video.findUniqueOrThrow({
+          where: { id: abandoned.id },
+        })
+      ).status,
+    ).toBe("DELETED");
+    expect(
+      (
+        await database.client.video.findUniqueOrThrow({
+          where: { id: ready.id },
+        })
+      ).uploadKey,
+    ).toBeNull();
+    expect(
+      (await request(user.cookie, `videos/${ready.id}/playback`)).status,
+    ).toBe(201);
+  });
   it("deletes access atomically, persists storage failures and safely retries after restart", async () => {
     const user = await member();
     await grant(user.cookie);

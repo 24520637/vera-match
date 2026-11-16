@@ -10,6 +10,7 @@ import { config } from "dotenv";
 import { parseEnvironment } from "../src/config/environment";
 import { EnvironmentService } from "../src/config/environment.service";
 import { PrivateStorageService } from "../src/video/private-storage.service";
+import { configureIncomingExpiry } from "./video-storage-fixtures";
 
 config();
 describe("C037 native MinIO privacy", () => {
@@ -28,6 +29,7 @@ describe("C037 native MinIO privacy", () => {
   const key = storage.key("incoming");
   beforeAll(async () => {
     await client.send(new CreateBucketCommand({ Bucket: bucket }));
+    await configureIncomingExpiry(client, bucket);
   });
   afterAll(async () => {
     try {

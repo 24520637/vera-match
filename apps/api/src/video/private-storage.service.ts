@@ -4,6 +4,7 @@ import {
   DeleteObjectCommand,
   GetBucketPolicyCommand,
   GetBucketVersioningCommand,
+  GetBucketLifecycleConfigurationCommand,
   GetObjectCommand,
   HeadBucketCommand,
   HeadObjectCommand,
@@ -84,6 +85,20 @@ export class PrivateStorageService {
   }
   async uploadUrl(key: string, mimeType: string, sizeBytes: number) {
     await this.assertPrivate();
+    await this.safe(async () => {
+      const lifecycle = await this.client.send(
+        new GetBucketLifecycleConfigurationCommand({ Bucket: this.bucket }),
+      );
+      if (
+        !lifecycle.Rules?.some(
+          (rule) =>
+            rule.Status === "Enabled" &&
+            rule.Filter?.Prefix === "incoming/" &&
+            rule.Expiration?.Days === 1,
+        )
+      )
+        throw new Error("Private incoming upload lifecycle is required");
+    });
     return this.safe(() =>
       getSignedUrl(
         this.client,
