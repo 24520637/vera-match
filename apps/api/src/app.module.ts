@@ -7,9 +7,19 @@ import { ProfileModule } from "./profile/profile.module";
 import { QuestionnaireModule } from "./questionnaire/questionnaire.module";
 import { PreferencesModule } from "./preferences/preferences.module";
 import { ConsentModule } from "./consent/consent.module";
+import { VideoModule } from "./video/video.module";
 
 @Module({
-  imports: [EnvironmentModule, DatabaseModule, AuthModule, ProfileModule, QuestionnaireModule, PreferencesModule, ConsentModule],
+  imports: [
+    EnvironmentModule,
+    DatabaseModule,
+    AuthModule,
+    ProfileModule,
+    QuestionnaireModule,
+    PreferencesModule,
+    ConsentModule,
+    VideoModule,
+  ],
   controllers: [HealthController],
 })
 export class AppModule {}

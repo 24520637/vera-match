@@ -281,6 +281,8 @@ model Video {
   owner User @relation(fields: [ownerId], references: [id], onDelete: Cascade)
   bucket String
   objectKey String @unique
+  uploadKey String? @unique
+  uploadExpiresAt DateTime?
   mimeType String
   sizeBytes Int?
   durationMs Int?
