@@ -147,6 +147,72 @@ describe("Private video / real PostgreSQL / native MinIO", () => {
     expect(result.status).toBe(200);
   }
   const valid = { mimeType: "video/mp4", sizeBytes: 12 };
+  it("writes minimal privacy audit events atomically and never returns a URL after audit failure", async () => {
+    const user = await member();
+    await grant(user.cookie);
+    const upload = await intent(user.cookie);
+    await put(upload.uploadUrl);
+    await request(user.cookie, `videos/${upload.id}/confirm`);
+    expect(
+      (
+        await request(
+          user.cookie,
+          "videos/attacker-selected-private-value/playback",
+        )
+      ).status,
+    ).toBe(404);
+    const denial = await database.client.auditLog.findFirstOrThrow({
+      where: { actorId: user.id, action: "VIDEO_ACCESS_DENIED" },
+    });
+    expect(denial.subjectId).toBeNull();
+    await database.client.$executeRawUnsafe(
+      `CREATE FUNCTION video_audit_failure() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.action = 'VIDEO_PLAYBACK_ISSUED' THEN RAISE EXCEPTION 'synthetic-private-value'; END IF; RETURN NEW; END $$`,
+    );
+    await database.client.$executeRawUnsafe(
+      `CREATE TRIGGER video_audit_failure BEFORE INSERT ON "AuditLog" FOR EACH ROW EXECUTE FUNCTION video_audit_failure()`,
+    );
+    try {
+      const response = await request(
+        user.cookie,
+        `videos/${upload.id}/playback`,
+      );
+      expect(response.status).toBe(503);
+      const body = await response.text();
+      expect(body).not.toMatch(
+        /synthetic-private-value|X-Amz|Signature|objectKey/,
+      );
+      expect(
+        await database.client.auditLog.count({
+          where: { actorId: user.id, action: "VIDEO_PLAYBACK_ISSUED" },
+        }),
+      ).toBe(0);
+    } finally {
+      await database.client.$executeRawUnsafe(
+        `DROP TRIGGER video_audit_failure ON "AuditLog"`,
+      );
+      await database.client.$executeRawUnsafe(
+        `DROP FUNCTION video_audit_failure()`,
+      );
+    }
+    expect(
+      (await request(user.cookie, `videos/${upload.id}/playback`)).status,
+    ).toBe(201);
+    await request(user.cookie, `videos/${upload.id}`, {}, "DELETE");
+    const audits = await database.client.auditLog.findMany({
+      where: { actorId: user.id, subjectType: "Video" },
+    });
+    expect(audits.map((row) => row.action)).toEqual(
+      expect.arrayContaining([
+        "VIDEO_UPLOAD_CONFIRMED",
+        "VIDEO_ACCESS_DENIED",
+        "VIDEO_PLAYBACK_ISSUED",
+        "VIDEO_DELETE_REQUESTED",
+      ]),
+    );
+    expect(JSON.stringify(audits)).not.toMatch(
+      /attacker-selected|X-Amz|Signature|incoming\/|video\/|example.invalid|passwordHash/,
+    );
+  });
   it("never resurrects a withdrawn video on re-consent and never deletes a newly authorized generation", async () => {
     const user = await member();
     await grant(user.cookie);
