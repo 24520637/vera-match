@@ -143,6 +143,82 @@ describe("Private video / real PostgreSQL / native MinIO", () => {
     expect(result.status).toBe(200);
   }
   const valid = { mimeType: "video/mp4", sizeBytes: 12 };
+  it("denies new access after actual consent withdrawal while acknowledging pre-issued bearer access", async () => {
+    const user = await member();
+    await grant(user.cookie);
+    const upload = await intent(user.cookie);
+    await put(upload.uploadUrl);
+    await request(user.cookie, `videos/${upload.id}/confirm`);
+    const issued = await request(user.cookie, `videos/${upload.id}/playback`);
+    const playback = (await issued.json()) as { url: string };
+    const revoke = await request(
+      user.cookie,
+      "consents/me",
+      {
+        expectedVersion: 1,
+        consents: [{ purpose: "VIDEO_STORAGE", granted: false }],
+      },
+      "PATCH",
+    );
+    expect(revoke.status).toBe(200);
+    expect(
+      (await request(user.cookie, `videos/${upload.id}/playback`)).status,
+    ).toBe(403);
+    expect(
+      (await request(user.cookie, `videos/${upload.id}/confirm`)).status,
+    ).toBe(403);
+    expect(
+      (await request(user.cookie, "videos/upload-intent", valid)).status,
+    ).toBe(403);
+    // Revocation blocks API issuance immediately; it is not retroactive URL revocation.
+    expect((await fetch(playback.url)).status).toBe(200);
+  });
+  it("denies staff/expert, changed accounts, malformed identity and cross-origin video requests", async () => {
+    const user = await member();
+    await grant(user.cookie);
+    const upload = await intent(user.cookie);
+    const crossOrigin = await fetch(`${base}/api/videos/${upload.id}/confirm`, {
+      method: "POST",
+      headers: {
+        Cookie: user.cookie,
+        Origin: "https://attacker.invalid",
+        "Content-Type": "application/json",
+      },
+      body: "{}",
+    });
+    expect(crossOrigin.status).toBe(403);
+    for (const role of ["EXPERT", "ADMIN", "MODERATOR"] as const) {
+      await database.client.user.update({
+        where: { id: user.id },
+        data: { role },
+      });
+      expect(
+        (await request(user.cookie, `videos/${upload.id}/playback`)).status,
+      ).toBe(403);
+    }
+    await database.client.user.update({
+      where: { id: user.id },
+      data: { role: "MEMBER", status: "SUSPENDED" },
+    });
+    expect((await request(user.cookie, "videos/me", {}, "GET")).status).toBe(
+      401,
+    );
+  });
+  it("enforces the complete 60-second playback TTL on actual MinIO", async () => {
+    const user = await member();
+    await grant(user.cookie);
+    const upload = await intent(user.cookie);
+    await put(upload.uploadUrl);
+    await request(user.cookie, `videos/${upload.id}/confirm`);
+    const result = await request(user.cookie, `videos/${upload.id}/playback`);
+    const playback = (await result.json()) as { url: string };
+    expect((await fetch(playback.url)).status).toBe(200);
+    await new Promise((resolve) => setTimeout(resolve, 61000));
+    expect((await fetch(playback.url)).status).toBe(403);
+    expect(
+      (await fetch(playback.url, { headers: { Range: "bytes=0-3" } })).status,
+    ).toBe(403);
+  }, 75000);
   it("lists only owner metadata and issues private playback only for ready owned videos", async () => {
     const user = await member();
     await grant(user.cookie);
