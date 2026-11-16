@@ -40,6 +40,30 @@ the same worker explicitly. Locators do not cascade with User/Video metadata.
 Withdrawal processing records a media-only receipt; it deliberately does not
 complete the shared ConsentWithdrawalTask for other domain consumers.
 
+Worker observability uses fixed codes only: `VIDEO_CLEANUP_SCAN_FAILED` for an
+unexpected failed scan, `VIDEO_CLEANUP_SCAN_RECOVERED` for a subsequent successful
+scan, and `VIDEO_CLEANUP_RETRY_SCHEDULED` after a per-object retry is persisted.
+No exception message/stack, task/owner identifiers, keys, URLs or media are logged.
+The timer consumes already-reported rejections and keeps polling; shutdown waits
+for the active scan without forwarding its raw driver exception. Scan recovery
+does not mean every queued object has been erased. Operators must monitor these
+codes and the protected durable task backlog; no external alerting service is
+introduced here.
+
+Mapped withdrawals are prioritized ahead of unresolved subject mappings so an
+older orphaned batch cannot starve live cleanup. Missing mappings emit
+`VIDEO_CLEANUP_WITHDRAWAL_MAPPING_UNAVAILABLE` once per affected scan and remain
+pending for explicit operator reconciliation. No owner is guessed and no receipt
+or erasure acknowledgement is fabricated for them. This does not implement the
+separate account-deletion locator handoff.
+
+PostgreSQL failure before claim leaves the task untouched. A database failure
+after provider deletion leaves a recoverable lease and does not stamp erasure;
+after lease expiry, retry repeats provider removal/HEAD verification before
+committing completion. MinIO failure preserves PENDING/backoff and no completion
+timestamp. Connection-outage tests use unreachable loopback endpoints and
+disposable schemas; they do not stop the developer's PostgreSQL/MinIO services.
+
 Expired incoming uploads are reaped; a confirmed video's final object is kept.
 Incoming keys also require a one-day MinIO lifecycle rule. A PUT authorized
 before expiry can finish later: lifecycle is the fallback for a late incoming
@@ -88,6 +112,54 @@ PostgreSQL/Mailpit, shared UI, auth and member regression jobs. Passing owner
 tests do not complete the blocked expert assignment/review acceptance checks.
 
 ## Explicit dependencies and release gates
+
+### Ordinary-user consent publication is not configured
+
+`ConsentPolicyRegistry.current()` on develop and this branch returns undefined;
+there is no `.env` flag that enables grants. The actual consent page also passes
+no `publishedPolicies`, so its grant actions stay disabled. Tests override the
+provider only in isolated test modules/scripts, with `testOnly: true`; access and
+grant checks reject that evidence in both development and production.
+
+Before ordinary members can grant a purpose, the policy owners must approve its
+exact content, purpose, immutable version and locale. A separately reviewed
+publication change must supply that snapshot from the controlled API registry
+with `testOnly: false`, and publish the identical version/locale/content to the
+member page's `publishedPolicies`. No current values are approved by this PR.
+Changing any accepted bytes requires a new version, not rewriting old evidence.
+On explicit grant the API verifies the current version, preserves the UTF-8
+SHA-256 snapshot/evidence and records the consent event under existing CAS and
+idempotency rules. Direct row seeding or setting NODE_ENV=test is not a rollout
+procedure. Publishing frontend text alone cannot authorize a backend grant.
+
+Only VIDEO_STORAGE is needed for owner uploads/confirmation/playback. Future
+expert access additionally requires EXPERT_VIDEO_REVIEW and the full expert
+authorization contract. Other purposes remain independent and can stay OFF.
+Own safe metadata reads and deletion intentionally do not require consent again.
+
+### Recommended integration decision: B
+
+Scope the existing PR #11 as the independently verified owner-media/cleanup
+deliverable. Keep it Draft until Huong and Phuc explicitly agree that scope; do
+not call the entire Private Video feature complete or create a duplicate PR.
+
+The following remain tracked follow-up work after reviewed C031-C036 integration:
+
+- [ ] C050: current-consent, eligibility, assignment and MFA checks on expert
+      video/review read, renewal and edit/submit routes.
+- [ ] C051: cancellation of active assignments under CAS, with exact immutable
+      AssignmentEvent/retained actor evidence in the same transaction. No blind bulk
+      status updates; preserve valid terminal states and deletion history.
+- [ ] C053: redacted denied-assignment and expert privacy audit events.
+- [ ] C054: revoke/delete racing expert read/edit/submit, cancellation/reassignment
+      and signed-URL issuance, using the actual merged Phuc workflow.
+
+PR #12 at 4ec54b1 is unmerged and supplies C031 only, not C032-C036 APIs. Its
+assignment ID-reuse and live actor-mapping reset findings still require resolution
+and fresh review. Combined Prisma validation and both migration application orders
+with all seven migrations passed in isolated review schemas; this is not merged
+runtime/E2E acceptance. None of the three video migrations, existing migrations
+or shared consent/assignment contracts is changed by this readiness fix.
 
 - The real policy registry currently publishes no approved policies. Runtime
   grants fail closed. Tests inject synthetic test-only policy snapshots into

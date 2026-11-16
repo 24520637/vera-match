@@ -1,4 +1,9 @@
-import { Injectable, OnModuleDestroy, OnModuleInit } from "@nestjs/common";
+import {
+  Injectable,
+  Logger,
+  OnModuleDestroy,
+  OnModuleInit,
+} from "@nestjs/common";
 import { PrismaService } from "../database/prisma.service";
 import { EnvironmentService } from "../config/environment.service";
 import { PrivateStorageService } from "./private-storage.service";
@@ -8,6 +13,8 @@ import { PrivateStorageService } from "./private-storage.service";
 export class VideoCleanupService implements OnModuleInit, OnModuleDestroy {
   private timer?: ReturnType<typeof setInterval>;
   private running?: Promise<void>;
+  private readonly logger = new Logger(VideoCleanupService.name);
+  private scanFailed = false;
   constructor(
     private readonly prisma: PrismaService,
     private readonly storage: PrivateStorageService,
@@ -17,19 +24,34 @@ export class VideoCleanupService implements OnModuleInit, OnModuleDestroy {
     // Tests explicitly drive the real worker to exercise failures and restart recovery.
     if (this.environment.values.nodeEnv === "test") return;
     this.timer = setInterval(() => {
+      // runOnce reports failures without private error payloads. Consume the
+      // rejection so one failed scan does not stop future scheduled retries.
       void this.runOnce().catch(() => undefined);
     }, 15000);
     this.timer.unref();
   }
   async onModuleDestroy() {
     if (this.timer) clearInterval(this.timer);
-    await this.running;
+    // Failure was already reported by runOnce; let the remaining services close
+    // without passing a raw driver exception to the application shutdown logger.
+    await this.running?.catch(() => undefined);
   }
   runOnce() {
     if (this.running) return this.running;
-    this.running = this.process().finally(() => {
-      this.running = undefined;
-    });
+    this.running = this.process()
+      .then(() => {
+        if (this.scanFailed) this.logger.log("VIDEO_CLEANUP_SCAN_RECOVERED");
+        this.scanFailed = false;
+      })
+      .catch((error: unknown) => {
+        this.scanFailed = true;
+        // Never forward error.message, stack, task IDs or driver/SDK metadata.
+        this.logger.error("VIDEO_CLEANUP_SCAN_FAILED");
+        throw error;
+      })
+      .finally(() => {
+        this.running = undefined;
+      });
     return this.running;
   }
   private async process() {
@@ -96,7 +118,7 @@ export class VideoCleanupService implements OnModuleInit, OnModuleDestroy {
             });
         });
       } catch {
-        await this.prisma.videoCleanupTask.updateMany({
+        const retry = await this.prisma.videoCleanupTask.updateMany({
           where: lease,
           data: {
             status: "PENDING",
@@ -107,6 +129,7 @@ export class VideoCleanupService implements OnModuleInit, OnModuleDestroy {
             ),
           },
         });
+        if (retry.count) this.logger.warn("VIDEO_CLEANUP_RETRY_SCHEDULED");
       }
     }
   }
@@ -115,9 +138,11 @@ export class VideoCleanupService implements OnModuleInit, OnModuleDestroy {
     // cleanup belongs to other consumers and must not be silently acknowledged.
     const pending = await this.prisma.$queryRaw<{ id: string }[]>`
       SELECT t.id FROM "ConsentWithdrawalTask" t
+      LEFT JOIN "ConsentLedger" l ON l."subjectId" = t."subjectId"
       WHERE t.purpose = 'VIDEO_STORAGE' AND NOT EXISTS
         (SELECT 1 FROM "VideoWithdrawalReceipt" r WHERE r."withdrawalTaskId" = t.id)
-      ORDER BY t."createdAt" LIMIT 20`;
+      ORDER BY (l."userId" IS NULL), t."createdAt", t.id LIMIT 20`;
+    let mappingUnavailable = false;
     for (const item of pending) {
       await this.prisma.$transaction(async (tx) => {
         const task = await tx.consentWithdrawalTask.findUniqueOrThrow({
@@ -126,7 +151,12 @@ export class VideoCleanupService implements OnModuleInit, OnModuleDestroy {
         const ledger = await tx.consentLedger.findUnique({
           where: { subjectId: task.subjectId },
         });
-        if (!ledger) return; // Account deletion must preserve locators before erasing this mapping.
+        if (!ledger) {
+          // Leave this shared task pending for explicit reconciliation. Never
+          // infer an owner or acknowledge erasure from a missing live mapping.
+          mappingUnavailable = true;
+          return;
+        }
         await tx.$queryRaw`SELECT id FROM "User" WHERE id = ${ledger.userId} FOR UPDATE`;
         if (
           await tx.videoWithdrawalReceipt.findUnique({
@@ -180,6 +210,8 @@ export class VideoCleanupService implements OnModuleInit, OnModuleDestroy {
           });
       });
     }
+    if (mappingUnavailable)
+      this.logger.warn("VIDEO_CLEANUP_WITHDRAWAL_MAPPING_UNAVAILABLE");
   }
   private async enqueueExpiredUploads() {
     const candidates = await this.prisma.video.findMany({
