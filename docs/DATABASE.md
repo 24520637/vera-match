@@ -33,9 +33,9 @@ Do not treat a role flag as proof of reviewer qualification.
 Scope: T06/C031, `feat(expert-db): add credentials and assignments`.
 The project owner supplied Huong's seven approved design decisions for this
 implementation. This records technical direction, not production retention approval.
-This task retains baseline commit `88119cd1129436f2da97e733b4e3ea27f9b2676b`.
-T04 has since merged into develop, but its migrations/services are intentionally
-not integrated during this C031 review-fix task.
+The reviewed integration baseline is `4ec54b187c4a2b934cf422b41d501d5b8052dc5d`,
+which already includes T04. This review fix does not integrate any additional
+branch or modify existing T04 migrations/services.
 
 | Approved decision | Persistence design |
 | --- | --- |
@@ -48,6 +48,20 @@ not integrated during this C031 review-fix task.
 | Preserve integration ownership | No Auth/AuditLog/video/storage/privacy module is changed. READY/current consent, active eligibility, staff MFA, independent QA and withdrawal integration remain mandatory future API checks. |
 
 ### Write protocol and evidence
+
+PR #12 identity-reuse corrections are delivered by the separate additive migration
+`20261117010000_prevent_expert_identity_reuse`; published migrations are unchanged.
+`ExpertAssignmentIdentity` reserves every issued assignment ID independently of
+live resources. It is seeded from existing assignments and retained events, is
+append-only (including TRUNCATE protection), and has no cascading foreign keys.
+An INSERT trigger reserves the ID transactionally using a primary key, preventing
+DELETE/recreate revision resets and concurrent reuse. Failed creations roll back
+their reservations. Video deletion still cascades to assignments/reviews, while
+reservations and existing evidence survive. Previously deleted IDs with neither
+a surviving assignment nor retained event cannot be reconstructed retrospectively.
+Actor mappings reject independent DELETE while the User exists and reject TRUNCATE;
+actual User deletion may still cascade without deleting retained actor evidence.
+These are integrity protections, not approval of a production retention period.
 
 Credential creation starts PENDING at revision 0 with a CREATED event. No role or
 legacy row is auto-approved. Future approval creates a new immutable approval

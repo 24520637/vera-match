@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { assignmentEvent, createExpertUpgradeDatabase, expectDatabaseError } from "./expert-db-fixtures";
+import { actor, assign, assignmentEvent, createExpertUpgradeDatabase, expectDatabaseError, seedExpert, transition } from "./expert-db-fixtures";
 
 async function legacy(db: Awaited<ReturnType<typeof createExpertUpgradeDatabase>>, orphan = false) {
   const id = randomUUID(), p = db.client;
@@ -14,6 +14,34 @@ async function legacy(db: Awaited<ReturnType<typeof createExpertUpgradeDatabase>
 }
 
 describe("C031 additive migration upgrade", () => {
+  it("closes the reviewed DELETE/recreate exploit and backfills deleted historical IDs", async () => {
+    const db = await createExpertUpgradeDatabase();
+    try {
+      db.deployReviewedBaseline();
+      const seed = await seedExpert(db.client), original = await assign(db.client, seed);
+      await transition(db.client, original.id, 0n, "CANCELLED");
+      const recreate = () => db.client.expertAssignment.create({ data: {
+        id: original.id, videoId: original.videoId, expertId: original.expertId,
+        assignedById: original.assignedById, assignedByEvidence: actor,
+        credentialApprovalId: original.credentialApprovalId, createdAt: original.createdAt,
+      } });
+      await db.client.expertAssignment.delete({ where: { id: original.id } });
+      // Reproduce the original exploit on the exact reviewed schema: the old
+      // revision-zero event incorrectly satisfies the deferred mutation check.
+      expect(await recreate()).toMatchObject({ id: original.id, revision: 0n, status: "ASSIGNED" });
+      await db.client.expertAssignment.delete({ where: { id: original.id } });
+      const live = await assign(db.client, seed);
+      const eventsBefore = await db.client.assignmentEvent.findMany({ orderBy: { id: "asc" } });
+      db.deploy();
+      expect(await db.client.expertAssignmentIdentity.findMany({ orderBy: { assignmentId: "asc" } })).toEqual(
+        [original.id, live.id].sort().map(assignmentId => ({ assignmentId })));
+      expect(await db.client.assignmentEvent.findMany({ orderBy: { id: "asc" } })).toEqual(eventsBefore);
+      await transition(db.client, live.id, 0n, "CANCELLED");
+      await expect(recreate()).rejects.toMatchObject({ code: "P2002" });
+      db.deploy();
+      expect(await db.client.expertAssignmentIdentity.count()).toBe(2);
+    } finally { await db.close(); }
+  });
   it("preserves initial-migration data without fabricating approval or historical events", async () => {
     const db = await createExpertUpgradeDatabase();
     try {

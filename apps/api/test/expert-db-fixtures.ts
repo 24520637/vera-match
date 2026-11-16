@@ -93,6 +93,14 @@ export async function createExpertUpgradeDatabase() {
     run(["migrate", "resolve", "--applied", "20261111110738_init", "--schema", resolve(__dirname, "../prisma/schema.prisma")]);
   } catch (error) { await close(); throw error; }
   return { client, close,
+    deployReviewedBaseline: () => {
+      for (const name of ["20261115160000_add_member_resource_revisions",
+        "20261116020000_add_consent_evidence_and_handoff",
+        "20261116120000_add_expert_credentials_and_assignment_revision"]) {
+        run(["db", "execute", "--file", resolve(__dirname, "../prisma/migrations", name, "migration.sql"), "--url", url.toString()]);
+        run(["migrate", "resolve", "--applied", name, "--schema", resolve(__dirname, "../prisma/schema.prisma")]);
+      }
+    },
     deploy: () => run(["migrate", "deploy", "--schema", resolve(__dirname, "../prisma/schema.prisma")]),
     executeMigrationSQL: () => run(["db", "execute", "--file", resolve(__dirname,
       "../prisma/migrations/20261116120000_add_expert_credentials_and_assignment_revision/migration.sql"), "--url", url.toString()]),

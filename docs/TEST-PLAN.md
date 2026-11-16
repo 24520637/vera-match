@@ -4,6 +4,14 @@ Each feature needs valid inputs, invalid inputs, unauthorized access, state/race
 
 ## C031 - credential and assignment database foundation
 
+PR #12 identity-reuse regression coverage must reproduce CANCELLED revision 1
+DELETE/recreate as ASSIGNED revision 0 on the reviewed schema, then reject that
+operation after the additive fix. Verify reservation backfill for both live and
+deleted assignments with retained events without changing their evidence. Verify
+ID reservations survive Video/Assignment/Review cascades and cannot be deleted or
+truncated. Reject actor mapping DELETE/recreate and TRUNCATE for a live User, while
+allowing real User deletion and preserving historical opaque actor evidence.
+
 Plan subject: `feat(expert-db): add credentials and assignments` (T06).
 The seven approved decisions and remaining integration/production boundaries are
 recorded in [DATABASE.md](DATABASE.md#c031---approved-credential-and-assignment-database-decisions).
@@ -59,8 +67,8 @@ npm run prisma:generate
 This is database evidence only, not HTTP 409 implementation, moderator approval,
 independent QA authorization, video READY/consent/MFA enforcement, signed URL
 revocation, privacy cleanup or production retention approval. C032-C036 remain
-unimplemented by C031. T04 changes are intentionally not integrated during this
-C031 review-fix task; do not copy its migrations to make these tests pass.
+unimplemented by C031. The reviewed integration baseline already contains T04;
+run its regressions without modifying or copying its existing migrations.
 
 | Suite | Required scenarios | Passing evidence |
 | --- | --- | --- |
