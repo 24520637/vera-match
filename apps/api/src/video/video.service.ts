@@ -18,6 +18,43 @@ import {
 
 @Injectable()
 export class VideoService {
+  remove(ownerId: string, id: string) {
+    // Withdrawal must never prevent an owner from deleting their own video.
+    return consentStorage(() =>
+      this.prisma.$transaction(async (tx) => {
+        await tx.$queryRaw`SELECT id FROM "User" WHERE id = ${ownerId} FOR UPDATE`;
+        await requireConsentMember(tx, ownerId);
+        const video = await tx.video.findFirst({ where: { id, ownerId } });
+        if (!video)
+          throw new NotFoundException({
+            code: "VIDEO_NOT_FOUND",
+            message: "Video not found.",
+          });
+        if (video.status !== "DELETED")
+          await tx.video.update({
+            where: { id },
+            data: { status: "DELETED", deletedAt: new Date() },
+          });
+        await tx.videoCleanupTask.upsert({
+          where: { videoId: id },
+          create: {
+            videoId: id,
+            bucket: video.bucket,
+            objectKey: video.objectKey,
+            uploadKey: video.uploadKey,
+            uploadExpiresAt: video.uploadExpiresAt,
+          },
+          update: {
+            removeFinal: true,
+            status: "PENDING",
+            completedAt: null,
+            nextAttemptAt: new Date(),
+          },
+        });
+        return { id, status: "DELETED", cleanup: "PENDING" };
+      }),
+    );
+  }
   list(ownerId: string) {
     return consentStorage(() =>
       this.prisma.$transaction(async (tx) => {
@@ -34,6 +71,7 @@ export class VideoService {
               sizeBytes: true,
               createdAt: true,
               deletedAt: true,
+              cleanupCompletedAt: true,
             },
           }),
         };

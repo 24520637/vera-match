@@ -20,6 +20,8 @@ import { ConsentPurpose } from "@prisma/client";
 import { configureApplication } from "../src/configure-app";
 import { hashSessionToken } from "../src/auth/session-token";
 import { createAuthDatabase } from "./disposable-auth-database";
+import { VideoCleanupService } from "../src/video/video-cleanup.service";
+import { PrivateStorageService } from "../src/video/private-storage.service";
 
 class VideoTestPolicies extends ConsentPolicyRegistry {
   override current(purpose: ConsentPurpose): PolicySnapshot {
@@ -143,6 +145,71 @@ describe("Private video / real PostgreSQL / native MinIO", () => {
     expect(result.status).toBe(200);
   }
   const valid = { mimeType: "video/mp4", sizeBytes: 12 };
+  it("deletes access atomically, persists storage failures and safely retries after restart", async () => {
+    const user = await member();
+    await grant(user.cookie);
+    const other = await member();
+    await grant(other.cookie);
+    const upload = await intent(user.cookie);
+    await put(upload.uploadUrl);
+    await request(user.cookie, `videos/${upload.id}/confirm`);
+    const playback = (await (
+      await request(user.cookie, `videos/${upload.id}/playback`)
+    ).json()) as { url: string };
+    expect(
+      (await request(other.cookie, `videos/${upload.id}`, {}, "DELETE")).status,
+    ).toBe(404);
+    expect(
+      (await request(user.cookie, `videos/${upload.id}`, {}, "DELETE")).status,
+    ).toBe(202);
+    expect(
+      (await request(user.cookie, `videos/${upload.id}/playback`)).status,
+    ).toBe(404);
+    expect(
+      (await request(user.cookie, `videos/${upload.id}/confirm`)).status,
+    ).toBe(409);
+    const storage = app.get(PrivateStorageService);
+    const failure = jest
+      .spyOn(storage, "remove")
+      .mockRejectedValueOnce(new Error("synthetic private storage failure"));
+    await app.get(VideoCleanupService).runOnce();
+    failure.mockRestore();
+    const job = await database.client.videoCleanupTask.findUniqueOrThrow({
+      where: { videoId: upload.id },
+    });
+    expect(job).toMatchObject({
+      status: "PENDING",
+      lastErrorCode: "STORAGE_CLEANUP_FAILED",
+    });
+    expect((await fetch(playback.url)).status).toBe(200);
+    // Simulate a later durable retry in a fresh worker, rather than waiting 5 minutes.
+    await database.client.videoCleanupTask.update({
+      where: { id: job.id },
+      data: { nextAttemptAt: new Date(0), uploadExpiresAt: new Date(0) },
+    });
+    const restarted = new VideoCleanupService(
+      app.get(PrismaService),
+      storage,
+      app.get(EnvironmentService),
+    );
+    await restarted.runOnce();
+    expect((await fetch(playback.url)).status).toBe(404);
+    expect(
+      await database.client.videoCleanupTask.findUniqueOrThrow({
+        where: { id: job.id },
+      }),
+    ).toMatchObject({ status: "COMPLETE", lastErrorCode: null });
+    expect(
+      (
+        await database.client.video.findUniqueOrThrow({
+          where: { id: upload.id },
+        })
+      ).cleanupCompletedAt,
+    ).not.toBeNull();
+    expect(
+      (await request(user.cookie, `videos/${upload.id}`, {}, "DELETE")).status,
+    ).toBe(202);
+  });
   it("denies new access after actual consent withdrawal while acknowledging pre-issued bearer access", async () => {
     const user = await member();
     await grant(user.cookie);

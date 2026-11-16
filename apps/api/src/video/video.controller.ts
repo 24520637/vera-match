@@ -7,6 +7,8 @@ import {
   Param,
   BadRequestException,
   Get,
+  Delete,
+  HttpCode,
 } from "@nestjs/common";
 import { UserRole } from "@prisma/client";
 import { CurrentUser } from "../auth/current-user.decorator";
@@ -20,6 +22,27 @@ import { VideoService } from "./video.service";
 @UseGuards(SessionAuthGuard, RolesGuard, VideoRequestGuard)
 @Roles(UserRole.MEMBER)
 export class VideoController {
+  @Delete(":id")
+  @HttpCode(202)
+  @Header("Cache-Control", "private, no-store")
+  @Header("Vary", "Cookie")
+  remove(
+    @CurrentUser() user: SafeUser,
+    @Param("id") id: string,
+    @Body() body: unknown,
+  ) {
+    if (
+      !body ||
+      typeof body !== "object" ||
+      Array.isArray(body) ||
+      Object.keys(body).length
+    )
+      throw new BadRequestException({
+        code: "INVALID_REQUEST",
+        message: "Send an empty JSON object.",
+      });
+    return this.videos.remove(user.id, id);
+  }
   @Get("me")
   @Header("Cache-Control", "private, no-store")
   @Header("Vary", "Cookie")

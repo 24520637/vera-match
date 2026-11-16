@@ -3,6 +3,7 @@ import {
   CopyObjectCommand,
   DeleteObjectCommand,
   GetBucketPolicyCommand,
+  GetBucketVersioningCommand,
   GetObjectCommand,
   HeadBucketCommand,
   HeadObjectCommand,
@@ -59,6 +60,13 @@ export class PrivateStorageService {
   async assertPrivate() {
     return this.safe(async () => {
       await this.client.send(new HeadBucketCommand({ Bucket: this.bucket }));
+      const versioning = await this.client.send(
+        new GetBucketVersioningCommand({ Bucket: this.bucket }),
+      );
+      if (versioning.Status)
+        throw new Error(
+          "Versioned buckets require a separately reviewed erasure implementation",
+        );
       // This application intentionally requires NO bucket policy, rather than trying
       // to decide whether an arbitrary policy grants anonymous object access.
       try {
@@ -151,11 +159,29 @@ export class PrivateStorageService {
     );
   }
   async remove(key: string) {
-    await this.safe(() =>
-      this.client.send(
+    await this.safe(async () => {
+      const versioning = await this.client.send(
+        new GetBucketVersioningCommand({ Bucket: this.bucket }),
+      );
+      if (versioning.Status)
+        throw new Error("Versioned erasure is not supported");
+      await this.client.send(
         new DeleteObjectCommand({ Bucket: this.bucket, Key: key }),
-      ),
-    );
+      );
+      try {
+        await this.client.send(
+          new HeadObjectCommand({ Bucket: this.bucket, Key: key }),
+        );
+      } catch (error) {
+        if (
+          (error as { $metadata?: { httpStatusCode?: number } }).$metadata
+            ?.httpStatusCode === 404
+        )
+          return;
+        throw error;
+      }
+      throw new Error("Object removal not confirmed");
+    });
   }
   onModuleDestroy() {
     this.client.destroy();
