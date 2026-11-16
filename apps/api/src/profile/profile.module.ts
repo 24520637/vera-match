@@ -10,5 +10,6 @@ import { ProfileService } from "./profile.service";
   imports: [AuthModule, DatabaseModule, EnvironmentModule],
   controllers: [ProfileController],
   providers: [ProfileService, ProfileRequestGuard, ProfileRateLimiter],
+  exports: [ProfileRateLimiter],
 })
 export class ProfileModule {}
