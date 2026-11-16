@@ -10,6 +10,7 @@ export class ApiError extends Error {
     public readonly code?: string,
     public readonly details?: unknown,
     public readonly retryAfterSeconds?: number,
+    public readonly resourceRevision?: number,
   ) {
     super(message);
     this.name = "ApiError";
@@ -128,6 +129,8 @@ export async function apiFetch(
           envelope.retryAfterSeconds,
         )
       : undefined,
+    envelope.code === "DATA_SHAPE_UNAVAILABLE" && Number.isSafeInteger(envelope.revision) && (envelope.revision as number) >= 0
+      ? envelope.revision as number : undefined,
   );
 }
 
