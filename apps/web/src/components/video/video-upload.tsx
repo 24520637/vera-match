@@ -76,6 +76,8 @@ export function VideoUpload({ onUploaded }: { onUploaded?: () => void }) {
   const [recording, setRecording] = useState(false);
   const [cameraPending, setCameraPending] = useState(false);
   const controller = useRef<AbortController | null>(null);
+  const activeIntent = useRef<Intent | null>(null);
+  const [cancelling, setCancelling] = useState(false);
   const recorder = useRef<MediaRecorder | null>(null);
   const stream = useRef<MediaStream | null>(null);
   const camera = useRef<HTMLVideoElement>(null);
@@ -221,6 +223,7 @@ export function VideoUpload({ onUploaded }: { onUploaded?: () => void }) {
     setError("");
     setSuccess(false);
     setProgress(0);
+    activeIntent.current = null;
     try {
       const intent = await apiJson<Intent>("/videos/upload-intent", {
         method: "POST",
@@ -228,6 +231,7 @@ export function VideoUpload({ onUploaded }: { onUploaded?: () => void }) {
         signal: abort.signal,
       });
       if (!intent) throw new Error("The upload could not be started.");
+      activeIntent.current = intent;
       await uploadVideoBytes(intent, file, setProgress, abort.signal);
       await apiJson(`/videos/${encodeURIComponent(intent.id)}/confirm`, {
         method: "POST",
@@ -237,6 +241,7 @@ export function VideoUpload({ onUploaded }: { onUploaded?: () => void }) {
       if (alive.current && current === attempt.current) {
         setSuccess(true);
         setFile(null);
+        if (inputRef.current) inputRef.current.value = "";
         onUploaded?.();
       }
     } catch (failure) {
@@ -256,6 +261,32 @@ export function VideoUpload({ onUploaded }: { onUploaded?: () => void }) {
         );
     } finally {
       if (alive.current && current === attempt.current) setBusy(false);
+    }
+  }
+  async function cancelUpload() {
+    setCancelling(true);
+    controller.current?.abort();
+    const intent = activeIntent.current;
+    try {
+      if (intent) {
+        await apiJson(`/videos/${encodeURIComponent(intent.id)}`, {
+          method: "DELETE",
+          json: {},
+        });
+        if (alive.current) {
+          setError(
+            "Video access removed. Temporary bytes are queued for cleanup.",
+          );
+          onUploaded?.();
+        }
+      }
+    } catch {
+      if (alive.current)
+        setError(
+          "Cancellation could not be confirmed. Refresh your video list and remove the upload there.",
+        );
+    } finally {
+      if (alive.current) setCancelling(false);
     }
   }
   return (
@@ -282,7 +313,7 @@ export function VideoUpload({ onUploaded }: { onUploaded?: () => void }) {
           type="file"
           accept="video/mp4,video/webm"
           hint="MP4 or WebM, up to 100 MiB."
-          disabled={busy || recording || cameraPending}
+          disabled={busy || cancelling || recording || cameraPending}
           onChange={(event) => choose(event.target.files?.[0] ?? null)}
           error={error && !file ? error : undefined}
         />
@@ -349,14 +380,17 @@ export function VideoUpload({ onUploaded }: { onUploaded?: () => void }) {
             type="submit"
             loading={busy}
             loadingLabel="Uploading…"
-            disabled={recording || cameraPending || retry.seconds > 0}
+            disabled={
+              recording || cancelling || cameraPending || retry.seconds > 0
+            }
           >
             Upload private video
           </Button>
           {busy && (
             <Button
               variant="secondary"
-              onClick={() => controller.current?.abort()}
+              onClick={() => void cancelUpload()}
+              disabled={cancelling}
             >
               Cancel upload
             </Button>

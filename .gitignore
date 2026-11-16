@@ -16,3 +16,4 @@ __pycache__/
 playwright-report/
 test-results/
 .auth-e2e-runtime.json
+.video-e2e-runtime.json
