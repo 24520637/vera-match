@@ -147,6 +147,66 @@ describe("Private video / real PostgreSQL / native MinIO", () => {
     expect(result.status).toBe(200);
   }
   const valid = { mimeType: "video/mp4", sizeBytes: 12 };
+  it("rejects test-only consent evidence for video access outside the test environment", async () => {
+    const user = await member();
+    await grant(user.cookie);
+    const upload = await intent(user.cookie);
+    await put(upload.uploadUrl);
+    expect(
+      (await request(user.cookie, `videos/${upload.id}/confirm`)).status,
+    ).toBe(201);
+    const environment = app.get(EnvironmentService),
+      previous = environment.values;
+    try {
+      for (const nodeEnv of ["development", "production"] as const) {
+        Object.defineProperty(environment, "values", {
+          value: { ...previous, nodeEnv },
+          configurable: true,
+        });
+        expect(
+          (await request(user.cookie, "videos/upload-intent", valid)).status,
+        ).toBe(403);
+        expect(
+          (await request(user.cookie, `videos/${upload.id}/confirm`)).status,
+        ).toBe(403);
+        expect(
+          (await request(user.cookie, `videos/${upload.id}/playback`)).status,
+        ).toBe(403);
+        expect(
+          (
+            await request(
+              user.cookie,
+              "consents/me",
+              {
+                expectedVersion: 1,
+                consents: [
+                  {
+                    purpose: "VIDEO_STORAGE",
+                    granted: true,
+                    policyVersion: "synthetic-video-v1",
+                  },
+                ],
+              },
+              "PATCH",
+            )
+          ).status,
+        ).toBe(400);
+        // Safe own metadata and deletion never require granting consent again.
+        expect(
+          (await request(user.cookie, "videos/me", {}, "GET")).status,
+        ).toBe(200);
+      }
+      expect(
+        (await request(user.cookie, `videos/${upload.id}`, {}, "DELETE"))
+          .status,
+      ).toBe(202);
+    } finally {
+      Object.defineProperty(environment, "values", {
+        value: previous,
+        configurable: true,
+      });
+    }
+  });
   it("does not delete final media when reaping incoming bytes for an under-review video", async () => {
     const user = await member();
     await grant(user.cookie);
