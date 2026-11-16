@@ -147,6 +147,187 @@ describe("Private video / real PostgreSQL / native MinIO", () => {
     expect(result.status).toBe(200);
   }
   const valid = { mimeType: "video/mp4", sizeBytes: 12 };
+  it("does not delete final media when reaping incoming bytes for an under-review video", async () => {
+    const user = await member();
+    await grant(user.cookie);
+    const upload = await intent(user.cookie);
+    await put(upload.uploadUrl);
+    await request(user.cookie, `videos/${upload.id}/confirm`);
+    const row = await database.client.video.update({
+      where: { id: upload.id },
+      data: { status: "UNDER_REVIEW", uploadExpiresAt: new Date(0) },
+    });
+    await app.get(VideoCleanupService).runOnce();
+    expect(
+      (await database.client.video.findUniqueOrThrow({ where: { id: row.id } }))
+        .status,
+    ).toBe("UNDER_REVIEW");
+    expect(
+      (await app.get(PrivateStorageService).inspect(row.objectKey)).size,
+    ).toBe(12);
+    expect(
+      (
+        await database.client.videoCleanupTask.findUniqueOrThrow({
+          where: { videoId: row.id },
+        })
+      ).removeFinal,
+    ).toBe(false);
+  });
+  it("serializes URL issuance against withdrawal using the shared database lock", async () => {
+    const user = await member();
+    await grant(user.cookie);
+    const upload = await intent(user.cookie);
+    await put(upload.uploadUrl);
+    await request(user.cookie, `videos/${upload.id}/confirm`);
+    const storage = app.get(PrivateStorageService);
+    const original = storage.playbackUrl.bind(storage);
+    let entered!: () => void, release!: () => void;
+    const started = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const spy = jest
+      .spyOn(storage, "playbackUrl")
+      .mockImplementationOnce(async (key, mime) => {
+        entered();
+        await gate;
+        return original(key, mime);
+      });
+    try {
+      const issuance = request(user.cookie, `videos/${upload.id}/playback`);
+      await started;
+      const withdrawal = request(
+        user.cookie,
+        "consents/me",
+        {
+          expectedVersion: 1,
+          consents: [{ purpose: "VIDEO_STORAGE", granted: false }],
+        },
+        "PATCH",
+      );
+      release();
+      expect((await issuance).status).toBe(201);
+      expect((await withdrawal).status).toBe(200);
+      expect(
+        (await request(user.cookie, `videos/${upload.id}/playback`)).status,
+      ).toBe(403);
+    } finally {
+      release();
+      spy.mockRestore();
+    }
+  });
+  it("serializes confirmation and deletion and cleans a lost storage acknowledgement safely", async () => {
+    const user = await member();
+    await grant(user.cookie);
+    const upload = await intent(user.cookie);
+    await put(upload.uploadUrl);
+    const storage = app.get(PrivateStorageService);
+    const originalPromote = storage.promote.bind(storage);
+    let entered!: () => void, release!: () => void;
+    const started = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const spy = jest
+      .spyOn(storage, "promote")
+      .mockImplementationOnce(async (...args) => {
+        entered();
+        await gate;
+        return originalPromote(...args);
+      });
+    try {
+      const confirmation = request(user.cookie, `videos/${upload.id}/confirm`);
+      await started;
+      const deletion = request(
+        user.cookie,
+        `videos/${upload.id}`,
+        {},
+        "DELETE",
+      );
+      release();
+      expect((await confirmation).status).toBe(201);
+      expect((await deletion).status).toBe(202);
+      expect(
+        (await request(user.cookie, `videos/${upload.id}/playback`)).status,
+      ).toBe(404);
+    } finally {
+      release();
+      spy.mockRestore();
+    }
+    const row = await database.client.video.findUniqueOrThrow({
+      where: { id: upload.id },
+    });
+    const originalRemove = storage.remove.bind(storage);
+    let lost = false;
+    const loss = jest
+      .spyOn(storage, "remove")
+      .mockImplementation(async (key) => {
+        await originalRemove(key);
+        if (key === row.objectKey && !lost) {
+          lost = true;
+          throw Error("synthetic lost acknowledgement");
+        }
+      });
+    await app.get(VideoCleanupService).runOnce();
+    loss.mockRestore();
+    expect(
+      await database.client.videoCleanupTask.findUniqueOrThrow({
+        where: { videoId: row.id },
+      }),
+    ).toMatchObject({
+      status: "PENDING",
+      lastErrorCode: "STORAGE_CLEANUP_FAILED",
+    });
+    expect(lost).toBe(true);
+    await database.client.videoCleanupTask.update({
+      where: { videoId: row.id },
+      data: { uploadExpiresAt: new Date(0), nextAttemptAt: new Date(0) },
+    });
+    await new VideoCleanupService(
+      app.get(PrismaService),
+      storage,
+      app.get(EnvironmentService),
+    ).runOnce();
+    expect(
+      (
+        await database.client.videoCleanupTask.findUniqueOrThrow({
+          where: { videoId: row.id },
+        })
+      ).status,
+    ).toBe("COMPLETE");
+  });
+  it("rejects a source replacement between validation and conditional promotion", async () => {
+    const user = await member();
+    await grant(user.cookie);
+    const upload = await intent(user.cookie);
+    await put(upload.uploadUrl);
+    const storage = app.get(PrivateStorageService),
+      promote = storage.promote.bind(storage);
+    const spy = jest
+      .spyOn(storage, "promote")
+      .mockImplementationOnce(async (...args) => {
+        await put(upload.uploadUrl, Buffer.from("replaced".padEnd(12)));
+        return promote(...args);
+      });
+    try {
+      expect(
+        (await request(user.cookie, `videos/${upload.id}/confirm`)).status,
+      ).toBe(503);
+    } finally {
+      spy.mockRestore();
+    }
+    expect(
+      (
+        await database.client.video.findUniqueOrThrow({
+          where: { id: upload.id },
+        })
+      ).status,
+    ).toBe("UPLOADING");
+  });
   it("writes minimal privacy audit events atomically and never returns a URL after audit failure", async () => {
     const user = await member();
     await grant(user.cookie);
@@ -343,9 +524,17 @@ describe("Private video / real PostgreSQL / native MinIO", () => {
       (await request(user.cookie, `videos/${upload.id}/confirm`)).status,
     ).toBe(409);
     const storage = app.get(PrivateStorageService);
+    const target = await database.client.video.findUniqueOrThrow({
+      where: { id: upload.id },
+    });
+    const realRemove = storage.remove.bind(storage);
     const failure = jest
       .spyOn(storage, "remove")
-      .mockRejectedValueOnce(new Error("synthetic private storage failure"));
+      .mockImplementation(async (key) => {
+        if (key === target.objectKey)
+          throw Error("synthetic private storage failure");
+        return realRemove(key);
+      });
     await app.get(VideoCleanupService).runOnce();
     failure.mockRestore();
     const job = await database.client.videoCleanupTask.findUniqueOrThrow({
