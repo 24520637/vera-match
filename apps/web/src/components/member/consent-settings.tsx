@@ -35,18 +35,20 @@ export function ConsentSettings({ publishedPolicies }: { publishedPolicies: Publ
   useEffect(() => { const controller = new AbortController(); void load(controller.signal); return () => controller.abort(); }, []);
   async function send(operation: Mutation) {
     if (busy) return;
-    setBusy(true); setError(undefined); setMessage(""); setPending(undefined);
+    const reconciling = pending?.key === operation.key;
+    setBusy(true); setError(undefined); setMessage("");
     try {
       // A new key is generated only by a new explicit action. Reconciliation reuses this exact object.
       readConsents(await apiJson("/consents/me", { method: "PATCH", json: operation.body,
         headers: { "Idempotency-Key": operation.key }, signal: AbortSignal.timeout(15000) }));
-      setFresh(false); setAccepted({});
+      setPending(undefined); setFresh(false); setAccepted({});
       const confirmed = await load();
       setMessage(confirmed ? "Request recorded. The current consent choices are shown below."
         : "Request recorded, but current choices could not be confirmed. Refresh before relying on the displayed state.");
     } catch (failure) {
       setError(failure); (operation.granted ? grantWait : revokeWait).fromError(failure);
       setAccepted({});
+      if (reconciling && !(failure instanceof ApiError && failure.status === 429)) setPending(undefined);
       if (failure instanceof ApiError && failure.status === 409) { setConflict(true); setFresh(false); }
       if (!(failure instanceof ApiError) || failure.kind !== "http" || (failure.status ?? 0) >= 500) {
         setPending(operation); setFresh(false);
@@ -58,6 +60,7 @@ export function ConsentSettings({ publishedPolicies }: { publishedPolicies: Publ
     const policy = publishedPolicies[purpose];
     if (granted && (!fresh || pending || !policy || !accepted[purpose] || grantWait.seconds)) return;
     if (!granted && revokeWait.seconds) return;
+    if (pending?.purpose === purpose && pending.granted === granted) return;
     const item = granted ? { purpose, granted, policyVersion: policy!.version } : { purpose, granted };
     void send({ key: crypto.randomUUID(), purpose, granted, body: { expectedVersion: snapshot.version, consents: [item] } });
   }
@@ -96,7 +99,7 @@ export function ConsentSettings({ publishedPolicies }: { publishedPolicies: Publ
         <div className="inline">
           <Button disabled={busy || loading || !fresh || conflict || !!pending || !policy || !accepted[purpose] || grantWait.seconds > 0}
             onClick={() => mutate(purpose, true)}>Grant {purposeLabels[purpose].toLowerCase()}</Button>
-          <Button variant="secondary" disabled={busy || loading || conflict || revokeWait.seconds > 0}
+          <Button variant="secondary" disabled={busy || loading || conflict || revokeWait.seconds > 0 || (pending?.purpose === purpose && !pending.granted)}
             onClick={() => mutate(purpose, false)}>Withdraw {purposeLabels[purpose].toLowerCase()}</Button>
         </div>
       </Card>;
