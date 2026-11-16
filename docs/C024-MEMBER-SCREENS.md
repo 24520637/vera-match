@@ -74,6 +74,17 @@ On restricted Windows environments, Playwright may need process permissions to
 terminate its own Next servers during teardown. Do not stop unrelated services.
 Test results must be reported from actual execution, not inferred from these commands.
 
+PR #10 regression coverage also exercises the real client session boundary:
+temporary session network/503 failures hide private controls while preserving
+unsaved resource drafts in a member-scoped memory provider outside that boundary.
+The same member must review refreshed saved data before submitting restored edits.
+Confirmed logout, forbidden access, account changes and leaving the member layout
+invalidate that memory. Drafts are not written to browser storage and do not survive
+a full reload. Consent reconciliation retains the original unresolved payload and
+idempotency key across HTTP 429; countdown expiry only enables manual retry.
+CI runs the real member desktop/mobile runner after installing Chromium and starting
+the existing PostgreSQL service, retaining its HTML report under the UI artifact.
+
 Full-page axe inspection also reports a pre-existing shared header wordmark
 `label-content-name-mismatch` in `components/layout/site-header.tsx` (visible
 VERAMatch versus aria-label VERA Match home). C024 does not change that shared

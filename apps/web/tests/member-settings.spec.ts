@@ -16,9 +16,14 @@ async function mock(page: Page) {
   const failures: Record<string, Failure | undefined> = {};
   const replay = new Map<string, object>();
   let dropConsent = false;
+  const auth = { id: "synthetic-member", failure: undefined as Failure | "network" | undefined };
   await page.route("**/api/**", async route => {
     const req = route.request(), path = new URL(req.url()).pathname, method = req.method();
-    if (path === "/api/auth/me") return route.fulfill({ json: { id: "synthetic-member", email: "member@example.invalid", displayName: null, role: "MEMBER" } });
+    if (path === "/api/auth/me") {
+      if (auth.failure === "network") return route.abort("failed");
+      if (auth.failure) return route.fulfill({ status: auth.failure.status, json: auth.failure.body });
+      return route.fulfill({ json: { id: auth.id, email: "member@example.invalid", displayName: null, role: "MEMBER" } });
+    }
     const resource = path.split("/")[2] as keyof typeof state;
     if (!(resource in state)) return route.fulfill({ status: 404, json: {} });
     const failure = failures[`${method}:${resource}`];
@@ -51,8 +56,72 @@ async function mock(page: Page) {
     }
     return route.fulfill({ json: state[resource] });
   });
-  return { state, calls, failures, dropConsentResponse: () => { dropConsent = true; } };
+  return { auth, state, calls, failures, dropConsentResponse: () => { dropConsent = true; } };
 }
+
+for (const failure of ["network", "503"] as const) test(`session ${failure} hides private fields but restores the same member's unsaved draft`, async ({ page }) => {
+  const server = await mock(page);
+  await page.goto(`${url}?screen=profile`);
+  await page.getByLabel("City", { exact: true }).fill("Private unsaved city");
+  server.auth.failure = failure === "network" ? "network" : { status: 503, body: {} };
+  await page.evaluate(() => window.dispatchEvent(new Event("online")));
+  await expect(page.getByLabel("City", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("Private unsaved city")).toHaveCount(0);
+  server.auth.failure = undefined;
+  await page.evaluate(() => window.dispatchEvent(new Event("online")));
+  await expect(page.getByLabel("City", { exact: true })).toHaveValue("Private unsaved city");
+  await expect(page.getByRole("button", { name: "Save changes", exact: true })).toBeDisabled();
+  await expect(page.getByLabel("I reviewed the latest saved data and want to submit my edits.")).toBeVisible();
+  expect(server.calls).toHaveLength(0);
+});
+
+test("an account switch invalidates the previous member's draft", async ({ page }) => {
+  const server = await mock(page);
+  await page.goto(`${url}?screen=profile`);
+  await page.getByLabel("City", { exact: true }).fill("Member A private draft");
+  server.auth.id = "member-b";
+  await page.evaluate(() => window.dispatchEvent(new Event("online")));
+  await expect(page.getByLabel("City", { exact: true })).toHaveValue("");
+  server.auth.id = "synthetic-member";
+  await page.evaluate(() => window.dispatchEvent(new Event("online")));
+  await expect(page.getByLabel("City", { exact: true })).toHaveValue("");
+  expect(server.calls).toHaveLength(0);
+});
+
+test("confirmed logout clears drafts even when the same member signs in again", async ({ page }) => {
+  const server = await mock(page);
+  // Exercise the member guard without redirecting out of the mounted memory provider.
+  await page.goto(`${url}?screen=profile&boundary=member`);
+  await page.getByLabel("City", { exact: true }).fill("Draft before logout");
+  server.auth.failure = { status: 401, body: {} };
+  await page.evaluate(() => window.dispatchEvent(new Event("online")));
+  await expect(page.getByRole("link", { name: "Sign in", exact: true })).toBeVisible();
+  await expect(page.getByLabel("City", { exact: true })).toHaveCount(0);
+  server.auth.failure = undefined;
+  await page.evaluate(() => window.dispatchEvent(new Event("online")));
+  await expect(page.getByLabel("City", { exact: true })).toHaveValue("");
+  expect(server.calls).toHaveLength(0);
+});
+
+for (const granted of [true, false]) test(`429 reconciliation preserves the original ${granted ? "grant" : "withdrawal"} until manual retry`, async ({ page }) => {
+  const server = await mock(page);
+  await page.goto(`${url}?screen=consents&policies=synthetic`);
+  if (granted) await page.getByLabel("I agree to the displayed profile matching policy.").check();
+  server.dropConsentResponse();
+  await page.getByRole("button", { name: `${granted ? "Grant" : "Withdraw"} profile matching`, exact: true }).click();
+  const reconcile = page.getByRole("button", { name: "Reconcile original request" });
+  await expect(reconcile).toBeVisible();
+  server.failures["PATCH:consents"] = { status: 429, body: { code: "RATE_LIMITED" }, headers: { "Retry-After": "2" } };
+  await reconcile.click();
+  await expect(reconcile).toBeDisabled();
+  await expect(reconcile).toBeEnabled({ timeout: 5000 });
+  expect(server.calls).toHaveLength(2);
+  await reconcile.click();
+  await expect(page.getByText("Request recorded. The current consent choices are shown below.")).toBeVisible();
+  expect(server.calls).toHaveLength(3);
+  for (const call of server.calls) { expect(call.key).toBe(server.calls[0].key); expect(call.body).toEqual(server.calls[0].body); }
+  expect(server.state.consents.version).toBe(1);
+});
 
 test("profile save uses a dirty-field PATCH and reloads without enabling consent", async ({ page }) => {
   const server = await mock(page);

@@ -9,15 +9,19 @@ import { RetryAfterFeedback } from "../auth/retry-after-feedback";
 import { Button } from "../ui/button";
 import { Checkbox, Fieldset, Form, FormActions, Input, Select, Textarea } from "../ui/form";
 import { EmptyState, LoadingState, Notice } from "../ui/status";
+import { useMemberDrafts } from "./member-drafts";
 
 const labels: Record<string, string> = { birthDate: "Birth date", occupation: "Occupation", city: "City", bio: "About you",
   relationshipGoal: "Relationship goal", interests: "Interests", values: "Values", visibilityEnabled: "Visible for matching",
   minAge: "Minimum age", maxAge: "Maximum age", dealBreakers: "Dealbreakers", priorities: "Priority order" };
 export function ResourceEditor({ screen }: { screen: Exclude<Screen, "consents"> }) {
-  const [draft, setDraft] = useState<Values>(() => defaults(screen));
+  const memory = useMemberDrafts();
+  const restored = useRef(memory?.read(screen));
+  const [draft, setDraft] = useState<Values>(() => restored.current?.values ?? defaults(screen));
   const [saved, setSaved] = useState<Values>();
   const [revision, setRevision] = useState<number>();
-  const [dirty, setDirty] = useState<string[]>([]);
+  const [dirty, setDirty] = useState<string[]>(() => restored.current?.dirty ?? []);
+  useEffect(() => { memory?.write(screen, { values: draft, dirty }); }, [memory, screen, draft, dirty]);
   const [busy, setBusy] = useState(false), [loading, setLoading] = useState(true), [empty, setEmpty] = useState(false);
   const [error, setError] = useState<unknown>(), [success, setSuccess] = useState("");
   const [conflict, setConflict] = useState(false), [review, setReview] = useState(false), [reviewed, setReviewed] = useState(false);
@@ -46,7 +50,7 @@ export function ResourceEditor({ screen }: { screen: Exclude<Screen, "consents">
     // Retry deadline is stateful; it must not retrigger fetching or erase drafts.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [screen]);
-  useEffect(() => { const controller = new AbortController(); void load(false, controller.signal); return () => controller.abort(); }, [load]);
+  useEffect(() => { const controller = new AbortController(); void load(!!restored.current, controller.signal); return () => controller.abort(); }, [load]);
   function edit(name: string, value: Value) {
     setDraft(previous => ({ ...previous, [name]: value }));
     setDirty(previous => previous.includes(name) ? previous : [...previous, name]); setSuccess("");
