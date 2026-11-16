@@ -5,9 +5,10 @@ import { DatabaseModule } from "./database/database.module";
 import { AuthModule } from "./auth/auth.module";
 import { ProfileModule } from "./profile/profile.module";
 import { QuestionnaireModule } from "./questionnaire/questionnaire.module";
+import { PreferencesModule } from "./preferences/preferences.module";
 
 @Module({
-  imports: [EnvironmentModule, DatabaseModule, AuthModule, ProfileModule, QuestionnaireModule],
+  imports: [EnvironmentModule, DatabaseModule, AuthModule, ProfileModule, QuestionnaireModule, PreferencesModule],
   controllers: [HealthController],
 })
 export class AppModule {}
