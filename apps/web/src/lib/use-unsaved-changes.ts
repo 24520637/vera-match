@@ -3,7 +3,7 @@
 import { useEffect } from "react";
 
 /** Protect page-local drafts on browser exit and ordinary link navigation. */
-export function useUnsavedChanges(dirty: boolean) {
+export function useUnsavedChanges(dirty: boolean, message = "Leave this page? Your unsaved example changes will be lost.") {
   useEffect(() => {
     if (!dirty) return;
     const beforeUnload = (event: BeforeUnloadEvent) => {
@@ -33,7 +33,7 @@ export function useUnsavedChanges(dirty: boolean) {
         return;
       if (
         !window.confirm(
-          "Leave this page? Your unsaved example changes will be lost.",
+          message,
         )
       ) {
         event.preventDefault();
@@ -46,5 +46,5 @@ export function useUnsavedChanges(dirty: boolean) {
       window.removeEventListener("beforeunload", beforeUnload);
       document.removeEventListener("click", beforeNavigate, true);
     };
-  }, [dirty]);
+  }, [dirty, message]);
 }
