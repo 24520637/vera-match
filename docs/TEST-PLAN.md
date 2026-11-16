@@ -2,6 +2,66 @@
 
 Each feature needs valid inputs, invalid inputs, unauthorized access, state/race tests, UI feedback states, and audit/revoke behavior when relevant.
 
+## C031 - credential and assignment database foundation
+
+Plan subject: `feat(expert-db): add credentials and assignments` (T06).
+The seven approved decisions and remaining integration/production boundaries are
+recorded in [DATABASE.md](DATABASE.md#c031---approved-credential-and-assignment-database-decisions).
+
+- Apply all existing plus additive migrations to a fresh disposable schema.
+- Upgrade initial-migration fixtures without losing users, videos, assignments or
+  reviews; create no fabricated historic approvals/events. Re-deploy is a no-op.
+- Legacy duplicate active assignments/orphan actors stop migration atomically;
+  no automatic repair, winner selection or data deletion.
+- Inject a failure after DDL/backfill execution; assert tables, types, indexes,
+  added columns and data changes roll back, not merely a preflight failure.
+- Exactly one current credential per expert; FK/approval-subject checks; retain
+  immutable training/confidentiality versions, verification/approval actors,
+  timestamps/expiry, revocation reason and distinct reapproval instances.
+- Reject public evidence URLs and incorrect snapshot hashes. No storage durability
+  guarantee is inferred from accepting a private object locator.
+- Exercise every approved lifecycle edge, terminal states, stale CAS, revision
+  jumps, transaction rollback and binding immutability. dueAt and expiresAt differ.
+- Concurrent inserts hit the PostgreSQL partial unique index; concurrent CAS
+  transitions/credential updates have exactly one winner. Reassignment is atomic.
+- State and matching event commit together; reject orphan history. Reject
+  UPDATE/DELETE/TRUNCATE of newly retained evidence/history.
+- For both event tables, commit valid mutations with caller-supplied past/future
+  createdAt values and assert persisted recording time is within database-clock
+  bounds. A delayed transaction must record insertion time, not transaction start;
+  verify UTC behavior under a different session-local timezone. No unrelated
+  validation rejection may count as timestamp enforcement evidence.
+- Reject standalone legacy revision-0 events and wrong from/to history even with
+  an otherwise matching snapshot. A real mutation with correct history succeeds.
+- Negative tests supply matching events and assert the intended database error;
+  CAS race losers must report the explicit revision conflict, not arbitrary failure.
+- assignedById uses FK SET NULL without losing retained evidence. Existing
+  Video -> Assignment -> Review cascade still works; new history/approvals survive
+  that cascade and current-credential/account deletion in disposable fixtures.
+- Upgrade legacy active/terminal assignments, delete their assigning User and
+  verify opaque actor evidence survives, reverse mapping disappears, and no
+  qualification/approval or transition event is fabricated.
+- Reject credential DELETE/recreate and TRUNCATE CAS resets for a live account;
+  real User deletion cascades still work without losing immutable evidence.
+- Run Prisma validate/generate, TypeScript, API build, API unit and available
+  existing integration regressions; report unavailable SMTP checks honestly.
+- Test only synthetic data in UUID-named schemas on a verified disposable local
+  PostgreSQL. Verify cleanup and `git diff --check`; never reset public/shared data.
+
+Focused commands after configuring a disposable test database:
+
+```text
+npm run test:integration --workspace apps/api -- --runTestsByPath test/expert-database.integration-spec.ts test/expert-migration.integration-spec.ts
+npm run prisma:validate
+npm run prisma:generate
+```
+
+This is database evidence only, not HTTP 409 implementation, moderator approval,
+independent QA authorization, video READY/consent/MFA enforcement, signed URL
+revocation, privacy cleanup or production retention approval. C032-C036 remain
+unimplemented by C031. T04 changes are intentionally not integrated during this
+C031 review-fix task; do not copy its migrations to make these tests pass.
+
 | Suite | Required scenarios | Passing evidence |
 | --- | --- | --- |
 | Auth | Duplicate registration; expired/replayed verification; pending login; refresh restore; logout-all; replayed reset token | Correct `401`/`403`; no token exposure or account enumeration |
