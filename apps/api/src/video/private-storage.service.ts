@@ -114,7 +114,12 @@ export class PrivateStorageService {
       };
     });
   }
-  async promote(source: string, target: string, etag: string) {
+  async promote(
+    source: string,
+    target: string,
+    etag: string,
+    mimeType: string,
+  ) {
     await this.safe(() =>
       this.client.send(
         new CopyObjectCommand({
@@ -124,7 +129,7 @@ export class PrivateStorageService {
           CopySourceIfMatch: etag,
           CacheControl: "private, no-store",
           MetadataDirective: "REPLACE",
-          ContentType: undefined,
+          ContentType: mimeType,
         }),
       ),
     );

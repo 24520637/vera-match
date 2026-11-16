@@ -143,6 +143,80 @@ describe("Private video / real PostgreSQL / native MinIO", () => {
     expect(result.status).toBe(200);
   }
   const valid = { mimeType: "video/mp4", sizeBytes: 12 };
+  const videoBytes = Buffer.from([
+    0, 0, 0, 24, 102, 116, 121, 112, 105, 115, 111, 109,
+  ]);
+  async function intent(cookie: string) {
+    const response = await request(cookie, "videos/upload-intent", valid);
+    expect(response.status).toBe(201);
+    return (await response.json()) as { id: string; uploadUrl: string };
+  }
+  const put = (url: string, bytes = videoBytes) =>
+    fetch(url, {
+      method: "PUT",
+      headers: { "Content-Type": "video/mp4" },
+      body: bytes,
+    });
+  it("confirms only actual valid objects, serializes duplicate confirmations and isolates playback from re-upload", async () => {
+    const user = await member();
+    await grant(user.cookie);
+    const upload = await intent(user.cookie);
+    expect(
+      (await request(user.cookie, `videos/${upload.id}/confirm`)).status,
+    ).toBe(503);
+    await put(upload.uploadUrl, Buffer.from("spoofed-file".padEnd(12)));
+    expect(
+      (await request(user.cookie, `videos/${upload.id}/confirm`)).status,
+    ).toBe(409);
+    expect(
+      (
+        await database.client.video.findUniqueOrThrow({
+          where: { id: upload.id },
+        })
+      ).status,
+    ).toBe("UPLOADING");
+    expect((await put(upload.uploadUrl)).status).toBe(200);
+    const confirmations = await Promise.all([
+      request(user.cookie, `videos/${upload.id}/confirm`),
+      request(user.cookie, `videos/${upload.id}/confirm`),
+    ]);
+    expect(confirmations.map((x) => x.status)).toEqual([201, 201]);
+    const row = await database.client.video.findUniqueOrThrow({
+      where: { id: upload.id },
+    });
+    expect(row.status).toBe("READY");
+    await put(upload.uploadUrl, Buffer.from("spoofed-file".padEnd(12)));
+    const { PrivateStorageService } =
+      await import("../src/video/private-storage.service");
+    const checked = await app.get(PrivateStorageService).inspect(row.objectKey);
+    expect(Buffer.from(checked.prefix)).toEqual(videoBytes);
+    const other = await member();
+    await grant(other.cookie);
+    expect(
+      (await request(other.cookie, `videos/${upload.id}/confirm`)).status,
+    ).toBe(404);
+    expect(
+      (
+        await request(user.cookie, `videos/${upload.id}/confirm`, {
+          status: "READY",
+        })
+      ).status,
+    ).toBe(400);
+  });
+  it("rejects expired uploads and changed signed lengths", async () => {
+    const user = await member();
+    await grant(user.cookie);
+    const upload = await intent(user.cookie);
+    expect((await put(upload.uploadUrl, Buffer.alloc(13))).status).toBe(403);
+    await put(upload.uploadUrl);
+    await database.client.video.update({
+      where: { id: upload.id },
+      data: { uploadExpiresAt: new Date(0) },
+    });
+    expect(
+      (await request(user.cookie, `videos/${upload.id}/confirm`)).status,
+    ).toBe(409);
+  });
   it("requires a session, current actual consent, safe metadata and session-derived owner", async () => {
     expect((await request("", "videos/upload-intent", valid)).status).toBe(401);
     const user = await member();
