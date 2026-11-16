@@ -1,0 +1,8 @@
+.member-settings { max-width: 52rem; padding-bottom: 4rem; }
+.member-nav { display: flex; flex-wrap: wrap; gap: .75rem 1.25rem; padding-block: 1.25rem; }
+.member-settings .member-nav { padding-inline: 0; }
+.member-settings dd { margin: 0 0 .75rem; white-space: pre-wrap; overflow-wrap: anywhere; }
+.member-settings fieldset { min-width: 0; }
+.member-settings .consent-policy { white-space: pre-wrap; overflow-wrap: anywhere; }
+.member-settings [tabindex="-1"]:focus { outline: 2px solid var(--color-ink); outline-offset: .25rem; }
+@media (max-width: 40rem) { .member-settings .form-actions { align-items: stretch; } }
