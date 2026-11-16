@@ -95,6 +95,7 @@ model User {
   questionnaireAnswers QuestionnaireAnswer[]
   resourceRevisions MemberResourceRevision[]
   consents Consent[]
+  consentLedger ConsentLedger?
   videos Video[]
   expertAssignments ExpertAssignment[] @relation("AssignedExpert")
   @@index([status, role])
@@ -185,8 +186,94 @@ model Consent {
   granted Boolean @default(false)
   grantedAt DateTime?
   revokedAt DateTime?
+  policyVersion String?
+  policyEvidenceId String? @db.Uuid
+  policyEvidence ConsentPolicyEvidence? @relation(fields: [policyEvidenceId], references: [id], onDelete: Restrict)
   updatedAt DateTime @updatedAt
   @@unique([userId, purpose])
+}
+// Live identity mapping is deleted with User. Opaque subjects/evidence are not.
+model ConsentSubject {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  ledger ConsentLedger?
+  events ConsentEvent[]
+  idempotency ConsentIdempotency[]
+  tasks ConsentWithdrawalTask[]
+}
+model ConsentLedger {
+  userId String @id
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  subjectId String @unique @db.Uuid
+  subject ConsentSubject @relation(fields: [subjectId], references: [id], onDelete: Restrict)
+  version BigInt @default(0)
+}
+model ConsentPolicyEvidence {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  purpose ConsentPurpose
+  policyVersion String
+  locale String
+  content String @db.Text
+  digest String
+  testOnly Boolean @default(false)
+  algorithm String @default("SHA-256")
+  encoding String @default("UTF-8")
+  createdAt DateTime @default(now())
+  states Consent[]
+  events ConsentEvent[]
+  @@unique([purpose, policyVersion, locale])
+}
+enum ConsentEventKind {
+  STATE_CHANGED
+  OFF_REAFFIRMED
+  GRANT_REAFFIRMED
+  POLICY_RECONSENT
+}
+model ConsentEvent {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  subjectId String @db.Uuid
+  subject ConsentSubject @relation(fields: [subjectId], references: [id], onDelete: Restrict)
+  // /me actor is the same opaque subject; no live user ID or session token.
+  purpose ConsentPurpose
+  oldGranted Boolean
+  newGranted Boolean
+  kind ConsentEventKind
+  previousVersion BigInt
+  nextVersion BigInt
+  policyVersion String?
+  policyEvidenceId String? @db.Uuid
+  policyEvidence ConsentPolicyEvidence? @relation(fields: [policyEvidenceId], references: [id], onDelete: Restrict)
+  evidenceGap Boolean @default(false)
+  createdAt DateTime @default(now())
+  withdrawalTask ConsentWithdrawalTask?
+  @@unique([subjectId, nextVersion, purpose])
+}
+model ConsentIdempotency {
+  subjectId String @db.Uuid
+  subject ConsentSubject @relation(fields: [subjectId], references: [id], onDelete: Restrict)
+  keyHash String
+  fingerprint String
+  response Json
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  @@id([subjectId, keyHash])
+  @@index([expiresAt])
+}
+model ConsentWithdrawalTask {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  subjectId String @db.Uuid
+  subject ConsentSubject @relation(fields: [subjectId], references: [id], onDelete: Restrict)
+  eventId String @unique @db.Uuid
+  event ConsentEvent @relation(fields: [eventId], references: [id], onDelete: Restrict)
+  purpose ConsentPurpose
+  version BigInt
+  status String @default("PENDING")
+  attempts Int @default(0)
+  nextAttemptAt DateTime @default(now())
+  lastErrorCode String?
+  completedAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@index([status, nextAttemptAt])
 }
 model Video {
   id String @id @default(cuid())
