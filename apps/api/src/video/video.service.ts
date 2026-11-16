@@ -1,13 +1,67 @@
-import { Injectable } from "@nestjs/common";
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from "@nestjs/common";
 import { ConsentAccessService } from "../consent/consent-access.service";
 import {
   PrivateStorageService,
   UPLOAD_TTL_SECONDS,
+  matchesVideoContainer,
 } from "./private-storage.service";
 import { uploadInput } from "./video.validation";
 
 @Injectable()
 export class VideoService {
+  confirm(ownerId: string, id: string) {
+    return this.consent.withAuthorizedConsent(
+      ownerId,
+      "VIDEO_STORAGE",
+      async (tx) => {
+        const video = await tx.video.findFirst({ where: { id, ownerId } });
+        if (!video)
+          throw new NotFoundException({
+            code: "VIDEO_NOT_FOUND",
+            message: "Video not found.",
+          });
+        if (video.status === "READY" && !video.deletedAt)
+          return { id, status: "READY" as const };
+        if (
+          video.status !== "UPLOADING" ||
+          video.deletedAt ||
+          !video.uploadKey ||
+          !video.uploadExpiresAt ||
+          video.uploadExpiresAt <= new Date()
+        )
+          throw new ConflictException({
+            code: "UPLOAD_EXPIRED",
+            message: "This upload is no longer available. Start a new upload.",
+          });
+        const object = await this.storage.inspect(video.uploadKey);
+        if (
+          video.bucket !== this.storage.bucket ||
+          object.size !== video.sizeBytes ||
+          object.mime !== video.mimeType ||
+          !object.etag ||
+          !matchesVideoContainer(object.prefix, video.mimeType)
+        )
+          throw new ConflictException({
+            code: "UPLOAD_MISMATCH",
+            message: "Uploaded video does not match the upload request.",
+          });
+        // Never serve the writable incoming key. Conditional copy binds the checked
+        // object to the immutable playback key; all owner operations hold User lock.
+        await this.storage.promote(
+          video.uploadKey,
+          video.objectKey,
+          object.etag,
+          video.mimeType,
+        );
+        await tx.video.update({ where: { id }, data: { status: "READY" } });
+        return { id, status: "READY" as const };
+      },
+    );
+  }
   constructor(
     private readonly consent: ConsentAccessService,
     private readonly storage: PrivateStorageService,

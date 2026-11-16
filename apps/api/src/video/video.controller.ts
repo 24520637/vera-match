@@ -1,4 +1,12 @@
-import { Body, Controller, Header, Post, UseGuards } from "@nestjs/common";
+import {
+  Body,
+  Controller,
+  Header,
+  Post,
+  UseGuards,
+  Param,
+  BadRequestException,
+} from "@nestjs/common";
 import { UserRole } from "@prisma/client";
 import { CurrentUser } from "../auth/current-user.decorator";
 import type { CurrentUser as SafeUser } from "../auth/auth-context";
@@ -11,6 +19,27 @@ import { VideoService } from "./video.service";
 @UseGuards(SessionAuthGuard, RolesGuard, VideoRequestGuard)
 @Roles(UserRole.MEMBER)
 export class VideoController {
+  @Post(":id/confirm")
+  @Header("Cache-Control", "private, no-store")
+  @Header("Vary", "Cookie")
+  @Header("Referrer-Policy", "no-referrer")
+  confirm(
+    @CurrentUser() user: SafeUser,
+    @Param("id") id: string,
+    @Body() body: unknown,
+  ) {
+    if (
+      !body ||
+      typeof body !== "object" ||
+      Array.isArray(body) ||
+      Object.keys(body).length
+    )
+      throw new BadRequestException({
+        code: "INVALID_REQUEST",
+        message: "Send an empty JSON object.",
+      });
+    return this.videos.confirm(user.id, id);
+  }
   constructor(private readonly videos: VideoService) {}
   @Post("upload-intent")
   @Header("Cache-Control", "private, no-store")
