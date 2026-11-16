@@ -11,6 +11,7 @@ import {
 } from "./private-storage.service";
 import { uploadInput } from "./video.validation";
 import { PrismaService } from "../database/prisma.service";
+import { Prisma } from "@prisma/client";
 import {
   consentStorage,
   requireConsentMember,
@@ -18,6 +19,31 @@ import {
 
 @Injectable()
 export class VideoService {
+  private async requireGeneration(
+    tx: Prisma.TransactionClient,
+    ownerId: string,
+    version: bigint | null,
+  ) {
+    const ledger = await tx.consentLedger.findUnique({
+      where: { userId: ownerId },
+    });
+    if (
+      version === null ||
+      !ledger ||
+      (await tx.consentWithdrawalTask.count({
+        where: {
+          subjectId: ledger.subjectId,
+          purpose: "VIDEO_STORAGE",
+          version: { gt: version },
+        },
+      }))
+    )
+      throw new ConflictException({
+        code: "VIDEO_WITHDRAWN",
+        message:
+          "Consent was withdrawn for this video. Upload a new video after granting consent again.",
+      });
+  }
   remove(ownerId: string, id: string) {
     // Withdrawal must never prevent an owner from deleting their own video.
     return consentStorage(() =>
@@ -91,6 +117,7 @@ export class VideoService {
             code: "VIDEO_NOT_FOUND",
             message: "Video not found.",
           });
+        await this.requireGeneration(tx, ownerId, video.storageConsentVersion);
         const url = await this.storage.playbackUrl(
           video.objectKey,
           video.mimeType,
@@ -114,6 +141,7 @@ export class VideoService {
             code: "VIDEO_NOT_FOUND",
             message: "Video not found.",
           });
+        await this.requireGeneration(tx, ownerId, video.storageConsentVersion);
         if (video.status === "READY" && !video.deletedAt)
           return { id, status: "READY" as const };
         if (
@@ -162,7 +190,7 @@ export class VideoService {
     return this.consent.withAuthorizedConsent(
       ownerId,
       "VIDEO_STORAGE",
-      async (tx) => {
+      async (tx, version) => {
         const uploadKey = this.storage.key("incoming");
         const uploadExpiresAt = new Date(
           Date.now() + UPLOAD_TTL_SECONDS * 1000,
@@ -181,6 +209,7 @@ export class VideoService {
             objectKey: this.storage.key("video"),
             uploadKey,
             uploadExpiresAt,
+            storageConsentVersion: version,
           },
         });
         return {

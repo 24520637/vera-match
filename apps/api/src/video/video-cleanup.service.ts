@@ -33,6 +33,8 @@ export class VideoCleanupService implements OnModuleInit, OnModuleDestroy {
     return this.running;
   }
   private async process() {
+    await this.enqueueWithdrawals();
+    await this.enqueueExpiredUploads();
     const tasks = await this.prisma.videoCleanupTask.findMany({
       where: {
         status: { in: ["PENDING", "RUNNING"] },
@@ -87,6 +89,11 @@ export class VideoCleanupService implements OnModuleInit, OnModuleDestroy {
               where: { id: task.videoId, status: "DELETED" },
               data: { cleanupCompletedAt: new Date() },
             });
+          if (result.count && !waitForUploadExpiry)
+            await tx.video.updateMany({
+              where: { id: task.videoId },
+              data: { uploadKey: null },
+            });
         });
       } catch {
         await this.prisma.videoCleanupTask.updateMany({
@@ -101,6 +108,104 @@ export class VideoCleanupService implements OnModuleInit, OnModuleDestroy {
           },
         });
       }
+    }
+  }
+  private async enqueueWithdrawals() {
+    // A media-only receipt never marks the shared task COMPLETE: matching/report
+    // cleanup belongs to other consumers and must not be silently acknowledged.
+    const pending = await this.prisma.$queryRaw<{ id: string }[]>`
+      SELECT t.id FROM "ConsentWithdrawalTask" t
+      WHERE t.purpose = 'VIDEO_STORAGE' AND NOT EXISTS
+        (SELECT 1 FROM "VideoWithdrawalReceipt" r WHERE r."withdrawalTaskId" = t.id)
+      ORDER BY t."createdAt" LIMIT 20`;
+    for (const item of pending) {
+      await this.prisma.$transaction(async (tx) => {
+        const task = await tx.consentWithdrawalTask.findUniqueOrThrow({
+          where: { id: item.id },
+        });
+        const ledger = await tx.consentLedger.findUnique({
+          where: { subjectId: task.subjectId },
+        });
+        if (!ledger) return; // Account deletion must preserve locators before erasing this mapping.
+        await tx.$queryRaw`SELECT id FROM "User" WHERE id = ${ledger.userId} FOR UPDATE`;
+        if (
+          await tx.videoWithdrawalReceipt.findUnique({
+            where: { withdrawalTaskId: task.id },
+          })
+        )
+          return;
+        const videos = await tx.video.findMany({
+          where: {
+            ownerId: ledger.userId,
+            status: { not: "DELETED" },
+            OR: [
+              { storageConsentVersion: null },
+              { storageConsentVersion: { lt: task.version } },
+            ],
+          },
+          take: 20,
+        });
+        for (const video of videos) {
+          await tx.video.update({
+            where: { id: video.id },
+            data: { status: "DELETED", deletedAt: new Date() },
+          });
+          await tx.videoCleanupTask.upsert({
+            where: { videoId: video.id },
+            create: {
+              videoId: video.id,
+              bucket: video.bucket,
+              objectKey: video.objectKey,
+              uploadKey: video.uploadKey,
+              uploadExpiresAt: video.uploadExpiresAt,
+            },
+            update: {
+              removeFinal: true,
+              status: "PENDING",
+              completedAt: null,
+              nextAttemptAt: new Date(),
+            },
+          });
+        }
+        if (videos.length < 20)
+          await tx.videoWithdrawalReceipt.create({
+            data: { withdrawalTaskId: task.id },
+          });
+      });
+    }
+  }
+  private async enqueueExpiredUploads() {
+    const candidates = await this.prisma.video.findMany({
+      where: { uploadKey: { not: null }, uploadExpiresAt: { lte: new Date() } },
+      orderBy: { createdAt: "asc" },
+      take: 20,
+    });
+    for (const candidate of candidates) {
+      await this.prisma.$transaction(async (tx) => {
+        await tx.$queryRaw`SELECT id FROM "User" WHERE id = ${candidate.ownerId} FOR UPDATE`;
+        const video = await tx.video.findUnique({
+          where: { id: candidate.id },
+        });
+        if (!video?.uploadKey) return;
+        const removeFinal = video.status !== "READY";
+        if (video.status === "UPLOADING")
+          await tx.video.update({
+            where: { id: video.id },
+            data: { status: "DELETED", deletedAt: new Date() },
+          });
+        await tx.videoCleanupTask.upsert({
+          where: { videoId: video.id },
+          create: {
+            videoId: video.id,
+            bucket: video.bucket,
+            objectKey: video.objectKey,
+            uploadKey: video.uploadKey,
+            uploadExpiresAt: video.uploadExpiresAt,
+            removeFinal,
+          },
+          update: {},
+        });
+      });
     }
   }
 }

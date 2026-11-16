@@ -284,6 +284,7 @@ model Video {
   uploadKey String? @unique
   uploadExpiresAt DateTime?
   cleanupCompletedAt DateTime?
+  storageConsentVersion BigInt?
   mimeType String
   sizeBytes Int?
   durationMs Int?
@@ -294,6 +295,10 @@ model Video {
   @@index([ownerId, status])
 }
 // Durable storage locators survive account/metadata deletion. Never expose to clients.
+model VideoWithdrawalReceipt {
+  withdrawalTaskId String @id @db.Uuid
+  processedAt DateTime @default(now())
+}
 model VideoCleanupTask {
   id String @id @default(cuid())
   videoId String @unique
