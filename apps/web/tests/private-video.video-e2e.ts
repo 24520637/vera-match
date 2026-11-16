@@ -140,15 +140,41 @@ test("real recording upload playback deletion and consent withdrawal", async ({
     const removed = await db.video.findFirstOrThrow({
       where: { ownerId: user.id, status: "DELETED" },
     });
-    await db.videoCleanupTask.update({
-      where: { videoId: removed.id },
+    // Let the real worker finish its first removal pass before advancing this
+    // fixture's expiry. Mutating a RUNNING task races its leased snapshot and
+    // can legitimately restore the original future nextAttemptAt on commit.
+    await expect
+      .poll(
+        async () => {
+          const task = await db.videoCleanupTask.findUniqueOrThrow({
+            where: { videoId: removed.id },
+          });
+          return (
+            task.status === "PENDING" &&
+            task.attempts > 0 &&
+            task.lastErrorCode === null &&
+            task.nextAttemptAt.getTime() > Date.now() + 30000
+          );
+        },
+        { timeout: 15000 },
+      )
+      .toBe(true);
+    const advanced = await db.videoCleanupTask.updateMany({
+      where: {
+        videoId: removed.id,
+        status: "PENDING",
+        lastErrorCode: null,
+        nextAttemptAt: { gt: new Date(Date.now() + 30000) },
+      },
       data: { uploadExpiresAt: new Date(0), nextAttemptAt: new Date(0) },
     });
+    expect(advanced.count).toBe(1);
     await expect
       .poll(
         async () =>
           (await db.video.findUniqueOrThrow({ where: { id: removed.id } }))
             .cleanupCompletedAt,
+        { timeout: 15000 },
       )
       .not.toBeNull();
     await page
