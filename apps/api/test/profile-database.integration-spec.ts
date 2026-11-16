@@ -1,7 +1,7 @@
 import { MemberResource, Prisma, PrismaClient } from "@prisma/client";
 import { randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { cpSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { createAuthDatabase } from "./disposable-auth-database";
@@ -109,7 +109,10 @@ describe("C019 additive profile persistence migration", () => {
     expect(await db.memberResourceRevision.count()).toBe(0);
     const history = await db.$queryRaw<{ migration_name: string }[]>`
       SELECT migration_name FROM "_prisma_migrations" WHERE finished_at IS NOT NULL ORDER BY migration_name`;
-    expect(history.map(row => row.migration_name)).toEqual([initialMigration, revisionMigration]);
+    expect(history.map(row => row.migration_name)).toEqual(
+      readdirSync(join(prismaDirectory, "migrations")).filter(name => /^\d+_/.test(name)).sort(),
+    );
+    expect(history.map(row => row.migration_name)).toContain(revisionMigration);
   });
 
   it("deploys the complete migration history into a fresh isolated schema", async () => {
