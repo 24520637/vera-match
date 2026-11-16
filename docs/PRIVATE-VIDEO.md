@@ -57,11 +57,35 @@ local bucket and configures incoming expiry. No public policy or versioning is
 supported; API issuance fails closed for an existing bucket policy. Versioned
 erasure requires a different reviewed implementation and is refused.
 
+On Windows, `node scripts/start-local-private-storage.cjs` starts the installed
+native executable hidden, with explicit local app/test CORS origins and secrets
+passed only through the child environment. It does not install an auto-start
+service. Default installation: `C:/DevTools/MinIO`; `MINIO_NATIVE_HOME` can select
+another existing installation. Keep the data directory outside the repository.
+
 Local installation was compiled from official MinIO release
 `RELEASE.2025-10-15T17-29-55Z` (commit
 `9e49d5e7a648f00e26f2246f4dc28e6b07f8c84a`). MinIO Community is source-only and
 its upstream repository is archived. This is a local test dependency, not a
 production storage recommendation. Review provider maintenance before release.
+
+## Verification
+
+Run `npm run prisma:validate`, `npm run prisma:generate`, `npm test`,
+`npm run test:integration --workspace apps/api`, `npm run lint`, `npm run build`,
+`npm run test:ui --workspace apps/web` and `node scripts/run-video-e2e.cjs`.
+The video browser suite uses real API/Consent/Prisma/MinIO with synthetic camera
+input and a test-only policy provider, on desktop and mobile. It records no
+credential-bearing traces. Each run owns a UUID database schema and bucket;
+cleanup rejects unknown metadata. Unit tests do not establish storage privacy.
+
+The integration suite verifies the real 60-second provider expiry, MIME/length
+signatures, anonymous denial, source replacement races, consent/issuance and
+confirmation/deletion ordering, durable failures/lost acknowledgements, retry
+after worker restart, re-consent generations and redacted atomic audits.
+CI builds pinned official native MinIO and preserves the existing native
+PostgreSQL/Mailpit, shared UI, auth and member regression jobs. Passing owner
+tests do not complete the blocked expert assignment/review acceptance checks.
 
 ## Explicit dependencies and release gates
 

@@ -194,7 +194,8 @@ export class VideoCleanupService implements OnModuleInit, OnModuleDestroy {
           where: { id: candidate.id },
         });
         if (!video?.uploadKey) return;
-        const removeFinal = video.status !== "READY";
+        const removeFinal =
+          video.status === "UPLOADING" || video.status === "DELETED";
         if (video.status === "UPLOADING")
           await tx.video.update({
             where: { id: video.id },
