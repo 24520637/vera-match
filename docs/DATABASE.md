@@ -24,7 +24,111 @@
 - Subjective reviewer conclusions do not become scoreable claims. Factual claims require QA, owner confirmation, explicit sharing and no revocation.
 - Document and enforce retention and deletion based on legal requirements and member promises; never assume indefinite storage is acceptable.
 
-**Draft model gap:** Staff credential/eligibility and some workflow audit details are described as planned work but may require additional migrations. Do not treat a role flag as proof of reviewer qualification.
+**C031 database foundation:** Staff credentials and assignment history are described below.
+This does not implement eligibility approval, assignment APIs or authorization.
+Do not treat a role flag as proof of reviewer qualification.
+
+## C031 - approved credential and assignment database decisions
+
+Scope: T06/C031, `feat(expert-db): add credentials and assignments`.
+The project owner supplied Huong's seven approved design decisions for this
+implementation. This records technical direction, not production retention approval.
+This task retains baseline commit `88119cd1129436f2da97e733b4e3ea27f9b2676b`.
+T04 has since merged into develop, but its migrations/services are intentionally
+not integrated during this C031 review-fix task.
+
+| Approved decision | Persistence design |
+| --- | --- |
+| One current credential; immutable qualification evidence | `ExpertCredential` uses userId as primary key and a separate UUID subject. `ExpertCredentialApproval` retains each distinct approval with training/policy versions, private evidence, verifier/approver evidence, timestamps and optional expiry. `ExpertCredentialEvent` records creation, training, confidentiality, verification, approval and reasoned revocation. |
+| Approved lifecycle and reassignment | Existing `ExpertAssignment` remains; SQL enforces ASSIGNED -> IN_PROGRESS -> SUBMITTED, SUBMITTED -> IN_PROGRESS/COMPLETED, and any active state -> CANCELLED. CANCELLED/COMPLETED cannot be reopened or edited. Reassignment cancels the old row and creates a new one in one transaction. dueAt is a scheduling deadline; expiresAt is an independent optional access-expiry boundary. |
+| One active primary assignment per video | PostgreSQL partial unique index `ExpertAssignment_one_active_video` covers ASSIGNED, IN_PROGRESS and SUBMITTED. All assignments currently represent primary work; no secondary-assignment feature is introduced. |
+| Independent revisions/history | Credential and assignment revisions are separate BigInt counters, initial 0, bounded by Number.MAX_SAFE_INTEGER. Updates advance exactly once. SQL requires matching append-only events in the same transaction. Each new assignment is bound to a particular approval instance, never automatically rebound on reapproval. |
+| Nullable assignment actor FK | assignedById references User with ON DELETE SET NULL. `ExpertActorIdentity` maps known legacy assigning users to opaque subjects; assignedByEvidence retains that subject independently. Mapping deletion follows User deletion, not evidence deletion. FK existence never proves authority. |
+| Preserve existing deletion chain | Video -> ExpertAssignment -> ExpertReview cascade is unchanged. New approvals/events have no cascading FK through User, Video, current credential or assignment. Approval references use RESTRICT. |
+| Preserve integration ownership | No Auth/AuditLog/video/storage/privacy module is changed. READY/current consent, active eligibility, staff MFA, independent QA and withdrawal integration remain mandatory future API checks. |
+
+### Write protocol and evidence
+
+Credential creation starts PENDING at revision 0 with a CREATED event. No role or
+legacy row is auto-approved. Future approval creates a new immutable approval
+snapshot, changes current state with expectedRevision CAS and appends an APPROVED
+event in one transaction. Reapproval cannot reuse the old approval ID or revive
+terminal assignments. A REVOKED event retains revokedAt and a nonblank reason.
+Training/confidentiality events require the corresponding version; verification
+events retain verifiedAt and verifying actor evidence. Expiry is evaluated at
+authorization time; no expiry worker or default duration is introduced here.
+
+Future mutation code must authorize first, update current state with
+`WHERE revision = expectedRevision`, require exactly one affected row, then append
+the matching event before commit. A zero-row CAS must become HTTP 409 at the future
+API boundary; C031 adds no HTTP endpoint/error mapper or automatic retry.
+AssignmentEvent.snapshot matches the database row projection excluding assignedById,
+expertId and the internal eventFromStatus/eventTransactionId witness fields.
+The assignment write trigger derives the old status and current PostgreSQL
+transaction ID; event insertion must match that actual mutation and from/to status,
+revision and approval ID. Callers cannot supply their own witness: the trigger
+overwrites it. Legacy revision 0 has no witness; reading or FK identity cleanup
+cannot authorize retroactive events. Events cannot be inserted for absent/future
+state or independently in a later transaction. Deferred constraint triggers reject a current
+state write without its event. Transaction failure rolls back both. FK SET NULL
+identity minimization is a narrow exception: it preserves domain revision and
+retained evidence without fabricating a new assignment transition.
+
+AssignmentEvent.createdAt and ExpertCredentialEvent.createdAt are audit recording
+times controlled by PostgreSQL BEFORE INSERT triggers. Caller values, including
+past/future timestamps, are unconditionally overwritten with
+`clock_timestamp() AT TIME ZONE 'UTC'`, stored at millisecond precision. This is
+insertion time, not transaction-start CURRENT_TIMESTAMP or caller clock time,
+and does not depend on the session timezone. Existing verifiedAt/revokedAt and
+approval evidence fields describe separate business facts; no extra historical
+time field is introduced. Append-only protections continue to prevent later edits.
+
+Standalone DELETE of a current credential while its User still
+exists is rejected, as is TRUNCATE. This prevents credential DELETE/recreate from
+resetting CAS revision for the same live account. Existing User DELETE cascades
+still remove these live mappings after the parent disappears, without deleting
+retained approvals/events. This adds no account-deletion endpoint or retention
+period; privileged maintenance remains subject to separately approved procedures.
+
+Evidence uses either `{kind: "PRIVATE_REFERENCE", bucket, objectKey}` without a
+public URL, or `{kind: "SNAPSHOT", content, sha256}` with a verified UTF-8 SHA-256
+digest. Only those envelope fields are accepted. Private-reference existence and
+object immutability require later storage verification; a locator alone is not
+proof of durable evidence. Future servers must derive actors, never accept
+client-provided evidence as proof of approval or independent QA authority.
+
+SQL triggers reject UPDATE/DELETE/TRUNCATE of approvals/events. They protect
+against application writes, not privileged administrators disabling triggers.
+Production privileges, evidence access, retention/expiry/holds and backup
+enforcement require separate review. Opaque subjects/locators remain potentially
+personal data, not anonymous data. No production hard-delete endpoint, indefinite
+retention policy or purge exception is introduced. Existing expert FK restrictions
+also remain in effect.
+
+### Additive migration and legacy boundary
+
+`20261116120000_add_expert_credentials_and_assignment_revision` follows the existing
+initial migration. It runs transactionally and fails without rewriting data if
+legacy active assignments duplicate a video or assignedById is orphaned. An
+operator must review remediation separately before deployment.
+
+Legacy assignments retain status, IDs and data at revision 0. Only the known
+assignedById fact is mapped to an opaque subject, with source LEGACY_ASSIGNED_BY_ID;
+no name, email, role-at-assignment, qualification or approval is inferred/copied.
+The live reverse mapping cascades with User deletion while retained actor subjects
+survive in assignedByEvidence, including terminal assignments. Opaque evidence is
+still potentially personal data; no retention/de-identification policy is newly
+approved here. Approval remains null with no invented transition history. Their first future
+mutation must append revision 1 evidence; unknown historic approvals cannot be
+silently retrofitted. Future access must fail closed for missing bindings.
+Nullable schema fields support this boundary; new inserts require approval binding
+and actor evidence. Indexes/triggers/check constraints are partly SQL-only: Prisma
+schema/client generation alone cannot verify them.
+
+API eligibility (including revocation/expiry), READY/current consent, independent
+QA and MFA are not enforced by FK existence or these structural checks. Later
+features must implement/test them. Retention, storage/backup guarantees and signed
+URL provider enforcement remain pre-production gates under C012.
 
 ## C012 DTO-to-Prisma mapping - approved MVP contract, not implemented
 
