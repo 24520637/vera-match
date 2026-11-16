@@ -7,6 +7,80 @@ describe("C031 credential and assignment persistence", () => {
   beforeAll(async () => { db = await createAuthDatabase(); });
   afterAll(async () => { await db?.close(); });
 
+  it("rejects deleted assignment ID reuse even with the original revision-zero snapshot", async () => {
+    const seed = await seedExpert(db.client);
+    const original = await assign(db.client, seed);
+    await transition(db.client, original.id, 0n, "CANCELLED");
+    await db.client.expertAssignment.delete({ where: { id: original.id } });
+    // All original immutable fields and the existing event match. The reservation,
+    // not an absent event or invalid approval, must reject the historical reset.
+    await expect(db.client.expertAssignment.create({ data: {
+      id: original.id, videoId: original.videoId, expertId: original.expertId,
+      assignedById: original.assignedById, assignedByEvidence: actor,
+      credentialApprovalId: original.credentialApprovalId, createdAt: original.createdAt,
+    } })).rejects.toMatchObject({ code: "P2002" });
+    expect(await db.client.assignmentEvent.count({ where: { assignmentId: original.id } })).toBe(2);
+    expect(await db.client.expertAssignment.findUnique({ where: { id: original.id } })).toBeNull();
+    expect(await db.client.expertAssignmentIdentity.findUnique({ where: { assignmentId: original.id } })).not.toBeNull();
+  });
+
+  it("preserves Video deletion cascades but never releases an issued assignment ID", async () => {
+    const seed = await seedExpert(db.client), row = await assign(db.client, seed);
+    await db.client.expertReview.create({ data: { assignmentId: row.id, summary: "Synthetic cascade test" } });
+    await db.client.video.delete({ where: { id: seed.video.id } });
+    expect(await db.client.expertAssignment.count({ where: { id: row.id } })).toBe(0);
+    expect(await db.client.expertReview.count({ where: { assignmentId: row.id } })).toBe(0);
+    expect(await db.client.assignmentEvent.count({ where: { assignmentId: row.id } })).toBe(1);
+    const other = await seedExpert(db.client);
+    await expect(db.client.expertAssignment.create({ data: { id: row.id,
+      videoId: other.video.id, expertId: other.expert.id, assignedByEvidence: actor,
+      credentialApprovalId: other.approval.id } })).rejects.toMatchObject({ code: "P2002" });
+    await expectDatabaseError(db.client.$executeRaw`DELETE FROM "ExpertAssignmentIdentity" WHERE "assignmentId"=${row.id}`, "append-only");
+    await expectDatabaseError(db.client.$executeRawUnsafe('TRUNCATE "ExpertAssignmentIdentity"'), "append-only");
+  });
+
+  it("rejects actor identity reset and TRUNCATE but allows User account deletion", async () => {
+    const seed = await seedExpert(db.client);
+    const identity = await db.client.expertActorIdentity.create({ data: { userId: seed.moderator.id } });
+    await expectDatabaseError(db.client.$transaction(async tx => {
+      await tx.$executeRaw`DELETE FROM "ExpertActorIdentity" WHERE "userId"=${seed.moderator.id}`;
+      await tx.expertActorIdentity.create({ data: { userId: seed.moderator.id } });
+    }), "live identity cannot be deleted independently");
+    await expectDatabaseError(db.client.$executeRawUnsafe('TRUNCATE "ExpertActorIdentity"'), "append-only");
+    expect(await db.client.expertActorIdentity.findUnique({ where: { userId: seed.moderator.id } })).toEqual(identity);
+    const assignedByEvidence = { subject: identity.subjectId };
+    const row = await db.client.$transaction(async tx => {
+      const row = await tx.expertAssignment.create({ data: { videoId: seed.video.id,
+        expertId: seed.expert.id, assignedById: seed.moderator.id,
+        assignedByEvidence, credentialApprovalId: seed.approval.id } });
+      await assignmentEvent(tx, row.id, null);
+      return row;
+    });
+    await db.client.user.delete({ where: { id: seed.moderator.id } });
+    expect(await db.client.expertActorIdentity.findUnique({ where: { userId: seed.moderator.id } })).toBeNull();
+    expect(await db.client.expertAssignment.findUnique({ where: { id: row.id } })).toMatchObject({ assignedById: null, assignedByEvidence });
+    expect(await db.client.assignmentEvent.findFirst({ where: { assignmentId: row.id } })).toMatchObject({ snapshot: expect.objectContaining({ assignedByEvidence }) });
+  });
+
+  it("rolls back failed reservations and serializes concurrent claims of the same ID", async () => {
+    const seed = await seedExpert(db.client), id = `${seed.video.id}-assignment`;
+    const create = (fail = false) => db.client.$transaction(async tx => {
+      const row = await tx.expertAssignment.create({ data: { id, videoId: seed.video.id,
+        expertId: seed.expert.id, assignedByEvidence: actor, credentialApprovalId: seed.approval.id } });
+      await assignmentEvent(tx, row.id, null);
+      if (fail) throw new Error("synthetic rollback");
+      return row;
+    });
+    await expect(create(true)).rejects.toThrow("synthetic rollback");
+    expect(await db.client.expertAssignmentIdentity.findUnique({ where: { assignmentId: id } })).toBeNull();
+    const outcomes = await Promise.allSettled([create(), create()]);
+    expect(outcomes.filter(result => result.status === "fulfilled")).toHaveLength(1);
+    expect(outcomes.find(result => result.status === "rejected")).toMatchObject({ reason: { code: "P2002" } });
+    expect(await db.client.expertAssignment.findUnique({ where: { id } })).toMatchObject({ revision: 0n, status: "ASSIGNED" });
+    expect(await db.client.assignmentEvent.count({ where: { assignmentId: id } })).toBe(1);
+    expect(await db.client.expertAssignmentIdentity.count({ where: { assignmentId: id } })).toBe(1);
+  });
+
   async function databaseTime(tx: Prisma.TransactionClient) {
     const [row] = await tx.$queryRaw<{ at: Date }[]>`SELECT (clock_timestamp() AT TIME ZONE 'UTC')::timestamp(3) AS at`;
     return row.at;

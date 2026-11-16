@@ -328,6 +328,11 @@ enum ExpertCredentialStatus {
   REVOKED
 }
 
+// Issued assignment IDs survive deletion of live resources; no cascading foreign key.
+model ExpertAssignmentIdentity {
+  assignmentId String @id
+}
+
 // Live identity mapping only; retained evidence carries the opaque subject.
 model ExpertActorIdentity {
   userId String @id
