@@ -143,6 +143,39 @@ describe("Private video / real PostgreSQL / native MinIO", () => {
     expect(result.status).toBe(200);
   }
   const valid = { mimeType: "video/mp4", sizeBytes: 12 };
+  it("lists only owner metadata and issues private playback only for ready owned videos", async () => {
+    const user = await member();
+    await grant(user.cookie);
+    const other = await member();
+    await grant(other.cookie);
+    const upload = await intent(user.cookie);
+    expect(
+      (await request(user.cookie, `videos/${upload.id}/playback`)).status,
+    ).toBe(404);
+    await put(upload.uploadUrl);
+    expect(
+      (await request(user.cookie, `videos/${upload.id}/confirm`)).status,
+    ).toBe(201);
+    const list = await request(user.cookie, "videos/me", {}, "GET");
+    const metadata = (await list.json()) as { videos: { id: string }[] };
+    expect(metadata.videos.map((x) => x.id)).toContain(upload.id);
+    expect(JSON.stringify(metadata)).not.toMatch(
+      /objectKey|uploadKey|bucket|uploadUrl/,
+    );
+    const otherList = await request(other.cookie, "videos/me", {}, "GET");
+    expect(await otherList.json()).toEqual({ videos: [] });
+    expect(
+      (await request(other.cookie, `videos/${upload.id}/playback`)).status,
+    ).toBe(404);
+    const response = await request(user.cookie, `videos/${upload.id}/playback`);
+    expect(response.headers.get("cache-control")).toContain("no-store");
+    expect(response.headers.get("referrer-policy")).toBe("no-referrer");
+    const playback = (await response.json()) as { url: string };
+    expect(new URL(playback.url).searchParams.get("X-Amz-Expires")).toBe("60");
+    const media = await fetch(playback.url);
+    expect(media.headers.get("cache-control")).toContain("no-store");
+    expect(Buffer.from(await media.arrayBuffer())).toEqual(videoBytes);
+  });
   const videoBytes = Buffer.from([
     0, 0, 0, 24, 102, 116, 121, 112, 105, 115, 111, 109,
   ]);

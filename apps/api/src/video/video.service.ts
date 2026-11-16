@@ -10,9 +10,61 @@ import {
   matchesVideoContainer,
 } from "./private-storage.service";
 import { uploadInput } from "./video.validation";
+import { PrismaService } from "../database/prisma.service";
+import {
+  consentStorage,
+  requireConsentMember,
+} from "../consent/consent.service";
 
 @Injectable()
 export class VideoService {
+  list(ownerId: string) {
+    return consentStorage(() =>
+      this.prisma.$transaction(async (tx) => {
+        await requireConsentMember(tx, ownerId);
+        return {
+          videos: await tx.video.findMany({
+            where: { ownerId },
+            orderBy: { createdAt: "desc" },
+            take: 50,
+            select: {
+              id: true,
+              status: true,
+              mimeType: true,
+              sizeBytes: true,
+              createdAt: true,
+              deletedAt: true,
+            },
+          }),
+        };
+      }),
+    );
+  }
+  playback(ownerId: string, id: string) {
+    return this.consent.withAuthorizedConsent(
+      ownerId,
+      "VIDEO_STORAGE",
+      async (tx) => {
+        const video = await tx.video.findFirst({
+          where: { id, ownerId, status: "READY", deletedAt: null },
+        });
+        if (!video || video.bucket !== this.storage.bucket)
+          throw new NotFoundException({
+            code: "VIDEO_NOT_FOUND",
+            message: "Video not found.",
+          });
+        const url = await this.storage.playbackUrl(
+          video.objectKey,
+          video.mimeType,
+        );
+        return {
+          id,
+          url,
+          expiresAt: new Date(Date.now() + 60000).toISOString(),
+        };
+      },
+    );
+  }
   confirm(ownerId: string, id: string) {
     return this.consent.withAuthorizedConsent(
       ownerId,
@@ -63,6 +115,7 @@ export class VideoService {
     );
   }
   constructor(
+    private readonly prisma: PrismaService,
     private readonly consent: ConsentAccessService,
     private readonly storage: PrivateStorageService,
   ) {}
