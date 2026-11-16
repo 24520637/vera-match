@@ -146,6 +146,13 @@ export class VideoCleanupService implements OnModuleInit, OnModuleDestroy {
           take: 20,
         });
         for (const video of videos) {
+          await tx.auditLog.create({
+            data: {
+              action: "VIDEO_CONSENT_WITHDRAWN",
+              subjectType: "Video",
+              subjectId: video.id,
+            },
+          });
           await tx.video.update({
             where: { id: video.id },
             data: { status: "DELETED", deletedAt: new Date() },

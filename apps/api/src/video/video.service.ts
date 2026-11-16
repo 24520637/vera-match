@@ -56,11 +56,20 @@ export class VideoService {
             code: "VIDEO_NOT_FOUND",
             message: "Video not found.",
           });
-        if (video.status !== "DELETED")
+        if (video.status !== "DELETED") {
           await tx.video.update({
             where: { id },
             data: { status: "DELETED", deletedAt: new Date() },
           });
+          await tx.auditLog.create({
+            data: {
+              actorId: ownerId,
+              action: "VIDEO_DELETE_REQUESTED",
+              subjectType: "Video",
+              subjectId: video.id,
+            },
+          });
+        }
         await tx.videoCleanupTask.upsert({
           where: { videoId: id },
           create: {
@@ -122,6 +131,14 @@ export class VideoService {
           video.objectKey,
           video.mimeType,
         );
+        await tx.auditLog.create({
+          data: {
+            actorId: ownerId,
+            action: "VIDEO_PLAYBACK_ISSUED",
+            subjectType: "Video",
+            subjectId: video.id,
+          },
+        });
         return {
           id,
           url,
@@ -176,6 +193,14 @@ export class VideoService {
           video.mimeType,
         );
         await tx.video.update({ where: { id }, data: { status: "READY" } });
+        await tx.auditLog.create({
+          data: {
+            actorId: ownerId,
+            action: "VIDEO_UPLOAD_CONFIRMED",
+            subjectType: "Video",
+            subjectId: video.id,
+          },
+        });
         return { id, status: "READY" as const };
       },
     );

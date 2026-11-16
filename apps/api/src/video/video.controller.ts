@@ -9,6 +9,7 @@ import {
   Get,
   Delete,
   HttpCode,
+  UseInterceptors,
 } from "@nestjs/common";
 import { UserRole } from "@prisma/client";
 import { CurrentUser } from "../auth/current-user.decorator";
@@ -17,8 +18,10 @@ import { Roles, RolesGuard } from "../auth/roles.guard";
 import { SessionAuthGuard } from "../auth/session-auth.guard";
 import { VideoRequestGuard } from "./video-request.guard";
 import { VideoService } from "./video.service";
+import { VideoAuditInterceptor } from "./video-audit.interceptor";
 
 @Controller("videos")
+@UseInterceptors(VideoAuditInterceptor)
 @UseGuards(SessionAuthGuard, RolesGuard, VideoRequestGuard)
 @Roles(UserRole.MEMBER)
 export class VideoController {
