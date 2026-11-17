@@ -32,7 +32,9 @@ export class VideoRequestGuard implements CanActivate {
           415,
         );
     }
-    if (Object.keys(request.query).length)
+    const isList =
+      request.method === "GET" && context.getHandler().name === "list";
+    if (Object.keys(request.query).some((key) => !isList || key !== "cursor"))
       throw new HttpException(
         {
           code: "INVALID_REQUEST",
