@@ -2,6 +2,32 @@
 
 Each feature needs valid inputs, invalid inputs, unauthorized access, state/race tests, UI feedback states, and audit/revoke behavior when relevant.
 
+## C032 - moderator expert approval
+
+Contract: [EXPERT-APPROVAL.md](EXPERT-APPROVAL.md). Tests use server-injected
+synthetic versions/evidence and UUID-owned disposable PostgreSQL schemas only.
+The default application providers remain closed even when NODE_ENV=test.
+
+- Deny MEMBER self-approval, EXPERT and ADMIN (403, no role inheritance); deny
+  missing/revoked/expired/inactive/unverified moderator sessions (401).
+- Require an existing ACTIVE verified EXPERT; never create/activate/change a User.
+- Reject unapproved versions, unavailable/mismatched/expired/future evidence,
+  forged authority/hash/timestamp fields, bad Origin/JSON and query overrides.
+- Preserve actual recoverable evidence snapshots and server-calculated SHA-256,
+  opaque actor identity, server timestamps and immutable approval/event history.
+- Cover null/future expiry and both evidence validity ceilings; no default expiry.
+- Cover first approval, existing pending credential, reapproval after revocation,
+  stale revision and concurrent initialization/reapproval (one winner, one 409).
+- Inject a final audit INSERT failure to prove rollback of initialization, actor
+  mapping, approval and all events; retain cancelled assignments and old bindings.
+- Verify private/no-store errors/success and separate quotas with 429 Retry-After.
+- Run C031 migration/database, T04, Auth, unit, Prisma, TypeScript and build checks.
+  No synthetic test result establishes production evidence approval or real MFA.
+
+```text
+npm run test:integration --workspace apps/api -- --runTestsByPath test/expert-approval.integration-spec.ts
+```
+
 ## C031 - credential and assignment database foundation
 
 PR #12 identity-reuse regression coverage must reproduce CANCELLED revision 1
