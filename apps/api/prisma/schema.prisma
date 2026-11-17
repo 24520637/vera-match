@@ -202,6 +202,7 @@ model ConsentSubject {
   events ConsentEvent[]
   idempotency ConsentIdempotency[]
   tasks ConsentWithdrawalTask[]
+  assignments ExpertAssignment[]
 }
 model ConsentLedger {
   userId String @id
@@ -330,6 +331,10 @@ model ExpertAssignment {
   assignedByEvidence Json?
   credentialApprovalId String? @db.Uuid
   credentialApproval ExpertCredentialApproval? @relation(fields: [credentialApprovalId], references: [id], onDelete: Restrict)
+  // Nullable for legacy rows only; C033 records the authoritative review generation.
+  reviewConsentSubjectId String? @db.Uuid
+  reviewConsentSubject ConsentSubject? @relation(fields: [reviewConsentSubjectId], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "ExpertAssignment_review_subject_fkey")
+  reviewConsentVersion BigInt?
   revision BigInt @default(0)
   // Internal mutation witness; not part of future API DTOs or retained snapshots.
   eventFromStatus AssignmentStatus?
@@ -347,6 +352,20 @@ model ExpertAssignment {
   @@index([credentialApprovalId])
 }
 
+// Opaque actor scope and original result survive live account/assignment deletion.
+model AssignmentIdempotency {
+  actorSubjectId String @db.Uuid
+  operation String
+  keyHash String
+  fingerprint String
+  assignmentId String
+  identity ExpertAssignmentIdentity @relation(fields: [assignmentId], references: [assignmentId], onDelete: Restrict, onUpdate: NoAction, map: "AssignmentIdempotency_identity_fkey")
+  response Json
+  createdAt DateTime @default(now())
+  @@id([actorSubjectId, operation, keyHash])
+  @@index([assignmentId])
+}
+
 enum ExpertCredentialStatus {
   PENDING
   APPROVED
@@ -356,6 +375,7 @@ enum ExpertCredentialStatus {
 // Issued assignment IDs survive deletion of live resources; no cascading foreign key.
 model ExpertAssignmentIdentity {
   assignmentId String @id
+  receipts AssignmentIdempotency[]
 }
 
 // Live identity mapping only; retained evidence carries the opaque subject.
