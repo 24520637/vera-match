@@ -9,7 +9,11 @@ import {
   UPLOAD_TTL_SECONDS,
   matchesVideoContainer,
 } from "./private-storage.service";
-import { uploadInput } from "./video.validation";
+import {
+  uploadInput,
+  parseVideoCursor,
+  encodeVideoCursor,
+} from "./video.validation";
 import { PrismaService } from "../database/prisma.service";
 import { Prisma } from "@prisma/client";
 import {
@@ -102,25 +106,38 @@ export class VideoService {
       }),
     );
   }
-  list(ownerId: string) {
+  list(ownerId: string, cursor?: unknown) {
+    const after = parseVideoCursor(cursor);
     return consentStorage(() =>
       this.prisma.$transaction(async (tx) => {
         await requireConsentMember(tx, ownerId);
+        const rows = await tx.video.findMany({
+          where: {
+            ownerId,
+            ...(after
+              ? {
+                  OR: [
+                    { createdAt: { lt: after.createdAt } },
+                    { createdAt: after.createdAt, id: { lt: after.id } },
+                  ],
+                }
+              : {}),
+          },
+          orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+          take: 51,
+          select: {
+            id: true,
+            status: true,
+            mimeType: true,
+            sizeBytes: true,
+            createdAt: true,
+            deletedAt: true,
+            cleanupCompletedAt: true,
+          },
+        });
         return {
-          videos: await tx.video.findMany({
-            where: { ownerId },
-            orderBy: { createdAt: "desc" },
-            take: 50,
-            select: {
-              id: true,
-              status: true,
-              mimeType: true,
-              sizeBytes: true,
-              createdAt: true,
-              deletedAt: true,
-              cleanupCompletedAt: true,
-            },
-          }),
+          videos: rows.slice(0, 50),
+          nextCursor: rows.length > 50 ? encodeVideoCursor(rows[49]) : null,
         };
       }),
     );

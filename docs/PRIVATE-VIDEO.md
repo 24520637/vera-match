@@ -6,13 +6,13 @@ All paths use `/api`. Session/verified-active-MEMBER, Origin/JSON checks,
 bounded process-local quotas and server-derived ownership apply. GET metadata
 and DELETE remain usable after withdrawal; no consent is implied by a save.
 
-| Request                      | Contract                                                                                                                                                                                                           |
-| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| POST `/videos/upload-intent` | Exactly `{mimeType,sizeBytes}`. MP4/WebM, 12 bytes–100 MiB. Returns id, 300-second signed PUT and required Content-Type. Content-Length and Content-Type are signed.                                               |
-| POST `/videos/:id/confirm`   | Empty JSON object. HEAD verifies declared length/type; range GET checks container signature; conditional copy freezes checked incoming bytes under a different playback key. Only then READY. Retry is idempotent. |
-| GET `/videos/me`             | At most 50 newest own metadata rows. No bucket, keys, upload/playback URLs or other owners.                                                                                                                        |
-| POST `/videos/:id/playback`  | Empty JSON object. Current storage consent, valid generation, own READY/non-deleted video. Returns a 60-second URL. No staff/expert bypass.                                                                        |
-| DELETE `/videos/:id`         | Empty JSON object. Returns 202 DELETED/cleanup PENDING after transactional access denial and durable cleanup enqueue. This is not proof of erasure.                                                                |
+| Request                      | Contract                                                                                                                                                                                                                    |
+| ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| POST `/videos/upload-intent` | Exactly `{mimeType,sizeBytes}`. MP4/WebM, 12 bytes–100 MiB. Returns id, 300-second signed PUT and required Content-Type. Content-Length and Content-Type are signed.                                                        |
+| POST `/videos/:id/confirm`   | Empty JSON object. HEAD verifies declared length/type; range GET checks container signature; conditional copy freezes checked incoming bytes under a different playback key. Only then READY. Retry is idempotent.          |
+| GET `/videos/me`             | Returns `{videos,nextCursor}`; 50 newest own metadata rows per page, stable `createdAt DESC,id DESC`. Pass the opaque `nextCursor` as `?cursor=...`; null means end. No bucket, keys, upload/playback URLs or other owners. |
+| POST `/videos/:id/playback`  | Empty JSON object. Current storage consent, valid generation, own READY/non-deleted video. Returns a 60-second URL. No staff/expert bypass.                                                                                 |
+| DELETE `/videos/:id`         | Empty JSON object. Returns 202 DELETED/cleanup PENDING after transactional access denial and durable cleanup enqueue. This is not proof of erasure.                                                                         |
 
 Success responses are private/no-store; signed URLs stay in memory and must not
 be logged, traced, stored in browser storage or shared. Missing owner resources
@@ -157,19 +157,24 @@ The following remain tracked follow-up work after reviewed C031-C036 integration
 - [ ] C054: revoke/delete racing expert read/edit/submit, cancellation/reassignment
       and signed-URL issuance, using the actual merged Phuc workflow.
 
-PR #12 at c5fa452 is unmerged and supplies C031 only, not C032-C036 APIs. Its
-additive identity-reservation/mapping-guard migration addresses the prior review
-findings and still requires formal C031 review. Combined Prisma validation and
-both migration application orders with all eight migrations passed in isolated
-review schemas; this is not merged runtime/E2E acceptance. None of the three video migrations, existing migrations
-or shared consent/assignment contracts is changed by this readiness fix.
+PR #12 (C031) merged into develop on 2026-11-17 as
+`9f963555ef96565f8d104faa50ba8d764026b0c1`. Its additive credential,
+assignment revision/event and identity-reservation protections are upstream.
+PR #13 (C032 moderator approval) also merged as
+`bc0bd39569daf9a379db316ddef74b1258747305`; its production qualification
+registry/evidence source remains closed. Neither merge implements the remaining
+C033-C036 expert assignment/access workflow or this feature's expert revocation.
+The earlier combined Prisma validation and both migration orders passed with
+all eight migrations in disposable review schemas; that is not runtime expert
+integration/E2E acceptance. Existing migrations and shared contracts are unchanged.
 
 - The real policy registry currently publishes no approved policies. Runtime
   grants fail closed. Tests inject synthetic test-only policy snapshots into
   the real Consent service; no production grant bypass or pretend policy exists.
 - C050 expert access/edit integration and C051 assignment cancellation are
-  BLOCKED on Phuc's actual assignment/credential/CAS/history contract and routes.
-  Current develop has the starter assignment schema only. This feature exposes
+  BLOCKED on integration with the remaining C033-C036 routes and the merged
+  C031 credential/assignment CAS/history contract. Develop now has C031/C032;
+  schema availability alone does not complete these checks. This feature exposes
   no expert playback or review editing. It does not claim to cancel assignments,
   implement MFA or complete report/matching withdrawal. Phuc must check active
   assignment, eligibility, owner consent, video state and MFA on every access.
@@ -191,3 +196,14 @@ remains pending for the next scan. If deletion requeues after claim, the old
 worker lease cannot finalize the new request. PostgreSQL/MinIO regression tests
 exercise both orderings through the real owner deletion service and verify that
 completion is recorded only after final-object absence is confirmed.
+
+### Owner video pagination
+
+GET `/videos/me` accepts only the optional opaque `cursor` query parameter.
+Malformed/duplicate cursors and unexpected query parameters return 400. Each
+page is filtered by the authenticated owner before the keyset boundary; a
+cursor never grants access. Equal timestamps are ordered by ID, and deletion
+of a boundary row or new newer uploads does not shift the remaining older rows.
+The library appends pages with the shared Load older videos control, announces
+its loaded count and retains existing rows/cursor on transient errors or 429.
+Refresh restarts pagination and invalidates stale in-flight page responses.

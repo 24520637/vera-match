@@ -147,6 +147,122 @@ describe("Private video / real PostgreSQL / native MinIO", () => {
     expect(result.status).toBe(200);
   }
   const valid = { mimeType: "video/mp4", sizeBytes: 12 };
+  it("paginates beyond 50 rows with stable ties, owner isolation and usable older READY media", async () => {
+    const user = await member();
+    await grant(user.cookie);
+    const upload = await intent(user.cookie);
+    await put(upload.uploadUrl);
+    expect(
+      (await request(user.cookie, `videos/${upload.id}/confirm`)).status,
+    ).toBe(201);
+    await database.client.video.update({
+      where: { id: upload.id },
+      data: { createdAt: new Date("2026-01-01") },
+    });
+    const other = await member();
+    const newest = new Date("2026-01-02");
+    await database.client.video.createMany({
+      data: Array.from({ length: 55 }, (_, index) => ({
+        id: `pagination-${user.id}-${String(index).padStart(3, "0")}`,
+        ownerId: user.id,
+        bucket,
+        objectKey: randomUUID(),
+        mimeType: "video/mp4",
+        createdAt: newest,
+      })),
+    });
+    const foreign = await database.client.video.create({
+      data: {
+        ownerId: other.id,
+        bucket,
+        objectKey: randomUUID(),
+        mimeType: "video/mp4",
+        createdAt: new Date("2025-01-01"),
+      },
+    });
+    const first = await request(user.cookie, "videos/me", {}, "GET");
+    expect(first.status).toBe(200);
+    expect(first.headers.get("cache-control")).toContain("no-store");
+    type ListPage = { videos: { id: string }[]; nextCursor: string | null };
+    const page = (await first.json()) as ListPage;
+    expect(page.videos).toHaveLength(50);
+    expect(typeof page.nextCursor).toBe("string");
+    expect(page.videos.map((row: { id: string }) => row.id)).toEqual(
+      [...page.videos.map((row: { id: string }) => row.id)].sort().reverse(),
+    );
+    expect(JSON.stringify(page)).not.toMatch(
+      /objectKey|uploadKey|bucket|ownerId/,
+    );
+    // Keyset values survive deletion of the boundary row; new newer rows do not shift page two.
+    await database.client.video.delete({ where: { id: page.videos[49].id } });
+    await database.client.video.create({
+      data: {
+        ownerId: user.id,
+        bucket,
+        objectKey: randomUUID(),
+        mimeType: "video/mp4",
+        createdAt: new Date("2027-01-01"),
+      },
+    });
+    const second = await request(
+      user.cookie,
+      `videos/me?cursor=${encodeURIComponent(page.nextCursor!)}`,
+      {},
+      "GET",
+    );
+    expect(second.status).toBe(200);
+    const older = (await second.json()) as ListPage;
+    expect(older.videos).toHaveLength(6);
+    expect(older.nextCursor).toBeNull();
+    expect(
+      older.videos.some((row: { id: string }) => row.id === upload.id),
+    ).toBe(true);
+    const ids = [...page.videos, ...older.videos].map((row) => row.id);
+    expect(new Set(ids).size).toBe(56);
+    expect(ids).not.toContain(foreign.id);
+    // A cursor is a position, never authorization to another member's rows.
+    const stranger = await request(
+      other.cookie,
+      `videos/me?cursor=${encodeURIComponent(page.nextCursor!)}`,
+      {},
+      "GET",
+    );
+    expect(
+      ((await stranger.json()) as ListPage).videos.map(
+        (row: { id: string }) => row.id,
+      ),
+    ).toEqual([foreign.id]);
+    expect(
+      (await request(user.cookie, `videos/${upload.id}/playback`)).status,
+    ).toBe(201);
+    expect(
+      (await request(user.cookie, `videos/${upload.id}`, {}, "DELETE")).status,
+    ).toBe(202);
+  });
+
+  it("rejects malformed, duplicate and unexpected pagination parameters", async () => {
+    const user = await member();
+    for (const query of [
+      "cursor=",
+      "cursor=bad",
+      "cursor=" + "a".repeat(513),
+      "cursor=a&cursor=b",
+      "limit=100",
+      "ownerId=other",
+      "cursor=" +
+        Buffer.from(JSON.stringify(["not-a-date", "id"])).toString("base64url"),
+    ]) {
+      expect(
+        (await request(user.cookie, `videos/me?${query}`, {}, "GET")).status,
+      ).toBe(400);
+    }
+    const empty = await request(user.cookie, "videos/me", {}, "GET");
+    expect(await empty.json()).toEqual({ videos: [], nextCursor: null });
+    expect((await request("", "videos/me?cursor=bad", {}, "GET")).status).toBe(
+      401,
+    );
+  });
+
   it("rejects test-only consent evidence for video access outside the test environment", async () => {
     const user = await member();
     await grant(user.cookie);
@@ -742,7 +858,7 @@ describe("Private video / real PostgreSQL / native MinIO", () => {
       /objectKey|uploadKey|bucket|uploadUrl/,
     );
     const otherList = await request(other.cookie, "videos/me", {}, "GET");
-    expect(await otherList.json()).toEqual({ videos: [] });
+    expect(await otherList.json()).toEqual({ videos: [], nextCursor: null });
     expect(
       (await request(other.cookie, `videos/${upload.id}/playback`)).status,
     ).toBe(404);

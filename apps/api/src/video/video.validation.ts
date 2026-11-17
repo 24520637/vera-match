@@ -26,3 +26,56 @@ export function uploadInput(input: unknown): {
     sizeBytes: body.sizeBytes as number,
   };
 }
+
+export function parseVideoCursor(
+  value: unknown,
+): { createdAt: Date; id: string } | undefined {
+  if (value === undefined) return undefined;
+  const invalid = (): never => {
+    throw new BadRequestException({
+      code: "INVALID_CURSOR",
+      message:
+        "Use the next cursor returned by your video list, or refresh the list.",
+    });
+  };
+  if (
+    typeof value !== "string" ||
+    value.length > 512 ||
+    !/^[A-Za-z0-9_-]+$/.test(value)
+  )
+    invalid();
+  let tuple: unknown;
+  try {
+    const bytes = Buffer.from(value as string, "base64url");
+    if (bytes.toString("base64url") !== value) invalid();
+    tuple = JSON.parse(bytes.toString("utf8"));
+  } catch {
+    invalid();
+  }
+  if (
+    !Array.isArray(tuple) ||
+    tuple.length !== 2 ||
+    typeof tuple[0] !== "string" ||
+    typeof tuple[1] !== "string" ||
+    !/^[A-Za-z0-9_-]{1,200}$/.test(tuple[1])
+  )
+    invalid();
+  const [timestamp, id] = tuple as [string, string];
+  const createdAt = new Date(timestamp);
+  if (
+    !Number.isFinite(createdAt.getTime()) ||
+    createdAt.toISOString() !== timestamp
+  )
+    invalid();
+  return { createdAt, id };
+}
+
+export function encodeVideoCursor(video: {
+  createdAt: Date;
+  id: string;
+}): string {
+  return Buffer.from(
+    JSON.stringify([video.createdAt.toISOString(), video.id]),
+    "utf8",
+  ).toString("base64url");
+}

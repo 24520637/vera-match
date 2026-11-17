@@ -16,10 +16,13 @@ type Video = {
   deletedAt: string | null;
   cleanupCompletedAt: string | null;
 };
+type VideoPage = { videos: Video[]; nextCursor: string | null };
 type Playback = { id: string; url: string; expiresAt: string };
 
 export function VideoLibrary({ revision }: { revision: number }) {
   const [videos, setVideos] = useState<Video[]>();
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [allowed, setAllowed] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
@@ -27,16 +30,20 @@ export function VideoLibrary({ revision }: { revision: number }) {
   const [playback, setPlayback] = useState<Playback>();
   const [deleting, setDeleting] = useState<Video>();
   const sequence = useRef(0);
+  const nextFocus = useRef<string | undefined>(undefined);
   const alive = useRef(true);
   const retry = useRetryAfter();
   const refresh = useCallback(async () => {
     const current = ++sequence.current;
+    nextFocus.current = undefined;
     setPlayback(undefined);
     setError("");
     setAllowed(false);
+    setNextCursor(null);
+    setLoadingMore(false);
     try {
       const [list, consents] = await Promise.all([
-        apiJson<{ videos: Video[] }>("/videos/me"),
+        apiJson<VideoPage>("/videos/me"),
         apiJson<{ consents: { purpose: string; granted: boolean }[] }>(
           "/consents/me",
         ),
@@ -45,6 +52,7 @@ export function VideoLibrary({ revision }: { revision: number }) {
         throw new Error("Your videos could not be loaded.");
       if (alive.current && current === sequence.current) {
         setVideos(list.videos);
+        setNextCursor(list.nextCursor ?? null);
         setAllowed(
           consents.consents.some(
             (consent) => consent.purpose === "VIDEO_STORAGE" && consent.granted,
@@ -86,6 +94,56 @@ export function VideoLibrary({ revision }: { revision: number }) {
     );
     return () => clearTimeout(timer);
   }, [playback]);
+  useEffect(() => {
+    if (nextFocus.current) {
+      document.getElementById(`saved-video-${nextFocus.current}`)?.focus();
+      nextFocus.current = undefined;
+    }
+  }, [videos]);
+  async function loadMore() {
+    if (!nextCursor || loadingMore || busy || retry.seconds > 0) return;
+    const current = sequence.current;
+    setLoadingMore(true);
+    setError("");
+    try {
+      const page = await apiJson<VideoPage>(
+        `/videos/me?cursor=${encodeURIComponent(nextCursor)}`,
+      );
+      if (!page)
+        throw new Error("Older videos could not be loaded. Try again.");
+      if (alive.current && current === sequence.current) {
+        nextFocus.current = page.videos[0]?.id;
+        setVideos((previous) => {
+          const known = new Set(previous?.map((video) => video.id));
+          return [
+            ...(previous ?? []),
+            ...page.videos.filter((video) => !known.has(video.id)),
+          ];
+        });
+        setNextCursor(page.nextCursor);
+      }
+    } catch (failure) {
+      if (alive.current && current === sequence.current) {
+        retry.fromError(failure);
+        setError(
+          failure instanceof Error
+            ? failure.message
+            : "Older videos could not be loaded. Try again.",
+        );
+        if (
+          failure instanceof ApiError &&
+          [401, 403].includes(failure.status ?? 0)
+        ) {
+          setVideos(undefined);
+          setNextCursor(null);
+          setAllowed(false);
+          setPlayback(undefined);
+        }
+      }
+    } finally {
+      if (alive.current && current === sequence.current) setLoadingMore(false);
+    }
+  }
   async function action(video: Video, remove: boolean) {
     setBusy(true);
     setError("");
@@ -138,7 +196,7 @@ export function VideoLibrary({ revision }: { revision: number }) {
       <Button
         variant="secondary"
         onClick={() => void refresh()}
-        disabled={busy}
+        disabled={busy || loadingMore}
       >
         Refresh video list
       </Button>
@@ -165,10 +223,12 @@ export function VideoLibrary({ revision }: { revision: number }) {
           Deletion remains available.
         </Notice>
       )}
-      <ul className="video-list">
+      <ul id="saved-video-list" className="video-list" aria-busy={loadingMore}>
         {videos?.map((video, index) => (
           <li key={video.id}>
-            <h3>Video {videos.length - index}</h3>
+            <h3 id={`saved-video-${video.id}`} tabIndex={-1}>
+              Video {index + 1}
+            </h3>
             <p>
               Uploaded{" "}
               {new Intl.DateTimeFormat("en", {
@@ -192,7 +252,7 @@ export function VideoLibrary({ revision }: { revision: number }) {
                 controls
                 playsInline
                 preload="metadata"
-                aria-label={`Private playback video ${videos.length - index}`}
+                aria-label={`Private playback video ${index + 1}`}
                 onError={() => {
                   setPlayback(undefined);
                   setError(
@@ -205,26 +265,48 @@ export function VideoLibrary({ revision }: { revision: number }) {
               {video.status === "READY" && (
                 <Button
                   onClick={() => void action(video, false)}
-                  disabled={busy || !allowed || retry.seconds > 0}
+                  disabled={
+                    busy || loadingMore || !allowed || retry.seconds > 0
+                  }
                 >
-                  Play video {videos.length - index}
+                  Play video {index + 1}
                 </Button>
               )}
               {!video.cleanupCompletedAt && (
                 <Button
                   variant="danger"
-                  disabled={busy || retry.seconds > 0}
+                  disabled={busy || loadingMore || retry.seconds > 0}
                   onClick={() => setDeleting(video)}
                 >
                   {video.status === "DELETED"
                     ? "Retry cleanup request"
-                    : `Delete video ${videos.length - index}`}
+                    : `Delete video ${index + 1}`}
                 </Button>
               )}
             </div>
           </li>
         ))}
       </ul>
+      {videos && videos.length > 0 && (
+        <div className="form-actions">
+          <p role="status" aria-live="polite">
+            Showing {videos.length} {videos.length === 1 ? "video" : "videos"}.
+          </p>
+          {nextCursor && (
+            <Button
+              variant="secondary"
+              loading={loadingMore}
+              loadingLabel="Loading older videos…"
+              disabled={busy || retry.seconds > 0}
+              aria-controls="saved-video-list"
+              aria-describedby={retry.seconds > 0 ? "library-retry" : undefined}
+              onClick={() => void loadMore()}
+            >
+              Load older videos
+            </Button>
+          )}
+        </div>
+      )}
       <Modal
         open={!!deleting}
         onOpenChange={(open) => {

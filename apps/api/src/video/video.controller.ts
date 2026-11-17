@@ -7,6 +7,7 @@ import {
   Param,
   BadRequestException,
   Get,
+  Query,
   Delete,
   HttpCode,
   UseInterceptors,
@@ -50,8 +51,8 @@ export class VideoController {
   @Header("Cache-Control", "private, no-store")
   @Header("Vary", "Cookie")
   @Header("Referrer-Policy", "no-referrer")
-  list(@CurrentUser() user: SafeUser) {
-    return this.videos.list(user.id);
+  list(@CurrentUser() user: SafeUser, @Query("cursor") cursor: unknown) {
+    return this.videos.list(user.id, cursor);
   }
   @Post(":id/playback")
   @Header("Cache-Control", "private, no-store")

@@ -9,7 +9,7 @@ test("real recording upload playback deletion and consent withdrawal", async ({
   page,
   context,
 }, testInfo) => {
-  test.setTimeout(120000);
+  test.setTimeout(180000);
   const metadata = JSON.parse(
     await readFile(resolve(__dirname, "../.video-e2e-runtime.json"), "utf8"),
   );
@@ -208,6 +208,118 @@ test("real recording upload playback deletion and consent withdrawal", async ({
         session: sessionStorage.length,
       })),
     ).toEqual({ local: 0, session: 0 });
+    // An older confirmed video remains reachable after more than one metadata page.
+    const regrant = await page.request.patch("/api/consents/me", {
+      headers: {
+        Origin: "http://localhost:3100",
+        "Idempotency-Key": randomUUID(),
+      },
+      data: {
+        expectedVersion: 2,
+        consents: [
+          {
+            purpose: "VIDEO_STORAGE",
+            granted: true,
+            policyVersion: "synthetic-video-e2e-v1",
+          },
+        ],
+      },
+    });
+    expect(regrant.status()).toBe(200);
+    await page
+      .getByRole("button", { name: "Refresh video list", exact: true })
+      .click();
+    await recordAndUpload();
+    const olderReady = await db.video.findFirstOrThrow({
+      where: { ownerId: user.id, status: "READY" },
+      orderBy: { createdAt: "desc" },
+    });
+    await db.video.createMany({
+      data: Array.from({ length: 55 }, () => ({
+        ownerId: user.id,
+        bucket: olderReady.bucket,
+        objectKey: randomUUID(),
+        mimeType: "video/mp4",
+        createdAt: new Date("2099-01-01"),
+      })),
+    });
+    await page
+      .getByRole("button", { name: "Refresh video list", exact: true })
+      .click();
+    await expect(page.locator(".video-list > li")).toHaveCount(50);
+    await expect(page.getByRole("button", { name: /^Play video/ })).toHaveCount(
+      0,
+    );
+    let pageRequests = 0;
+    await page.route("**/api/videos/me?cursor=*", async (route) => {
+      pageRequests++;
+      if (pageRequests === 1)
+        await route.fulfill({
+          status: 429,
+          headers: { "Retry-After": "1" },
+          contentType: "application/json",
+          body: JSON.stringify({
+            code: "AUTH_RATE_LIMITED",
+            message: "Please wait before loading older videos.",
+            retryAfterSeconds: 1,
+          }),
+        });
+      else await route.continue();
+    });
+    const more = page.getByRole("button", {
+      name: "Load older videos",
+      exact: true,
+    });
+    await more.focus();
+    await page.keyboard.press("Enter");
+    await expect(
+      page.getByRole("alert").filter({ hasText: "Video request unavailable" }),
+    ).toContainText("Please wait before loading older videos.");
+    await expect(page.locator(".video-list > li")).toHaveCount(50);
+    await expect(more).toBeEnabled();
+    expect(pageRequests).toBe(1); // Countdown never automatically replays a request.
+    await more.focus();
+    await page.keyboard.press("Enter");
+    await expect(page.locator(".video-list > li")).toHaveCount(58);
+    await expect(
+      page.getByRole("status").filter({ hasText: "Showing 58 videos." }),
+    ).toBeVisible();
+    await expect(more).toHaveCount(0);
+    await page
+      .getByRole("button", { name: "Play video 56", exact: true })
+      .click();
+    const olderPlayer = page.getByLabel("Private playback video 56");
+    await expect(olderPlayer).toBeVisible();
+    await expect
+      .poll(() =>
+        olderPlayer.evaluate((element: HTMLVideoElement) => element.readyState),
+      )
+      .toBeGreaterThanOrEqual(1);
+    expect(
+      (await new AxeBuilder({ page }).include(".video-library").analyze())
+        .violations,
+    ).toEqual([]);
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+    ).toBe(true);
+    await page.screenshot({
+      path: testInfo.outputPath("paginated-video-review.png"),
+    });
+    await page
+      .getByRole("button", { name: "Delete video 56", exact: true })
+      .click();
+    await page
+      .getByRole("button", { name: "Delete private video", exact: true })
+      .click();
+    await expect
+      .poll(
+        async () =>
+          (await db.video.findUniqueOrThrow({ where: { id: olderReady.id } }))
+            .status,
+      )
+      .toBe("DELETED");
   } finally {
     await db.$disconnect();
   }
