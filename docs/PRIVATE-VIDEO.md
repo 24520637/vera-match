@@ -63,6 +63,9 @@ after lease expiry, retry repeats provider removal/HEAD verification before
 committing completion. MinIO failure preserves PENDING/backoff and no completion
 timestamp. Connection-outage tests use unreachable loopback endpoints and
 disposable schemas; they do not stop the developer's PostgreSQL/MinIO services.
+Requeuing a completed owner deletion clears its previous completion timestamp in
+the same transaction as the durable task update. Metadata stays pending until a
+fresh provider-verified pass commits; a lost requeue transaction changes neither.
 
 Expired incoming uploads are reaped; a confirmed video's final object is kept.
 Incoming keys also require a one-day MinIO lifecycle rule. A PUT authorized
@@ -154,11 +157,11 @@ The following remain tracked follow-up work after reviewed C031-C036 integration
 - [ ] C054: revoke/delete racing expert read/edit/submit, cancellation/reassignment
       and signed-URL issuance, using the actual merged Phuc workflow.
 
-PR #12 at 4ec54b1 is unmerged and supplies C031 only, not C032-C036 APIs. Its
-assignment ID-reuse and live actor-mapping reset findings still require resolution
-and fresh review. Combined Prisma validation and both migration application orders
-with all seven migrations passed in isolated review schemas; this is not merged
-runtime/E2E acceptance. None of the three video migrations, existing migrations
+PR #12 at c5fa452 is unmerged and supplies C031 only, not C032-C036 APIs. Its
+additive identity-reservation/mapping-guard migration addresses the prior review
+findings and still requires formal C031 review. Combined Prisma validation and
+both migration application orders with all eight migrations passed in isolated
+review schemas; this is not merged runtime/E2E acceptance. None of the three video migrations, existing migrations
 or shared consent/assignment contracts is changed by this readiness fix.
 
 - The real policy registry currently publishes no approved policies. Runtime

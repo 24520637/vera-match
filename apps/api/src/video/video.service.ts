@@ -59,7 +59,11 @@ export class VideoService {
         if (video.status !== "DELETED") {
           await tx.video.update({
             where: { id },
-            data: { status: "DELETED", deletedAt: new Date() },
+            data: {
+              status: "DELETED",
+              deletedAt: new Date(),
+              cleanupCompletedAt: null,
+            },
           });
           await tx.auditLog.create({
             data: {
@@ -86,6 +90,14 @@ export class VideoService {
             nextAttemptAt: new Date(),
           },
         });
+        if (video.status === "DELETED") {
+          // Clear after locking/requeuing the task, even if the earlier read
+          // saw null: a worker may have completed between that read and upsert.
+          await tx.video.update({
+            where: { id },
+            data: { cleanupCompletedAt: null },
+          });
+        }
         return { id, status: "DELETED", cleanup: "PENDING" };
       }),
     );
