@@ -1,5 +1,10 @@
 # API contract — VERA Match
 
+**C032 implementation:** The moderator-only expert approval endpoint and its
+fail-closed evidence-source boundary are documented in
+[Expert approval](EXPERT-APPROVAL.md). It introduces no member video access or MFA
+mechanism and does not change the existing authentication responses below.
+
 **Status:** Health/readiness and `/auth/register`, `/auth/verify-email`, `/auth/resend-verification`, `/auth/login`, `/auth/me`, `/auth/logout`, `/auth/logout-all`, `/auth/forgot-password` and `/auth/reset-password` are implemented. All other business routes below remain DESIGN ONLY. See `EMAIL-AUTH-SESSIONS.md` and [Authentication recovery](AUTH-RECOVERY.md) for tested details.
 
 API prefix: `/api`. The browser uses a server-issued HttpOnly session cookie. Mutating cookie-authenticated endpoints require CSRF protection. Implemented auth behavior is described below; `{code, message, details?}` is not a guarantee that every framework error has this shape. Auth DTO validation uses `400`, not `422`. Future feature `409` rules are approved MVP contracts, not implemented routes;
