@@ -71,6 +71,14 @@ export class VideoCleanupService implements OnModuleInit, OnModuleDestroy {
           id: task.id,
           status: task.status,
           attempts: task.attempts,
+          // Owner deletion can upgrade staging-only work after this scan. A
+          // stale payload must remain pending for a fresh scan, not complete it.
+          videoId: task.videoId,
+          bucket: task.bucket,
+          objectKey: task.objectKey,
+          removeFinal: task.removeFinal,
+          uploadKey: task.uploadKey,
+          uploadExpiresAt: task.uploadExpiresAt,
           nextAttemptAt: { lte: new Date() },
         },
         data: {
