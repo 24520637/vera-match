@@ -1,3 +1,4 @@
+import { StaffAssuranceSource } from "../src/safety/staff-assurance.source";
 import { SafetyRateLimiter } from "../src/safety/safety-request.guard";
 import { INestApplication } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
@@ -466,6 +467,386 @@ describe("Safety API / real sessions / isolated PostgreSQL", () => {
       await db.client.$executeRawUnsafe(
         "DROP FUNCTION safety_test_report_failure()",
       );
+    }
+  });
+
+  function staffProof() {
+    return jest
+      .spyOn(app.get(StaffAssuranceSource), "resolve")
+      .mockImplementation(async (_tx, auth) => ({
+        userId: auth.user.id,
+        sessionId: auth.sessionId,
+        level: "MFA",
+        verifiedAt: new Date(Date.now() - 1000),
+        expiresAt: new Date(Date.now() + 60000),
+        testOnly: true,
+      }));
+  }
+  async function caseReport(targetId?: string) {
+    const reporter = await account(),
+      target = targetId ?? (await account()).id;
+    expect(
+      (
+        await request(reporter.cookie, "reports", "POST", {
+          targetUserId: target,
+          reason: "HARASSMENT",
+          details: "SYNTHETIC <script>private evidence</script>",
+        })
+      ).status,
+    ).toBe(202);
+    return db.client.report.findFirstOrThrow({
+      where: { reporterId: reporter.id, targetUserId: target },
+    });
+  }
+  it("denies report access to guests, members, experts, ADMIN and moderators without real assurance", async () => {
+    const report = await caseReport();
+    expect((await request("", "moderation/reports")).status).toBe(401);
+    for (const role of ["MEMBER", "EXPERT", "ADMIN", "MODERATOR"] as const) {
+      const actor = await account(role);
+      expect((await request(actor.cookie, "moderation/reports")).status).toBe(
+        403,
+      );
+      expect(
+        (await request(actor.cookie, "moderation/reports/" + report.id)).status,
+      ).toBe(403);
+      expect(
+        (
+          await request(
+            actor.cookie,
+            "moderation/reports/" + report.id,
+            "PATCH",
+            { status: "IN_REVIEW", expectedRevision: 0 },
+          )
+        ).status,
+      ).toBe(403);
+    }
+    expect(
+      await db.client.reportModerationAction.count({
+        where: { reportId: report.id },
+      }),
+    ).toBe(0);
+  });
+  it("exposes only scoped queue metadata, requires claiming for details and audits every read/change", async () => {
+    const proof = staffProof();
+    try {
+      const mod = await account("MODERATOR"),
+        other = await account("MODERATOR"),
+        report = await caseReport();
+      const queue = await request(mod.cookie, "moderation/reports");
+      expect(queue.status).toBe(200);
+      expect(queue.headers.get("cache-control")).toContain("no-store");
+      const json = (await queue.json()) as { reports: { id: string }[] };
+      expect(json.reports.some((r) => r.id === report.id)).toBe(true);
+      expect(JSON.stringify(json)).not.toMatch(
+        /private evidence|script|reporterId|targetUserId|objectKey|bucket|passwordHash/,
+      );
+      expect(
+        (await request(mod.cookie, "moderation/reports/" + report.id)).status,
+      ).toBe(404);
+      const claim = await request(
+        mod.cookie,
+        "moderation/reports/" + report.id,
+        "PATCH",
+        { status: "IN_REVIEW", expectedRevision: 0 },
+      );
+      expect(claim.status).toBe(200);
+      const detail = await request(
+        mod.cookie,
+        "moderation/reports/" + report.id,
+      );
+      expect(detail.status).toBe(200);
+      expect(await detail.json()).toMatchObject({
+        report: { details: report.reason, status: "IN_REVIEW", revision: 1 },
+      });
+      expect(
+        (await request(other.cookie, "moderation/reports/" + report.id)).status,
+      ).toBe(404);
+      const otherQueue = (await (
+        await request(other.cookie, "moderation/reports")
+      ).json()) as { reports: { id: string }[] };
+      expect(otherQueue.reports.some((r) => r.id === report.id)).toBe(false);
+      expect(
+        (
+          await request(
+            mod.cookie,
+            "moderation/reports/" + report.id,
+            "PATCH",
+            { status: "RESOLVED", expectedRevision: 1 },
+          )
+        ).status,
+      ).toBe(200);
+      expect(
+        (
+          await request(
+            mod.cookie,
+            "moderation/reports/" + report.id,
+            "PATCH",
+            { status: "IN_REVIEW", expectedRevision: 2 },
+          )
+        ).status,
+      ).toBe(409);
+      const actions = await db.client.reportModerationAction.findMany({
+        where: { reportId: report.id },
+        orderBy: { revision: "asc" },
+      });
+      expect(
+        actions.map((a) => [a.fromStatus, a.toStatus, a.revision]),
+      ).toEqual([
+        ["OPEN", "IN_REVIEW", 1n],
+        ["IN_REVIEW", "RESOLVED", 2n],
+      ]);
+      expect(actions[0].actorEvidence).toEqual({
+        subject: (
+          await db.client.expertActorIdentity.findUniqueOrThrow({
+            where: { userId: mod.id },
+          })
+        ).subjectId,
+      });
+      expect(
+        (
+          await db.client.user.findUniqueOrThrow({
+            where: { id: report.targetUserId! },
+          })
+        ).status,
+      ).toBe("ACTIVE");
+      const audit = await db.client.auditLog.findMany({
+        where: { actorId: mod.id, action: { startsWith: "SAFETY_REPORT_" } },
+      });
+      expect(audit.some((a) => a.action === "SAFETY_REPORT_VIEWED")).toBe(true);
+      expect(JSON.stringify(audit)).not.toContain("private evidence");
+    } finally {
+      proof.mockRestore();
+    }
+  });
+  it("prevents self-case moderation and rejects stale, forged or invalid transitions", async () => {
+    const proof = staffProof();
+    try {
+      const mod = await account("MODERATOR"),
+        self = await caseReport(mod.id),
+        report = await caseReport();
+      expect(
+        (
+          await request(mod.cookie, "moderation/reports/" + self.id, "PATCH", {
+            status: "IN_REVIEW",
+            expectedRevision: 0,
+          })
+        ).status,
+      ).toBe(404);
+      for (const body of [
+        { status: "RESOLVED", expectedRevision: 0 },
+        { status: "IN_REVIEW", expectedRevision: 1 },
+      ])
+        expect(
+          (
+            await request(
+              mod.cookie,
+              "moderation/reports/" + report.id,
+              "PATCH",
+              body,
+            )
+          ).status,
+        ).toBe(409);
+      for (const body of [
+        { status: "IN_REVIEW", expectedRevision: 0, moderatorId: "forged" },
+        { status: "OPEN", expectedRevision: 0 },
+        { status: "IN_REVIEW", expectedRevision: -1 },
+      ])
+        expect(
+          (
+            await request(
+              mod.cookie,
+              "moderation/reports/" + report.id,
+              "PATCH",
+              body,
+            )
+          ).status,
+        ).toBe(400);
+      expect(
+        (await request(mod.cookie, "moderation/reports?status=UNKNOWN")).status,
+      ).toBe(400);
+      expect(
+        (
+          await request(
+            mod.cookie,
+            "moderation/reports/" + report.id + "?include=video",
+          )
+        ).status,
+      ).toBe(400);
+      expect(
+        await db.client.reportModerationAction.count({
+          where: { reportId: report.id },
+        }),
+      ).toBe(0);
+    } finally {
+      proof.mockRestore();
+    }
+  });
+  it("serializes concurrent claims and same-moderator CAS without duplicate history", async () => {
+    const proof = staffProof();
+    try {
+      const a = await account("MODERATOR"),
+        b = await account("MODERATOR"),
+        report = await caseReport();
+      const claims = await Promise.all([
+        request(a.cookie, "moderation/reports/" + report.id, "PATCH", {
+          status: "IN_REVIEW",
+          expectedRevision: 0,
+        }),
+        request(b.cookie, "moderation/reports/" + report.id, "PATCH", {
+          status: "IN_REVIEW",
+          expectedRevision: 0,
+        }),
+      ]);
+      expect(claims.map((r) => r.status).sort()).toEqual([200, 404]);
+      const actor = claims[0].status === 200 ? a : b;
+      const finish = await Promise.all([
+        request(actor.cookie, "moderation/reports/" + report.id, "PATCH", {
+          status: "RESOLVED",
+          expectedRevision: 1,
+        }),
+        request(actor.cookie, "moderation/reports/" + report.id, "PATCH", {
+          status: "DISMISSED",
+          expectedRevision: 1,
+        }),
+      ]);
+      expect(finish.map((r) => r.status).sort()).toEqual([200, 409]);
+      expect(
+        await db.client.reportModerationAction.count({
+          where: { reportId: report.id },
+        }),
+      ).toBe(2);
+    } finally {
+      proof.mockRestore();
+    }
+  });
+  it("rejects expired/mismatched assurance and synthetic assurance outside test mode", async () => {
+    const mod = await account("MODERATOR"),
+      source = app.get(StaffAssuranceSource);
+    for (const patch of [
+      { userId: "other" },
+      { sessionId: "other" },
+      { verifiedAt: new Date("2099-01-01") },
+      { expiresAt: new Date(0) },
+    ]) {
+      const proof = jest
+        .spyOn(source, "resolve")
+        .mockImplementation(async (_tx, auth) => ({
+          userId: auth.user.id,
+          sessionId: auth.sessionId,
+          level: "MFA",
+          verifiedAt: new Date(Date.now() - 1000),
+          expiresAt: new Date(Date.now() + 60000),
+          testOnly: true,
+          ...patch,
+        }));
+      try {
+        expect((await request(mod.cookie, "moderation/reports")).status).toBe(
+          403,
+        );
+      } finally {
+        proof.mockRestore();
+      }
+    }
+    const proof = staffProof(),
+      env = app.get(EnvironmentService),
+      before = env.values;
+    try {
+      Object.defineProperty(env, "values", {
+        value: { ...before, nodeEnv: "production" },
+        configurable: true,
+      });
+      expect((await request(mod.cookie, "moderation/reports")).status).toBe(
+        403,
+      );
+    } finally {
+      Object.defineProperty(env, "values", {
+        value: before,
+        configurable: true,
+      });
+      proof.mockRestore();
+    }
+  });
+  it("rolls back moderation revision, actor identity, action and status if final audit fails", async () => {
+    const proof = staffProof();
+    try {
+      const mod = await account("MODERATOR"),
+        report = await caseReport();
+      await db.client.$executeRawUnsafe(
+        `CREATE FUNCTION safety_test_mod_failure() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'Synthetic moderation audit failure'; END $$`,
+      );
+      await db.client.$executeRawUnsafe(
+        'CREATE TRIGGER safety_test_mod_failure BEFORE INSERT ON "AuditLog" FOR EACH ROW EXECUTE FUNCTION safety_test_mod_failure()',
+      );
+      try {
+        expect(
+          (
+            await request(
+              mod.cookie,
+              "moderation/reports/" + report.id,
+              "PATCH",
+              { status: "IN_REVIEW", expectedRevision: 0 },
+            )
+          ).status,
+        ).toBe(503);
+      } finally {
+        await db.client.$executeRawUnsafe(
+          'DROP TRIGGER safety_test_mod_failure ON "AuditLog"',
+        );
+        await db.client.$executeRawUnsafe(
+          "DROP FUNCTION safety_test_mod_failure()",
+        );
+      }
+      expect(
+        await db.client.report.findUnique({ where: { id: report.id } }),
+      ).toMatchObject({ status: "OPEN", revision: 0n, moderatorId: null });
+      expect(
+        await db.client.reportModerationAction.count({
+          where: { reportId: report.id },
+        }),
+      ).toBe(0);
+      expect(
+        await db.client.expertActorIdentity.findUnique({
+          where: { userId: mod.id },
+        }),
+      ).toBeNull();
+    } finally {
+      proof.mockRestore();
+    }
+  });
+
+  it("paginates the scoped moderation queue beyond fifty cases", async () => {
+    const proof = staffProof();
+    try {
+      const mod = await account("MODERATOR"),
+        a = await account(),
+        b = await account(),
+        ids = Array.from({ length: 55 }, () => randomUUID());
+      await db.client.report.createMany({
+        data: ids.map((id) => ({
+          id,
+          reporterId: a.id,
+          targetUserId: b.id,
+          reason: "SYNTHETIC pagination details",
+          reasonCode: "SPAM" as const,
+        })),
+      });
+      const first = (await (
+        await request(mod.cookie, "moderation/reports?status=OPEN")
+      ).json()) as { reports: { id: string }[]; nextCursor: string };
+      expect(first.reports).toHaveLength(50);
+      const second = (await (
+        await request(
+          mod.cookie,
+          "moderation/reports?status=OPEN&cursor=" + first.nextCursor,
+        )
+      ).json()) as { reports: { id: string }[]; nextCursor: null };
+      const found = new Set(
+        [...first.reports, ...second.reports].map((r) => r.id),
+      );
+      for (const id of ids) expect(found.has(id)).toBe(true);
+      expect(second.nextCursor).toBeNull();
+    } finally {
+      proof.mockRestore();
     }
   });
 });

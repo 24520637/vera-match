@@ -53,7 +53,7 @@ export class SafetyRequestGuard implements CanActivate {
       r.auth!.user.id,
       action === "submitReport"
         ? 5
-        : action === "block"
+        : action === "block" || action === "transitionReport"
           ? 20
           : r.method === "GET"
             ? 120

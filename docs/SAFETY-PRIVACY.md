@@ -65,3 +65,27 @@ constant-time lookup or a claim that a moderation decision was made. Reporting
 remains available after blocking; five requests/member/minute are process-local
 MVP quotas and never consume the separate unblock bucket. No automatic POST
 replay or durable duplicate-report suppression is claimed.
+
+## C064 moderation and real-assurance release gate
+
+Only active verified MODERATOR sessions may call GET /moderation/reports,
+GET /moderation/reports/:id and PATCH /moderation/reports/:id. ADMIN does not
+inherit access. StaffAssuranceSource is empty by default in every environment;
+there is no client boolean or environment override granting MFA. Private report
+access requires trusted session-bound, unexpired MFA assurance. Synthetic proofs
+are injected only into isolated tests and are rejected outside NODE_ENV=test.
+Production moderation remains BLOCKED until a reviewed real assurance source
+is integrated. Role membership and email verification alone are insufficient.
+
+The queue returns bounded metadata/cursor only for unassigned OPEN cases or the
+caller's cases, excluding cases involving that moderator. Details require an
+explicit successful claim. OPEN -> IN_REVIEW assigns the moderator; only that
+moderator may move IN_REVIEW -> RESOLVED or DISMISSED. Terminal states cannot
+reopen. Resolving a case does not suspend users, erase evidence or fetch media.
+
+PATCH takes exactly expectedRevision/status. User/session rechecks, sorted User
+locks, Report row lock, revision CAS, opaque actor mapping, immutable action and
+redacted audit commit together. Stale writes return 409; a case claimed by another
+moderator becomes out-of-scope (404), including a lost concurrent claim. Queue and
+detail reads are audited without report text. Unassigned or other staff's details
+return the same unavailable response. No report/media/consent data is public.

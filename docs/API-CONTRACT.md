@@ -1,5 +1,11 @@
 # API contract — VERA Match
 
+**T11 implementation:** Block/report and scoped moderator endpoints are described
+in [Safety and privacy](SAFETY-PRIVACY.md). Moderator access requires MODERATOR
+plus real session-bound staff assurance; its production source is not configured.
+ADMIN does not inherit these permissions. Account closure/deletion and actual
+matching/expert block integration are explicitly deferred.
+
 **C032 implementation:** The moderator-only expert approval endpoint and its
 fail-closed evidence-source boundary are documented in
 [Expert approval](EXPERT-APPROVAL.md). It introduces no member video access or MFA
