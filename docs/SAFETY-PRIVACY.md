@@ -25,3 +25,24 @@ It fails atomically on inconsistent legacy rows rather than dropping/repairing t
 Review orphan/self-reference records before deployment. Apply only through the
 normal reviewed migration process; local public database migration is NOT performed.
 Tests use synthetic UUID-owned schemas and test initial-schema upgrades.
+
+## C062 blocking and consumer boundary
+
+POST /blocks accepts only targetUserId, denies self-block/unavailable targets and
+returns 204 after an idempotent own directional block. Targets are opaque account
+references, not email/name lookups; active verified accounts may be blocked
+regardless of their role. DELETE /blocks/:targetUserId requires empty JSON, removes
+only the caller's edge and never removes a reverse block. GET /blocks/me returns
+50 own outgoing references/dates plus nextCursor; inbound block direction, names
+and contact data are private. No consent grant is required to restrict contact.
+
+Mutations lock participant User IDs in sorted order, then revalidate the actor and
+session before committing state plus redacted atomic audit. Separate bounded MVP
+quotas reserve unblock capacity independently of block/report writes.
+
+BlockAccessService.assertClear(tx,a,b) rejects either direction; excludedPeers
+supplies an internal reciprocal filter. Consumers must check authoritative rows
+in their own transaction after the same sorted participant locks. No positive
+result is a cached grant. The actual matching/review access routes do not exist
+yet: endpoint-level immediate exclusion is BLOCKED until Phuc integrates and
+tests these helpers. Existing MatchPair/decision history is not blindly deleted.

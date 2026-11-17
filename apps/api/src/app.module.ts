@@ -1,3 +1,4 @@
+import { SafetyModule } from "./safety/safety.module";
 import { Module } from "@nestjs/common";
 import { EnvironmentModule } from "./config/environment.module";
 import { HealthController } from "./health.controller";
@@ -20,6 +21,7 @@ import { ExpertApprovalModule } from "./expert-admin/expert-approval.module";
     PreferencesModule,
     ConsentModule,
     VideoModule,
+    SafetyModule,
     ExpertApprovalModule,
   ],
   controllers: [HealthController],
