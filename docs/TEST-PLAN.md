@@ -2,6 +2,42 @@
 
 Each feature needs valid inputs, invalid inputs, unauthorized access, state/race tests, UI feedback states, and audit/revoke behavior when relevant.
 
+## C033 - READY video assignment
+
+Contract: [ASSIGNMENT-API.md](ASSIGNMENT-API.md). Use synthetic qualification and
+policy providers in disposable PostgreSQL schemas only; no production MFA bypass.
+
+- Deny non-MODERATOR/inactive/unverified/revoked/expired sessions and forged fields.
+- Require READY/non-deleted video, eligible owner, both authoritative consents,
+  valid storage generation, eligible expert, approved current credential/evidence,
+  no self-review and no bilateral block. No invented availability/workload quota.
+- Check credential revision, approval/evidence expiry, explicit null/future UTC
+  dates, dueAt <= expiresAt and qualification validity ceilings.
+- Let session, qualification, evidence and assignment dates expire during source
+  I/O or a proven User-lock wait; use a fresh PostgreSQL clock immediately before
+  mutation and assert no assignment/event/success audit/idempotency receipt.
+- Persist review subject/generation; prove withdrawal/re-grant never validates the
+  old generation. Preserve C031 immutable snapshot/event/ID-reservation protections.
+- Same actor/key/canonical payload replays the original receipt with no new event;
+  different payload conflicts, other actors have independent key scopes. Replay
+  after soft/hard video deletion or withdrawal must not recreate or authorize work.
+- Concurrent duplicates have one event; competing creates have one winner/409;
+  SUBMITTED remains active. Race against real owner deletion, consent withdrawal
+  and reapproval using deterministic test barriers under the shared locks. Observe
+  pg_blocking_pids/pg_stat_activity contention before release; test the competing
+  transaction held before COMMIT as well as assignment-first ordering, including
+  withdrawal/re-consent generation and historical-receipt consequences.
+- Inject failure on final receipt persistence; verify rollback of assignment,
+  event, issued-ID reservation, audit and idempotency result. No automatic retry.
+- Fresh migration and upgrade preserve old data/events with NULL legacy bindings;
+  deliberately fail after DDL and assert rollback. Redeploy is a no-op.
+- Run C031/C032/T04/Auth/Video regressions, Prisma, TypeScript, builds and diff checks;
+  report missing SMTP/MinIO services as NOT RUN, not successful provider acceptance.
+
+```text
+npm run test:integration --workspace apps/api -- --runTestsByPath test/assignment-api.integration-spec.ts test/assignment-migration.integration-spec.ts
+```
+
 ## C032 - moderator expert approval
 
 Contract: [EXPERT-APPROVAL.md](EXPERT-APPROVAL.md). Tests use server-injected

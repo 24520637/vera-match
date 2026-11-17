@@ -7,9 +7,12 @@ import { ExpertApprovalRateLimiter, ExpertApprovalRequestGuard } from "./expert-
 import { ExpertApprovalService } from "./expert-approval.service";
 import { ExpertApprovalRegistry, ExpertEvidenceSource } from "./expert-approval.sources";
 import type { Request, Response, NextFunction } from "express";
+import { ConsentModule } from "../consent/consent.module";
+import { AssignmentController } from "./assignment.controller";
+import { AssignmentService } from "./assignment.service";
 
-@Module({ imports: [AuthModule, DatabaseModule, EnvironmentModule], controllers: [ExpertApprovalController],
-  providers: [ExpertApprovalService, ExpertApprovalRegistry, ExpertEvidenceSource, ExpertApprovalRateLimiter, ExpertApprovalRequestGuard] })
+@Module({ imports: [AuthModule, DatabaseModule, EnvironmentModule, ConsentModule], controllers: [ExpertApprovalController, AssignmentController],
+  providers: [ExpertApprovalService, ExpertApprovalRegistry, ExpertEvidenceSource, ExpertApprovalRateLimiter, ExpertApprovalRequestGuard, AssignmentService] })
 export class ExpertApprovalModule implements NestModule {
   configure(consumer: MiddlewareConsumer) {
     consumer.apply((_request: Request, response: Response, next: NextFunction) => {
@@ -18,6 +21,6 @@ export class ExpertApprovalModule implements NestModule {
       response.setHeader("Referrer-Policy", "no-referrer");
       response.vary("Cookie");
       next();
-    }).forRoutes(ExpertApprovalController);
+    }).forRoutes(ExpertApprovalController, AssignmentController);
   }
 }

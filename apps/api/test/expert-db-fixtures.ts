@@ -4,6 +4,11 @@ import { execFileSync } from "node:child_process";
 import { resolve } from "node:path";
 
 export const actor = { subject: "synthetic-moderator-subject" };
+// Historical C031 schemas intentionally lack later C033 columns. Keep their
+// Prisma return projection limited to the fields that existed at that baseline.
+const assignmentSelect = { id: true, videoId: true, expertId: true, assignedById: true,
+  assignedByEvidence: true, credentialApprovalId: true, revision: true, eventFromStatus: true,
+  eventTransactionId: true, status: true, dueAt: true, expiresAt: true, cancelledAt: true, createdAt: true } as const;
 export function evidence(content = "SYNTHETIC TEST EVIDENCE ONLY") {
   return { kind: "SNAPSHOT", content, sha256: createHash("sha256").update(content).digest("hex") };
 }
@@ -52,19 +57,19 @@ export async function expectDatabaseError(operation: Promise<unknown>, message: 
 export async function assign(p: PrismaClient, seed: Awaited<ReturnType<typeof seedExpert>>) {
   return p.$transaction(async tx => {
     const row = await tx.expertAssignment.create({ data: { videoId: seed.video.id, expertId: seed.expert.id,
-      assignedById: seed.moderator.id, assignedByEvidence: actor, credentialApprovalId: seed.approval.id } });
+      assignedById: seed.moderator.id, assignedByEvidence: actor, credentialApprovalId: seed.approval.id }, select: assignmentSelect });
     await assignmentEvent(tx, row.id, null);
     return row;
   });
 }
 export async function transition(p: PrismaClient, id: string, revision: bigint, status: AssignmentStatus) {
   return p.$transaction(async tx => {
-    const before = await tx.expertAssignment.findUniqueOrThrow({ where: { id } });
+    const before = await tx.expertAssignment.findUniqueOrThrow({ where: { id }, select: { status: true } });
     const changed = await tx.expertAssignment.updateMany({ where: { id, revision }, data: {
       status, revision: { increment: 1 }, cancelledAt: status === "CANCELLED" ? new Date() : null } });
     if (changed.count !== 1) throw new Error("RESOURCE_REVISION_CONFLICT");
     await assignmentEvent(tx, id, before.status);
-    return tx.expertAssignment.findUniqueOrThrow({ where: { id } });
+    return tx.expertAssignment.findUniqueOrThrow({ where: { id }, select: assignmentSelect });
   });
 }
 

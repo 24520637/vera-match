@@ -18,6 +18,29 @@ export class ConsentAccessService {
       (!policy.testOnly || this.environment.values.nodeEnv === "test") &&
       policy.algorithm === "SHA-256" && policy.encoding === "UTF-8" && policyDigest(policy.content) === policy.digest;
   }
+  /** Caller must already hold this owner's User row lock in its transaction.
+   * Never opens a nested transaction or substitutes a cached projection.
+   */
+  async requireInTransaction(tx: Prisma.TransactionClient, userId: string, purposes: readonly ConsentPurpose[]) {
+    await requireConsentMember(tx, userId);
+    for (const purpose of purposes) {
+      if (!await this.allowed(tx, userId, purpose))
+        throw new ForbiddenException({ code: "CONSENT_REQUIRED", message: "Current consent is required." });
+    }
+    const ledger = await tx.consentLedger.findUnique({ where: { userId } });
+    if (!ledger) throw new ForbiddenException({ code: "CONSENT_REQUIRED", message: "Current consent is required." });
+    return { subjectId: ledger.subjectId, version: ledger.version };
+  }
+  /** Permanent withdrawal barrier for a previously captured generation. Re-grant
+   * does not erase tasks/history. Call under the same owner lock as authorization.
+   */
+  async requireGenerationInTransaction(tx: Prisma.TransactionClient, userId: string, subjectId: string | null,
+    version: bigint | null, purpose: ConsentPurpose) {
+    const ledger = await tx.consentLedger.findUnique({ where: { userId } });
+    if (!ledger || !subjectId || version === null || version < 0n || subjectId !== ledger.subjectId || version > ledger.version ||
+      await tx.consentWithdrawalTask.count({ where: { subjectId, purpose, version: { gt: version } } }))
+      throw new ForbiddenException({ code: "CONSENT_GENERATION_WITHDRAWN", message: "This authorization generation is no longer valid." });
+  }
   isAllowed(userId: string, purpose: ConsentPurpose) {
     return consentStorage(() => this.prisma.$transaction(async tx => {
       try { await requireConsentMember(tx, userId); }

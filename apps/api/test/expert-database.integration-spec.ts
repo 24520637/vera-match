@@ -36,7 +36,8 @@ describe("C031 credential and assignment persistence", () => {
       videoId: other.video.id, expertId: other.expert.id, assignedByEvidence: actor,
       credentialApprovalId: other.approval.id } })).rejects.toMatchObject({ code: "P2002" });
     await expectDatabaseError(db.client.$executeRaw`DELETE FROM "ExpertAssignmentIdentity" WHERE "assignmentId"=${row.id}`, "append-only");
-    await expectDatabaseError(db.client.$executeRawUnsafe('TRUNCATE "ExpertAssignmentIdentity"'), "append-only");
+    // C033 adds a receipt FK: even CASCADE must not bypass issued-ID protection.
+    await expectDatabaseError(db.client.$executeRawUnsafe('TRUNCATE "ExpertAssignmentIdentity" CASCADE'), "append-only");
   });
 
   it("rejects actor identity reset and TRUNCATE but allows User account deletion", async () => {

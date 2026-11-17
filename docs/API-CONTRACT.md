@@ -1,5 +1,9 @@
 # API contract — VERA Match
 
+**C033 implementation:** [Assignment API](ASSIGNMENT-API.md) defines
+`POST /expert-admin/assignments`, review-consent generation binding and durable
+idempotency. It is synthetic-test-only until real staff assurance is integrated.
+
 **C032 implementation:** The moderator-only expert approval endpoint and its
 fail-closed evidence-source boundary are documented in
 [Expert approval](EXPERT-APPROVAL.md). It introduces no member video access or MFA
@@ -65,10 +69,10 @@ not changes to current auth.
 | POST      | `/videos/upload-intent`            | Member                  | Consent, MIME/size validation; short-lived owner-scoped upload URL                                        |
 | POST      | `/videos/:id/confirm`              | Owner                   | Check actual object metadata; set READY only after verification                                           |
 | GET       | `/videos/me`                       | Owner                   | Private metadata list                                                                                     |
-| POST      | `/videos/:id/playback`             | Owner / assigned expert | Current authorization and consent → short-lived signed URL                                                |
-| DELETE    | `/videos/:id`                      | Owner                   | Revoke access, cancel dependent assignments, begin deletion workflow                                      |
-| POST      | `/expert/assignments`              | Moderator               | `{videoId,expertId,dueAt}`; verify eligibility, video status, owner consent                               |
-| GET       | `/expert/assignments/me`           | Expert                  | Only caller's currently assigned tasks                                                                    |
+| POST      | `/videos/:id/playback`             | Owner                   | Current authorization and consent; expert playback deferred to C034/C050                                  |
+| DELETE    | `/videos/:id`                      | Owner                   | Revoke owner access and enqueue cleanup; dependent assignment cancellation remains C051                   |
+| POST      | `/expert-admin/assignments`        | Moderator               | C033: strict DTO, both consents, generation, qualification revision and Idempotency-Key; synthetic only    |
+| GET       | `/expert/assignments/me`           | Expert (planned)        | C034 future route, not implemented by C033                                                                |
 | POST      | `/expert/reviews/:id/observations` | Assigned expert         | Time range, category, evidence/context, optimistic version                                                |
 | PATCH     | `/expert/reviews/:id/draft`        | Assigned expert         | Draft-only edit; version check and audit                                                                  |
 | POST      | `/expert/reviews/:id/submit`       | Assigned expert         | Required summary/limitations; freeze submitted snapshot                                                   |
