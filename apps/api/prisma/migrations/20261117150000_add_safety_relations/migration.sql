@@ -29,6 +29,7 @@ CREATE FUNCTION safety_audit_immutable() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
  IF TG_OP='TRUNCATE' THEN RAISE EXCEPTION 'Safety audit cannot be truncated' USING ERRCODE='23514'; END IF;
  IF left(OLD.action,7)='SAFETY_' THEN RAISE EXCEPTION 'Safety audit is append-only' USING ERRCODE='23514'; END IF;
+ IF TG_OP='UPDATE' THEN RETURN NEW; END IF;
  RETURN OLD;
 END $$;
 CREATE TRIGGER "AuditLog_safety_immutable" BEFORE UPDATE OR DELETE ON "AuditLog" FOR EACH ROW EXECUTE FUNCTION safety_audit_immutable();

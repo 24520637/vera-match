@@ -132,6 +132,24 @@ describe("C061 safety database / isolated PostgreSQL", () => {
       }),
     ).rejects.toThrow();
   });
+  it("preserves update and delete behavior for audit rows outside the safety namespace", async () => {
+    const audit = await db.client.auditLog.create({
+      data: { action: "AUTH_SYNTHETIC_EVENT", subjectType: "Session" },
+    });
+    const changed = await db.client.auditLog.update({
+      where: { id: audit.id },
+      data: { subjectType: "SyntheticSession" },
+    });
+    expect(changed.subjectType).toBe("SyntheticSession");
+    expect(
+      (await db.client.auditLog.findUnique({ where: { id: audit.id } }))
+        ?.subjectType,
+    ).toBe("SyntheticSession");
+    await db.client.auditLog.delete({ where: { id: audit.id } });
+    expect(
+      await db.client.auditLog.findUnique({ where: { id: audit.id } }),
+    ).toBeNull();
+  });
   it("upgrades legacy reports without inventing a reason classification or losing content", async () => {
     const legacy = await createExpertUpgradeDatabase();
     try {
