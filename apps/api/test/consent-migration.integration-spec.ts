@@ -22,10 +22,14 @@ describe("C023 additive migration upgrade", () => {
       cpSync(join(prisma, "schema.prisma"), join(temp, "schema.prisma"));
       mkdirSync(join(temp, "migrations"));
       cpSync(join(prisma, "migrations/migration_lock.toml"), join(temp, "migrations/migration_lock.toml"));
-      for (const name of readdirSync(join(prisma, "migrations")).filter(name => /^\d+_/.test(name) && name !== migration)) {
+      // The legacy baseline must exclude this migration and all later features, including C031.
+      for (const name of readdirSync(join(prisma, "migrations")).filter(name => /^\d+_/.test(name) && name < migration)) {
         cpSync(join(prisma, "migrations", name), join(temp, "migrations", name), { recursive: true });
       }
       deploy(join(temp, "schema.prisma"));
+      const baseline = await client.$queryRaw<{ migration_name: string }[]>`SELECT migration_name FROM "_prisma_migrations" WHERE finished_at IS NOT NULL`;
+      expect(baseline.length).toBeGreaterThan(0);
+      expect(baseline.every(row => row.migration_name < migration)).toBe(true);
       const user = await client.user.create({ data: { email: "synthetic-upgrade@example.invalid", passwordHash: "synthetic-password-hash" } });
       await client.$executeRaw`INSERT INTO "Consent" (id, "userId", purpose, granted, "grantedAt", "updatedAt")
         VALUES ('synthetic-legacy', ${user.id}, 'VIDEO_STORAGE', true, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`;

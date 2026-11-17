@@ -98,6 +98,9 @@ model User {
   consentLedger ConsentLedger?
   videos Video[]
   expertAssignments ExpertAssignment[] @relation("AssignedExpert")
+  createdAssignments ExpertAssignment[] @relation("AssignmentCreator")
+  expertCredential ExpertCredential?
+  expertActorIdentity ExpertActorIdentity?
   @@index([status, role])
 }
 
@@ -321,14 +324,124 @@ model ExpertAssignment {
   video Video @relation(fields: [videoId], references: [id], onDelete: Cascade)
   expertId String
   expert User @relation("AssignedExpert", fields: [expertId], references: [id])
-  assignedById String
+  assignedById String?
+  assignedBy User? @relation("AssignmentCreator", fields: [assignedById], references: [id], onDelete: SetNull)
+  // Nullable only for pre-C031 rows; SQL requires evidence/binding for new assignments.
+  assignedByEvidence Json?
+  credentialApprovalId String? @db.Uuid
+  credentialApproval ExpertCredentialApproval? @relation(fields: [credentialApprovalId], references: [id], onDelete: Restrict)
+  revision BigInt @default(0)
+  // Internal mutation witness; not part of future API DTOs or retained snapshots.
+  eventFromStatus AssignmentStatus?
+  eventTransactionId String?
   status AssignmentStatus @default(ASSIGNED)
   dueAt DateTime?
+  expiresAt DateTime?
   cancelledAt DateTime?
   createdAt DateTime @default(now())
   review ExpertReview?
+  // SQL migration enforces one active primary assignment per video with a partial unique index.
   @@index([expertId, status])
   @@index([videoId, status])
+  @@index([assignedById])
+  @@index([credentialApprovalId])
+}
+
+enum ExpertCredentialStatus {
+  PENDING
+  APPROVED
+  REVOKED
+}
+
+// Issued assignment IDs survive deletion of live resources; no cascading foreign key.
+model ExpertAssignmentIdentity {
+  assignmentId String @id
+}
+
+// Live identity mapping only; retained evidence carries the opaque subject.
+model ExpertActorIdentity {
+  userId String @id
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  subjectId String @unique @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+}
+
+enum ExpertCredentialEventKind {
+  CREATED
+  TRAINING_RECORDED
+  CONFIDENTIALITY_RECORDED
+  VERIFIED
+  APPROVED
+  REVOKED
+}
+
+// Live identity mapping only. Retained evidence never cascades through this row.
+model ExpertCredential {
+  userId String @id
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  subjectId String @unique @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  status ExpertCredentialStatus @default(PENDING)
+  revision BigInt @default(0)
+  approvalId String? @db.Uuid
+  approval ExpertCredentialApproval? @relation(fields: [approvalId], references: [id], onDelete: Restrict)
+  revokedAt DateTime?
+}
+
+// Approval is a new immutable instance each time, never a reusable eligibility flag.
+model ExpertCredentialApproval {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  subjectId String @db.Uuid
+  trainingVersion String
+  policyVersion String
+  trainingEvidence Json
+  confidentialityEvidence Json
+  verifiedByEvidence Json
+  verifiedAt DateTime
+  approvedByEvidence Json
+  approvedAt DateTime @default(now())
+  expiresAt DateTime?
+  credentials ExpertCredential[]
+  assignments ExpertAssignment[]
+  credentialEvents ExpertCredentialEvent[]
+  assignmentEvents AssignmentEvent[]
+  @@index([subjectId, approvedAt])
+}
+
+// No User/current-credential FK: deletion cannot erase independently retained evidence.
+model ExpertCredentialEvent {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  subjectId String @db.Uuid
+  revision BigInt
+  kind ExpertCredentialEventKind
+  status ExpertCredentialStatus
+  approvalId String? @db.Uuid
+  approval ExpertCredentialApproval? @relation(fields: [approvalId], references: [id], onDelete: Restrict)
+  actorEvidence Json
+  evidence Json
+  trainingVersion String?
+  policyVersion String?
+  verifiedAt DateTime?
+  expiresAt DateTime?
+  revokedAt DateTime?
+  reason String?
+  // SQL BEFORE INSERT always replaces caller input with database UTC recording time.
+  createdAt DateTime @default(now())
+  @@unique([subjectId, revision])
+}
+
+// assignmentId is an opaque historical locator, deliberately not a cascading FK.
+model AssignmentEvent {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  assignmentId String
+  revision BigInt
+  fromStatus AssignmentStatus?
+  toStatus AssignmentStatus
+  credentialApprovalId String? @db.Uuid
+  credentialApproval ExpertCredentialApproval? @relation(fields: [credentialApprovalId], references: [id], onDelete: Restrict)
+  actorEvidence Json
+  snapshot Json
+  // SQL BEFORE INSERT always replaces caller input with database UTC recording time.
+  createdAt DateTime @default(now())
+  @@unique([assignmentId, revision])
 }
 model ExpertReview {
   id String @id @default(cuid())

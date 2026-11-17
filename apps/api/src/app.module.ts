@@ -8,6 +8,7 @@ import { QuestionnaireModule } from "./questionnaire/questionnaire.module";
 import { PreferencesModule } from "./preferences/preferences.module";
 import { ConsentModule } from "./consent/consent.module";
 import { VideoModule } from "./video/video.module";
+import { ExpertApprovalModule } from "./expert-admin/expert-approval.module";
 
 @Module({
   imports: [
@@ -19,6 +20,7 @@ import { VideoModule } from "./video/video.module";
     PreferencesModule,
     ConsentModule,
     VideoModule,
+    ExpertApprovalModule,
   ],
   controllers: [HealthController],
 })
