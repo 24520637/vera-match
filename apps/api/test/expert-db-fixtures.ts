@@ -10,7 +10,8 @@ export function evidence(content = "SYNTHETIC TEST EVIDENCE ONLY") {
 export async function seedExpert(p: PrismaClient) {
   const expert = await p.user.create({ data: { email: `${randomUUID()}@example.invalid`, passwordHash: "synthetic-only", role: "EXPERT" } });
   const moderator = await p.user.create({ data: { email: `${randomUUID()}@example.invalid`, passwordHash: "synthetic-only", role: "MODERATOR" } });
-  const video = await p.video.create({ data: { ownerId: expert.id, bucket: "synthetic-private", objectKey: randomUUID(), mimeType: "video/mp4" } });
+  // Legacy upgrade schemas intentionally lack later Video columns.
+  const video = await p.video.create({ data: { ownerId: expert.id, bucket: "synthetic-private", objectKey: randomUUID(), mimeType: "video/mp4" }, select: { id: true } });
   await p.$transaction(async tx => {
     const row = await tx.expertCredential.create({ data: { userId: expert.id } });
     await credentialEvent(tx, row, "CREATED");

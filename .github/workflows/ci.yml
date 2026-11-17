@@ -59,6 +59,28 @@ jobs:
           done
           cat "$RUNNER_TEMP/vera-mailpit.log"
           exit 1
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.27.4"
+          cache: false
+      - name: Build and start pinned native MinIO (loopback only, no Docker)
+        shell: bash
+        env:
+          MINIO_ROOT_USER: synthetic-ci
+          MINIO_ROOT_PASSWORD: synthetic-ci-only-not-a-secret
+          MINIO_API_CORS_ALLOW_ORIGIN: http://localhost:3100,http://127.0.0.1:3100
+        run: |
+          git clone --depth 1 --branch RELEASE.2025-10-15T17-29-55Z https://github.com/minio/minio.git "$RUNNER_TEMP/vera-minio-source"
+          test "$(git -C "$RUNNER_TEMP/vera-minio-source" rev-parse HEAD)" = "9e49d5e7a648f00e26f2246f4dc28e6b07f8c84a"
+          (cd "$RUNNER_TEMP/vera-minio-source" && CGO_ENABLED=0 go build -trimpath -o "$RUNNER_TEMP/vera-minio" .)
+          mkdir -p "$RUNNER_TEMP/vera-minio-data"
+          "$RUNNER_TEMP/vera-minio" server "$RUNNER_TEMP/vera-minio-data" --address 127.0.0.1:9000 --console-address 127.0.0.1:9001 --quiet > "$RUNNER_TEMP/vera-minio.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/vera-minio.pid"
+          for attempt in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:9000/minio/health/live; then exit 0; fi
+            sleep 1
+          done
+          exit 1
       - name: Apply existing migrations to disposable CI database
         run: npx prisma migrate deploy --schema apps/api/prisma/schema.prisma
         env:
@@ -96,12 +118,21 @@ jobs:
           MINIO_ROOT_USER: synthetic-ci
           MINIO_ROOT_PASSWORD: synthetic-ci-only-not-a-secret
           PLAYWRIGHT_HTML_OUTPUT_DIR: playwright-report/member
+      - name: Verify private video against native MinIO and real API
+        run: node scripts/run-video-e2e.cjs
+        env:
+          DATABASE_URL: postgresql://vera_ci:synthetic-ci-only@127.0.0.1:5433/vera_t01_test?schema=public
+          MINIO_ROOT_USER: synthetic-ci
+          MINIO_ROOT_PASSWORD: synthetic-ci-only-not-a-secret
+          PLAYWRIGHT_HTML_OUTPUT_DIR: playwright-report/video
       - name: Save UI test report
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: ui-test-report
-          path: apps/web/playwright-report/
+          path: |
+            apps/web/playwright-report/
+            apps/web/test-results/**/private-video-review.png
           retention-days: 7
       - name: Stop native CI Mailpit
         if: always()
@@ -109,6 +140,13 @@ jobs:
         run: |
           if [[ -f "$RUNNER_TEMP/vera-mailpit.pid" ]]; then
             kill "$(cat "$RUNNER_TEMP/vera-mailpit.pid")"
+          fi
+      - name: Stop native CI MinIO
+        if: always()
+        shell: bash
+        run: |
+          if [[ -f "$RUNNER_TEMP/vera-minio.pid" ]]; then
+            kill "$(cat "$RUNNER_TEMP/vera-minio.pid")"
           fi
       - name: Stop native CI PostgreSQL
         if: always()

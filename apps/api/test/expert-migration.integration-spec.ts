@@ -5,7 +5,8 @@ async function legacy(db: Awaited<ReturnType<typeof createExpertUpgradeDatabase>
   const id = randomUUID(), p = db.client;
   const expert = await p.user.create({ data: { email: `${id}@example.invalid`, passwordHash: "synthetic-only", role: "EXPERT" } });
   const moderator = await p.user.create({ data: { email: `${randomUUID()}@example.invalid`, passwordHash: "synthetic-only", role: "MODERATOR" } });
-  const video = await p.video.create({ data: { ownerId: expert.id, bucket: "synthetic-private", objectKey: id, mimeType: "video/mp4" } });
+  // Legacy upgrade schemas intentionally lack later Video columns.
+  const video = await p.video.create({ data: { ownerId: expert.id, bucket: "synthetic-private", objectKey: id, mimeType: "video/mp4" }, select: { id: true } });
   const assignmentId = randomUUID();
   await p.$executeRaw`INSERT INTO "ExpertAssignment" (id,"videoId","expertId","assignedById","dueAt")
     VALUES (${assignmentId},${video.id},${expert.id},${orphan ? "missing-actor" : moderator.id},'2026-01-01'::timestamp)`;

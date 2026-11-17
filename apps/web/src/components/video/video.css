@@ -1,0 +1,35 @@
+.private-videos {
+  padding-block: var(--space-7);
+}
+.video-upload {
+  max-width: 48rem;
+  padding-block: var(--space-5);
+}
+.video-upload video,
+.private-videos video {
+  display: block;
+  width: 100%;
+  max-height: 30rem;
+  background: var(--color-ink);
+  border-radius: var(--radius-control);
+}
+.video-upload progress {
+  display: block;
+  width: 100%;
+  accent-color: var(--color-plum);
+}
+.video-library {
+  max-width: 48rem;
+  padding-block: var(--space-6);
+}
+.video-list {
+  list-style: none;
+  padding: 0;
+}
+.video-list > li {
+  padding-block: var(--space-5);
+  border-bottom: 1px solid var(--color-line);
+}
+.video-list p {
+  overflow-wrap: anywhere;
+}

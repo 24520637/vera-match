@@ -7,10 +7,21 @@ import { ProfileModule } from "./profile/profile.module";
 import { QuestionnaireModule } from "./questionnaire/questionnaire.module";
 import { PreferencesModule } from "./preferences/preferences.module";
 import { ConsentModule } from "./consent/consent.module";
+import { VideoModule } from "./video/video.module";
 import { ExpertApprovalModule } from "./expert-admin/expert-approval.module";
 
 @Module({
-  imports: [EnvironmentModule, DatabaseModule, AuthModule, ProfileModule, QuestionnaireModule, PreferencesModule, ConsentModule, ExpertApprovalModule],
+  imports: [
+    EnvironmentModule,
+    DatabaseModule,
+    AuthModule,
+    ProfileModule,
+    QuestionnaireModule,
+    PreferencesModule,
+    ConsentModule,
+    VideoModule,
+    ExpertApprovalModule,
+  ],
   controllers: [HealthController],
 })
 export class AppModule {}

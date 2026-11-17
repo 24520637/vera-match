@@ -284,6 +284,10 @@ model Video {
   owner User @relation(fields: [ownerId], references: [id], onDelete: Cascade)
   bucket String
   objectKey String @unique
+  uploadKey String? @unique
+  uploadExpiresAt DateTime?
+  cleanupCompletedAt DateTime?
+  storageConsentVersion BigInt?
   mimeType String
   sizeBytes Int?
   durationMs Int?
@@ -292,6 +296,27 @@ model Video {
   deletedAt DateTime?
   assignments ExpertAssignment[]
   @@index([ownerId, status])
+}
+// Durable storage locators survive account/metadata deletion. Never expose to clients.
+model VideoWithdrawalReceipt {
+  withdrawalTaskId String @id @db.Uuid
+  processedAt DateTime @default(now())
+}
+model VideoCleanupTask {
+  id String @id @default(cuid())
+  videoId String @unique
+  bucket String
+  objectKey String
+  uploadKey String?
+  uploadExpiresAt DateTime?
+  removeFinal Boolean @default(true)
+  status String @default("PENDING")
+  attempts Int @default(0)
+  nextAttemptAt DateTime @default(now())
+  lastErrorCode String?
+  completedAt DateTime?
+  createdAt DateTime @default(now())
+  @@index([status, nextAttemptAt])
 }
 model ExpertAssignment {
   id String @id @default(cuid())

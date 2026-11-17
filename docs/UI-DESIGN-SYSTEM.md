@@ -1,5 +1,24 @@
 # VERA Match UI design system
 
+## Private video adoption
+
+The private video workspace reuses the mist/plum palette, Newsreader headings,
+Instrument Sans text, shared controls, notices, dialog and member navigation.
+One focused upload area precedes simple saved-video rows; no new theme or repeated
+card grid. Camera access starts only from an explicit button, with a file fallback.
+Native video controls provide keyboard playback, and recording tracks/object URLs
+are released when no longer needed. Local preview and confirmed storage are named
+separately. Progress reports actual byte transfer, followed by server verification.
+
+Deletion uses the shared confirmation dialog. Access removal, pending object
+cleanup and verified current absence have distinct text. Withdrawal clears new
+playback authorization; URLs stay in memory, expire without automatic renewal,
+and are cleared on visibility/session changes. Unknown network outcomes ask the
+member to refresh before retrying. No UI claims immediate recall of bearer URLs,
+streams or buffered media. Synthetic camera desktop/mobile E2E and scoped axe
+checks cover the implemented interface; they do not certify captions/transcripts
+for arbitrary future user media or the separate expert review workflow.
+
 **Implementation:** Shared UI foundation merged in PR #4. Email authentication now reuses these components; profile, consent, matching and review services remain separate features. PR merge status does not establish a specific person’s visual approval.
 
 ## Direction: a considered conversation
