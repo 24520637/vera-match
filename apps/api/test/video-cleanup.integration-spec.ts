@@ -1,3 +1,4 @@
+import { VideoService } from "../src/video/video.service";
 import { Logger } from "@nestjs/common";
 import { Prisma, PrismaClient } from "@prisma/client";
 import { config } from "dotenv";
@@ -364,4 +365,96 @@ describe("Video cleanup outage recovery / disposable PostgreSQL / native MinIO",
       "VIDEO_CLEANUP_SCAN_RECOVERED",
     );
   });
+
+  test.each(["before", "after"] as const)(
+    "owner DELETE %s claim preserves full cleanup until provider verification",
+    async (timing) => {
+      const { video, task, url } = await fixture();
+      const uploadKey = storage.key("incoming"),
+        uploadExpiresAt = new Date(0);
+      await database.client.user.update({
+        where: { id: video.ownerId },
+        data: { status: "ACTIVE", emailVerifiedAt: new Date() },
+      });
+      await database.client.video.update({
+        where: { id: video.id },
+        data: { status: "READY", deletedAt: null, uploadKey, uploadExpiresAt },
+      });
+      await database.client.videoCleanupTask.update({
+        where: { id: task.id },
+        data: { removeFinal: false, uploadKey, uploadExpiresAt },
+      });
+      const remove = new VideoService(
+        database.client as PrismaService,
+        null!,
+        storage,
+      );
+      const delegate = database.client.videoCleanupTask;
+      const update = delegate.updateMany.bind(delegate);
+      let requeued = false;
+      const updateClaim = async (
+        args: Prisma.VideoCleanupTaskUpdateManyArgs,
+      ) => {
+        if (
+          timing === "after" &&
+          !requeued &&
+          args.where?.id === task.id &&
+          args.data.status === "RUNNING"
+        ) {
+          requeued = true;
+          const result = await update(args);
+          await remove.remove(video.ownerId, video.id);
+          return result;
+        }
+        return update(args);
+      };
+      const proxy = new Proxy(database.client as PrismaService, {
+        get(target, key) {
+          if (key === "videoCleanupTask")
+            return new Proxy(delegate, {
+              get(model, method) {
+                if (method === "updateMany") return updateClaim;
+                if (method === "findMany")
+                  return async (args: Prisma.VideoCleanupTaskFindManyArgs) => {
+                    const rows = await model.findMany(args);
+                    if (
+                      timing === "before" &&
+                      !requeued &&
+                      rows.some((row) => row.id === task.id)
+                    ) {
+                      requeued = true;
+                      await remove.remove(video.ownerId, video.id);
+                    }
+                    return rows;
+                  };
+                const value = Reflect.get(model, method);
+                return typeof value === "function" ? value.bind(model) : value;
+              },
+            });
+          const value = Reflect.get(target, key);
+          return typeof value === "function" ? value.bind(target) : value;
+        },
+      });
+      const worker = new VideoCleanupService(proxy, storage, environment);
+      await worker.runOnce();
+      expect(requeued).toBe(true);
+      expect(
+        await delegate.findUniqueOrThrow({ where: { id: task.id } }),
+      ).toMatchObject({
+        status: "PENDING",
+        removeFinal: true,
+        completedAt: null,
+      });
+      expect(
+        (
+          await database.client.video.findUniqueOrThrow({
+            where: { id: video.id },
+          })
+        ).cleanupCompletedAt,
+      ).toBeNull();
+      expect((await fetch(url)).status).toBe(200);
+      await worker.runOnce();
+      await verifyComplete(video.id, url);
+    },
+  );
 });

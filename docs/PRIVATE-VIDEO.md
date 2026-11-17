@@ -180,3 +180,14 @@ or shared consent/assignment contracts is changed by this readiness fix.
   multi-instance protection is claimed. Review real proxy topology before deploy.
 - Use synthetic/licensed fixtures only. Real private data requires approved
   policies, retention, maintained storage, MFA and completed expert integration.
+
+### Cleanup claim and owner deletion races
+
+A worker claims only the exact payload it scanned: video/bucket/object locators,
+staging expiry and whether the final object must be removed, as well as status
+and attempt count. Owner DELETE may upgrade staging-only cleanup to full removal.
+If that happens before claim, the stale claim is skipped and the durable task
+remains pending for the next scan. If deletion requeues after claim, the old
+worker lease cannot finalize the new request. PostgreSQL/MinIO regression tests
+exercise both orderings through the real owner deletion service and verify that
+completion is recorded only after final-object absence is confirmed.
