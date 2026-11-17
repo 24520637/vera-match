@@ -46,3 +46,22 @@ in their own transaction after the same sorted participant locks. No positive
 result is a cached grant. The actual matching/review access routes do not exist
 yet: endpoint-level immediate exclusion is BLOCKED until Phuc integrates and
 tests these helpers. Existing MatchPair/decision history is not blindly deleted.
+
+## C063 report submission
+
+POST /reports requires MEMBER authentication and exactly targetUserId, reason,
+details. Reasons: HARASSMENT, INAPPROPRIATE_CONTENT, IMPERSONATION, SPAM, OTHER.
+These are technical intake categories, not findings or production policy approval.
+Details are NFC/newline-normalized plain text, 10-2000 Unicode code points; control
+characters and obvious private capability/credential markers are rejected.
+Do not include passwords, private video links or unrelated personal information.
+No attachment, media fetch, HTML execution or client-supplied authority is supported.
+
+A 202 message acknowledges receipt of the request without disclosing target
+existence/availability or returning report evidence/status/IDs. Eligible targets
+create an OPEN report and redacted audit in one transaction. Absent/inactive or
+unverified targets create no report but receive the same message. This is not
+constant-time lookup or a claim that a moderation decision was made. Reporting
+remains available after blocking; five requests/member/minute are process-local
+MVP quotas and never consume the separate unblock bucket. No automatic POST
+replay or durable duplicate-report suppression is claimed.

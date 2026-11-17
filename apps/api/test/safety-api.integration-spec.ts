@@ -1,3 +1,4 @@
+import { SafetyRateLimiter } from "../src/safety/safety-request.guard";
 import { INestApplication } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import { randomBytes, randomUUID } from "node:crypto";
@@ -328,5 +329,143 @@ describe("Safety API / real sessions / isolated PostgreSQL", () => {
       new Set([...first.blocks, ...next.blocks].map((r) => r.targetUserId))
         .size,
     ).toBe(55);
+  });
+
+  it("stores bounded private reports and returns identical generic acknowledgements for unavailable targets", async () => {
+    const a = await account(),
+      b = await account();
+    const body = {
+      targetUserId: b.id,
+      reason: "HARASSMENT",
+      details: "SYNTHETIC private report details",
+    };
+    const sent = await request(a.cookie, "reports", "POST", body);
+    expect(sent.status).toBe(202);
+    const acknowledgement = await sent.json();
+    expect(acknowledgement).toEqual({
+      message: "Your report request was received.",
+    });
+    expect(
+      await db.client.report.findFirst({
+        where: { reporterId: a.id, targetUserId: b.id },
+      }),
+    ).toMatchObject({
+      reason: body.details,
+      reasonCode: "HARASSMENT",
+      status: "OPEN",
+      revision: 0n,
+      moderatorId: null,
+    });
+    expect(JSON.stringify(acknowledgement)).not.toMatch(
+      /details|reporter|target|status|id/,
+    );
+    const unavailable = await request(a.cookie, "reports", "POST", {
+      ...body,
+      targetUserId: "unknown-account",
+    });
+    expect(unavailable.status).toBe(202);
+    expect(await unavailable.json()).toEqual(acknowledgement);
+    await db.client.user.update({
+      where: { id: b.id },
+      data: { status: "SUSPENDED" },
+    });
+    expect(
+      await (await request(a.cookie, "reports", "POST", body)).json(),
+    ).toEqual(acknowledgement);
+    expect(await db.client.report.count({ where: { reporterId: a.id } })).toBe(
+      1,
+    );
+  });
+  it("keeps reporting available after blocking, rejects impersonation and never echoes evidence", async () => {
+    const a = await account(),
+      b = await account();
+    await request(a.cookie, "blocks", "POST", { targetUserId: b.id });
+    const body = {
+      targetUserId: b.id,
+      reason: "SPAM",
+      details: "SYNTHETIC <script>untrusted evidence</script>",
+    };
+    expect(
+      (
+        await request(a.cookie, "reports", "POST", {
+          ...body,
+          reporterId: b.id,
+        })
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await request(a.cookie, "reports", "POST", {
+          ...body,
+          targetUserId: a.id,
+        })
+      ).status,
+    ).toBe(400);
+    expect((await request("", "reports", "POST", body)).status).toBe(401);
+    const result = await request(a.cookie, "reports", "POST", body);
+    expect(result.status).toBe(202);
+    const r = await db.client.report.findFirstOrThrow({
+      where: { reporterId: a.id },
+    });
+    expect(r.reason).toBe(body.details);
+    const audit = await db.client.auditLog.findFirstOrThrow({
+      where: { action: "SAFETY_REPORT_SUBMITTED", subjectId: r.id },
+    });
+    expect(JSON.stringify(audit)).not.toMatch(
+      /script|untrusted|SPAM|passwordHash/,
+    );
+  });
+  it("returns Retry-After without consuming independent unblock capacity", async () => {
+    const a = await account(),
+      b = await account();
+    await request(a.cookie, "blocks", "POST", { targetUserId: b.id });
+    const limiter = app.get(SafetyRateLimiter);
+    for (let i = 0; i < 5; i++)
+      limiter.consume("safety:submitReport", a.id, 5, 60000);
+    const response = await request(a.cookie, "reports", "POST", {
+      targetUserId: b.id,
+      reason: "OTHER",
+      details: "SYNTHETIC bounded details",
+    });
+    expect(response.status).toBe(429);
+    expect(Number(response.headers.get("retry-after"))).toBeGreaterThan(0);
+    expect(response.headers.get("cache-control")).toContain("no-store");
+    expect((await request(a.cookie, "blocks/" + b.id, "DELETE")).status).toBe(
+      204,
+    );
+    expect(await db.client.report.count({ where: { reporterId: a.id } })).toBe(
+      0,
+    );
+  });
+  it("rolls back report creation if the atomic safety audit fails", async () => {
+    const a = await account(),
+      b = await account();
+    await db.client.$executeRawUnsafe(
+      `CREATE FUNCTION safety_test_report_failure() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'Synthetic report audit failure'; END $$`,
+    );
+    await db.client.$executeRawUnsafe(
+      'CREATE TRIGGER safety_test_report_failure BEFORE INSERT ON "AuditLog" FOR EACH ROW EXECUTE FUNCTION safety_test_report_failure()',
+    );
+    try {
+      expect(
+        (
+          await request(a.cookie, "reports", "POST", {
+            targetUserId: b.id,
+            reason: "OTHER",
+            details: "SYNTHETIC private details",
+          })
+        ).status,
+      ).toBe(503);
+      expect(
+        await db.client.report.count({ where: { reporterId: a.id } }),
+      ).toBe(0);
+    } finally {
+      await db.client.$executeRawUnsafe(
+        'DROP TRIGGER safety_test_report_failure ON "AuditLog"',
+      );
+      await db.client.$executeRawUnsafe(
+        "DROP FUNCTION safety_test_report_failure()",
+      );
+    }
   });
 });

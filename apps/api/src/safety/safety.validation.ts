@@ -1,3 +1,4 @@
+import { ReportReason } from "@prisma/client";
 import { BadRequestException } from "@nestjs/common";
 export function invalid(field: string, message: string): never {
   throw new BadRequestException({
@@ -48,3 +49,35 @@ export function cursor(value: unknown): string | undefined {
 }
 export const nextCursor = (id: string) =>
   Buffer.from(id, "utf8").toString("base64url");
+
+export function reportInput(value: unknown) {
+  const b = object(value, ["targetUserId", "reason", "details"]),
+    targetUserId = identifier(b.targetUserId, "targetUserId");
+  if (
+    typeof b.reason !== "string" ||
+    !Object.values(ReportReason).includes(b.reason as ReportReason)
+  )
+    invalid("reason", "Choose a report reason.");
+  if (typeof b.details !== "string")
+    invalid("details", "Describe what happened in 10 to 2000 characters.");
+  const details = (b.details as string)
+    .normalize("NFC")
+    .replace(/\r\n?/g, "\n")
+    .trim();
+  if (
+    [...details].length < 10 ||
+    [...details].length > 2000 ||
+    /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(details)
+  )
+    invalid("details", "Use 10 to 2000 characters without control characters.");
+  if (
+    /x-amz-(?:signature|credential)|(?:token|password|session)=[A-Za-z0-9_%+-]{8,}/i.test(
+      details,
+    )
+  )
+    invalid(
+      "details",
+      "Remove private access links and credentials from your report.",
+    );
+  return { targetUserId, reason: b.reason as ReportReason, details };
+}

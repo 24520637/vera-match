@@ -1,3 +1,5 @@
+import { ReportController } from "./report.controller";
+import { ReportService } from "./report.service";
 import { MiddlewareConsumer, Module, NestModule } from "@nestjs/common";
 import type { Request, Response, NextFunction } from "express";
 import { AuthModule } from "../auth/auth.module";
@@ -10,9 +12,10 @@ import { SafetyAccessService } from "./safety-access.service";
 import { SafetyRateLimiter, SafetyRequestGuard } from "./safety-request.guard";
 @Module({
   imports: [AuthModule, DatabaseModule, EnvironmentModule],
-  controllers: [BlockController],
+  controllers: [BlockController, ReportController],
   providers: [
     BlockService,
+    ReportService,
     BlockAccessService,
     SafetyAccessService,
     SafetyRateLimiter,
@@ -29,6 +32,6 @@ export class SafetyModule implements NestModule {
         s.vary("Cookie");
         n();
       })
-      .forRoutes(BlockController);
+      .forRoutes(BlockController, ReportController);
   }
 }
