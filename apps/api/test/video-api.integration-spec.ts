@@ -632,6 +632,19 @@ describe("Private video / real PostgreSQL / native MinIO", () => {
     expect(
       (await request(user.cookie, `videos/${upload.id}`, {}, "DELETE")).status,
     ).toBe(202);
+    const requeued = await database.client.videoCleanupTask.findUniqueOrThrow({
+      where: { id: job.id },
+    });
+    expect(requeued.status).toBe("PENDING");
+    const metadata = (await (
+      await request(user.cookie, "videos/me", {}, "GET")
+    ).json()) as {
+      videos: { id: string; cleanupCompletedAt: string | null }[];
+    };
+    expect(
+      metadata.videos.find((video) => video.id === upload.id)
+        ?.cleanupCompletedAt,
+    ).toBeNull();
   });
   it("denies new access after actual consent withdrawal while acknowledging pre-issued bearer access", async () => {
     const user = await member();
