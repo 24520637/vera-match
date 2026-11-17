@@ -80,7 +80,46 @@ async function cleanup() {
   const { configureApplication } = require(
     resolve(root, "apps/api/dist/configure-app.js"),
   );
-  app = await NestFactory.create(AppModule, { logger: false });
+  if (process.env.VERA_SAFETY_E2E_RUN_ID) {
+    if (
+      process.env.VERA_SAFETY_E2E_RUN_ID !== runId ||
+      process.env.NODE_ENV !== "test" ||
+      url.searchParams.get("schema") !== schema
+    )
+      throw new Error("Isolated safety fixture required");
+    const { Test } = require("@nestjs/testing");
+    const { StaffAssuranceSource } = require(
+      resolve(root, "apps/api/dist/safety/staff-assurance.source.js"),
+    );
+    const module = await Test.createTestingModule({ imports: [AppModule] })
+      .overrideProvider(StaffAssuranceSource)
+      .useValue({
+        resolve: async (tx, auth) => {
+          const actor = await tx.user.findUnique({
+            where: { id: auth.user.id },
+            select: { email: true, role: true },
+          });
+          if (
+            !actor ||
+            actor.role !== "MODERATOR" ||
+            !/^safety-staff-[a-f0-9-]+@example\.invalid$/.test(actor.email)
+          )
+            return undefined;
+          return {
+            userId: auth.user.id,
+            sessionId: auth.sessionId,
+            level: "MFA",
+            verifiedAt: new Date(Date.now() - 1000),
+            expiresAt: new Date(Date.now() + 60000),
+            testOnly: true,
+          };
+        },
+      })
+      .compile();
+    app = module.createNestApplication({ logger: false });
+  } else {
+    app = await NestFactory.create(AppModule, { logger: false });
+  }
   configureApplication(app);
   await app.listen(4100, "127.0.0.1");
   console.log("Authentication E2E API ready on localhost:4100");

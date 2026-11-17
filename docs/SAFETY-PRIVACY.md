@@ -89,3 +89,53 @@ redacted audit commit together. Stale writes return 409; a case claimed by anoth
 moderator becomes out-of-scope (404), including a lost concurrent claim. Queue and
 detail reads are audited without report text. Unassigned or other staff's details
 return the same unavailable response. No report/media/consent data is public.
+
+## C065 / deferred account lifecycle
+
+BLOCKED, not implemented. Existing authentication already denies SUSPENDED/DELETED
+accounts and supports logout-all; those are not a new account-closure endpoint.
+Before closure/erasure, agree the consent withdrawal transaction, C051 assignment
+revocation/history, durable media locator handoff/cleanup, retained report/consent
+evidence and approved retention/backup suppression. No User DELETE, status-changing
+account endpoint or pretend erasure receipt is added. C050/C051/C053/C054 expert
+follow-up is not completed by this feature.
+
+## C066 interface direction
+
+Reuse canvas #F5F3F8, paper #FFFFFF, ink #35263B, plum #513957, sage #DCE8E0 and
+error #982E42 through existing semantic tokens. Newsreader headings and Instrument
+Sans controls remain unchanged. Left-aligned forms/rows stack on mobile; no card
+grid, gradient or new theme. Clear request acknowledgement is separate from a
+moderation outcome. Known opaque account references are accepted without building
+a public member search or exposing names/contact information. Deletion is shown
+as unavailable with links to the existing consent/video/session controls.
+
+## Delivery boundary and verification
+
+| Step | Outcome | Remaining boundary                                                                              |
+| ---- | ------- | ----------------------------------------------------------------------------------------------- |
+| C061 | DONE    | Reviewed additive migration; no local public-schema deployment                                  |
+| C062 | PARTIAL | Block persistence/API and reciprocal helper tested; matching/review consumer integration absent |
+| C063 | DONE    | Bounded member reporting and negative cases tested                                              |
+| C064 | PARTIAL | Scoped workflow tested; real staff assurance provider remains a production gate                 |
+| C065 | BLOCKED | Account lifecycle/retention and expert cleanup agreement required                               |
+| C066 | PARTIAL | Block/report/moderation interfaces tested; account-deletion interface deliberately absent       |
+
+This PR is an independently scoped deliverable, not completion of Feature 04. No
+Redis, shared limiter, MFA provider, retention schedule or expert workflow is added.
+Process-local quotas remain MVP-only and need a shared deployment decision before
+multiple API processes. Existing trusted-proxy configuration is preserved.
+
+Tests use disposable UUID schemas, synthetic sessions and test-only assurance. The
+normal application always defaults to no staff assurance; no role or environment
+boolean enables private report access. Apply the migration to a deployment database
+only after review, backup and inspection of legacy references. Local developer data
+and environment files are preserved.
+
+### Executed local checks
+
+- PASS: Prisma validation and client generation; API/Next production builds; both TypeScript lint commands.
+- PASS: 204 unit tests.
+- PASS: all 199 API/PostgreSQL/native-storage integration cases across 17 suites, including 22 safety database/API cases. The initial broad run had 19 SMTP-related failures while Mailpit was stopped; after restarting native Mailpit, both affected suites passed (26/26).
+- PASS: four safety browser cases across desktop/mobile, with real API/PostgreSQL, keyboard checks, axe checks and synthetic screenshots.
+- NOT RUN: real production MFA, account closure/erasure and matching/expert block enforcement; dependencies remain explicit above. No migration was applied to the developer public schema.

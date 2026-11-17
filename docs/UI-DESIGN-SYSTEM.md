@@ -257,3 +257,19 @@ The C010 isolated fixture supplies its own titled document and styles without im
 Forgot Password and Reset Password reuse AuthScaffold, Card, Form, Input, PasswordInput, ErrorSummary, Notice, Button and RetryAfterFeedback. The existing mist (#F5F3F8), paper (#FFFFFF), ink (#35263B), muted (#66596C), plum (#513957) and sage (#DCE8E0) palette, Newsreader headings and Instrument Sans body type remain unchanged. Left-aligned editorial introductions pair with one focused form; narrow screens stack the same content. No second theme, gradients, dependencies or duplicate primitives are introduced.
 
 The recovery direction is quiet and practical: “A fresh start.” introduces the email request, and “Choose a new password.” introduces the reset. Generic request feedback protects account privacy. Guidance recommends a long unique phrase within the 12–128-character policy; it does not claim to measure strength. Missing, expired and used links offer a new request. Errors focus the first invalid field; success focuses its heading. Network failures preserve entries for explicit retry, while successful submission clears password controls and the in-memory token. Cooldown feedback uses the existing shared countdown. There is no automatic login or redirect to a caller-supplied destination.
+
+## Trust and safety adoption (C066)
+
+Safety choices and the moderator report queue reuse the existing typography, semantic
+colors, form primitives, notices and confirmation modal. Long references wrap; rows
+and forms stack on mobile. Block/unblock and terminal moderation decisions require
+explicit confirmation with the safest initial focus. Errors focus the first invalid
+field; asynchronous results remain announced. Private report text renders as literal
+text, never HTML. Drafts stay in the existing member memory context, never browser
+storage; 429 feedback never automatically replays a mutation.
+
+Account closure is explicitly unavailable, with links to existing consent, video and
+session controls. Moderator access denied for missing real assurance is an error
+state, not an empty queue. Synthetic browser assurance is isolated to the test host.
+Desktop/mobile browser checks cover keyboard confirmation/cancel, validation, error
+recovery, responsive overflow and axe checks; screenshots use synthetic data only.
