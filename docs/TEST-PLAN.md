@@ -2,6 +2,29 @@
 
 Each feature needs valid inputs, invalid inputs, unauthorized access, state/race tests, UI feedback states, and audit/revoke behavior when relevant.
 
+## C035 assignment queue integration (partial)
+
+Contract: [ASSIGNMENT-QUEUES-API.md](ASSIGNMENT-QUEUES-API.md).
+API tests: `test/assignment-queues.integration-spec.ts`, using disposable PostgreSQL
+and synthetic assurance/evidence only. Cover ownership, exact-role denials, missing
+and expired assurance, strict scope/query rejection, cursor pagination, safe field
+projection, both consents/generation, READY state, qualified experts, active
+assignment conflicts and blocks. Option 2 visibility is approved, but moderator
+list remains explicitly blocked until a real scope membership mechanism exists.
+Verify 503 exposes neither the caller's creations nor another moderator's rows,
+does not query assignment rows, rejects forged scope parameters and preserves
+401/403/429/503 behavior and private headers. Authorized-scope/cross-scope and
+moderator scope-aware pagination tests are BLOCKED until real membership issuance,
+mapping, verification and revocation are defined; synthetic scope labels are not
+implementation evidence. Existing expert ownership/pagination tests still run.
+
+Browser tests: `expert-queue-api.spec.ts`, `expert-queue-integration.spec.ts` and
+the preserved foundation tests. They use real apiJson adapters with HTTP contract
+mocks, not a combined browser/database E2E. Verify server candidate mapping, exact
+C033 payload/key, manual retry after unknown outcomes/session failure, stale reads,
+identity isolation, private-state hiding and confirmation. No cancellation, C051
+or real production MFA coverage is claimed.
+
 ## C033 - READY video assignment
 
 Contract: [ASSIGNMENT-API.md](ASSIGNMENT-API.md). Use synthetic qualification and

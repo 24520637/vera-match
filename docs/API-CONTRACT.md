@@ -78,7 +78,9 @@ not changes to current auth.
 | POST      | `/videos/:id/playback`             | Owner                   | Current authorization and consent; expert playback deferred to C034/C050                                  |
 | DELETE    | `/videos/:id`                      | Owner                   | Revoke owner access and enqueue cleanup; dependent assignment cancellation remains C051                   |
 | POST      | `/expert-admin/assignments`        | Moderator               | C033: strict DTO, both consents, generation, qualification revision and Idempotency-Key; synthetic only    |
-| GET       | `/expert/assignments/me`           | Expert (planned)        | C034 future route, not implemented by C033                                                                |
+| GET       | `/expert/assignments/me`           | Expert                  | C035 own metadata only, server identity, assurance and cursor pagination; see [queue contract](ASSIGNMENT-QUEUES-API.md) |
+| GET       | `/expert-admin/assignments`        | Moderator               | C035 Option 2 approved; 503 until server-managed scope membership/mapping/verification exists             |
+| GET       | `/expert-admin/assignments/candidate` | Moderator             | C035 known video/expert pair eligibility check; no public directory/search                               |
 | POST      | `/expert/reviews/:id/observations` | Assigned expert         | Time range, category, evidence/context, optimistic version                                                |
 | PATCH     | `/expert/reviews/:id/draft`        | Assigned expert         | Draft-only edit; version check and audit                                                                  |
 | POST      | `/expert/reviews/:id/submit`       | Assigned expert         | Required summary/limitations; freeze submitted snapshot                                                   |
