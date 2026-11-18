@@ -49,8 +49,9 @@ key/payload for manual retry. Cancellation and reassignment remain unavailable.
 - Candidate discovery/directory contracts beyond the implemented known-pair check.
 - Manual cancellation contract/ownership and its C051 coordination boundary.
 - Trusted MFA, approved qualification/consent evidence and metadata-access policy.
-- C034 is merged upstream; this branch has not integrated the newer baseline and
-  does not copy its code or migrations. Playback is outside C035.
+- C034 is included through the pending origin/develop merge, preserving its
+  implementation. Playback remains outside C035; production and C051 integration
+  limitations still apply.
 
 No C050/C051 cancellation, playback, review editing, public user search or Safety
 Report moderation is implemented. Production authorization remains server-owned.

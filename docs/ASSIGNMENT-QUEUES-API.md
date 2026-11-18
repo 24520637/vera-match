@@ -115,5 +115,6 @@ uniqueness/idempotency remains authoritative. Review server state before replaci
 an unknown operation. Production endpoints remain unavailable without reviewed sources.
 
 Manual cancellation, reassignment, media playback, C050/C051 and Safety Report
-moderation are not implemented. Integration with latest develop/C034 still needs
-a controlled Git step: this working branch has not been merged or rebased.
+moderation are not implemented. The combined working tree includes C034 from
+origin/develop through a pending merge; integration validation does not approve
+production assurance, moderator scope or C050/C051 behavior.

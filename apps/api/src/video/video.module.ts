@@ -20,5 +20,6 @@ import { VideoRateLimiter, VideoRequestGuard } from "./video-request.guard";
     VideoRateLimiter,
     VideoRequestGuard,
   ],
+  exports: [PrivateStorageService],
 })
 export class VideoModule {}

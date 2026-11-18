@@ -75,9 +75,10 @@ not changes to current auth.
 | POST      | `/videos/upload-intent`            | Member                  | Consent, MIME/size validation; short-lived owner-scoped upload URL                                        |
 | POST      | `/videos/:id/confirm`              | Owner                   | Check actual object metadata; set READY only after verification                                           |
 | GET       | `/videos/me`                       | Owner                   | Private metadata list                                                                                     |
-| POST      | `/videos/:id/playback`             | Owner                   | Current authorization and consent; expert playback deferred to C034/C050                                  |
+| POST      | `/videos/:id/playback`             | Owner                   | Owner-only playback; expert access uses the assignment-bound route below                                  |
 | DELETE    | `/videos/:id`                      | Owner                   | Revoke owner access and enqueue cleanup; dependent assignment cancellation remains C051                   |
 | POST      | `/expert-admin/assignments`        | Moderator               | C033: strict DTO, both consents, generation, qualification revision and Idempotency-Key; synthetic only    |
+| POST      | `/expert/assignments/:assignmentId/playback` | Expert | C034 assignment-bound playback; synthetic-only until trusted MFA and approved evidence integrations exist; see [contract](EXPERT-PLAYBACK-API.md) |
 | GET       | `/expert/assignments/me`           | Expert                  | C035 own metadata only, server identity, assurance and cursor pagination; see [queue contract](ASSIGNMENT-QUEUES-API.md) |
 | GET       | `/expert-admin/assignments`        | Moderator               | C035 Option 2 approved; 503 until server-managed scope membership/mapping/verification exists             |
 | GET       | `/expert-admin/assignments/candidate` | Moderator             | C035 known video/expert pair eligibility check; no public directory/search                               |
