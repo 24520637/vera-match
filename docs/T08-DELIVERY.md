@@ -4,6 +4,11 @@ Status: **PARTIAL**. The original requirements and six commit subjects are
 preserved in `5deaf06:docs/COMMIT-PLAN.csv`. The workspace follows
 [the expert review workflow](EXPERT-REVIEW-WORKFLOW.md).
 
+Implementation and verification commit for C043–C048:
+`bc61b28e9fde2d700879ba2d556954e0121340bb`. Base:
+`0c8d86e9acf26d82a7cc7cd03af5b4b526432ec3`. This traceability update records the
+implementation SHA without changing its code or tests.
+
 | Step | Scope and actual delivery | Status |
 | --- | --- | --- |
 | C043 | Reuse the initial migration's ExpertReview and ExpertObservation entities. Add database checks for positive versions and nonnegative, ordered evidence timestamps. | DONE for database foundation |
