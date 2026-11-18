@@ -22,7 +22,7 @@ instructions and the archived commit plan are not repository deliverables.
 | C084 | Actual Chromium offline/online and remote logout; existing cookie configuration assertions | PARTIAL: deployed HTTPS/proxy not exercised |
 | C085 | Real C034 -> MinIO expiry, foreign owner/assignment denial and C051 playback/delete races | DONE for implemented media; not full C054 edit/submit acceptance |
 | C086 | Ordinary-runtime staff denial, session-specific proof isolation, post-lookup demotion and post-sign commit rollback | PARTIAL: real MFA/eligibility integration and independent QA remain BLOCKED |
-| C087 | Findings disposition after the matrix | NOT RUN; never invent a fix commit |
+| C087 | Confirmed provider-exception privacy defect reproduced and sanitized in C034 | DONE for this finding; whole-feature/release acceptance remains BLOCKED |
 
 ## C083 identity and session boundary
 
@@ -101,6 +101,30 @@ MinIO signing returns no prepared URL and rolls back the successful-read audit;
 retry after removing the fault works. No review draft/QA self-approval test is
 fabricated for absent APIs.
 
+## C087 findings and disposition
+
+T15-F01 (P2, ordinary production access still gated): C034 rethrew HttpException
+from MFA/evidence/qualification-registry sources as if it were an application-owned
+public error. Three actual HTTP/PostgreSQL/native-MinIO fault probes returned the
+provider's synthetic private code/message/objectKey unchanged. This is a confirmed
+boundary defect, not a claim that real production media leaked. No critical/high
+finding was identified in the implemented paths examined; unavailable workflows
+are not thereby certified.
+
+The focused correction sanitizes only upstream source failures to existing 503
+EXPERT_ACCESS_UNAVAILABLE. Application-owned 401/403, role/assignment/consent checks,
+lock order, CAS, C033/C051 behavior and TTL remain unchanged. The original three
+probes FAIL before the correction and PASS afterward; normal retry signs only
+after valid authorization and writes its normal minimal audit. Default source
+providers and release gates are unchanged. Phuc was notified before changing the
+shared C034 boundary in the PR #18 coordination comment; his review of this T15
+PR remains required. No unmerged C035/C036 code is copied or imported.
+
+No fake fix/history is created for missing QA, Matching, real MFA, role provisioning
+or account deletion. C087 fixes the concrete privacy finding found during this
+regression pass; it is not a blanket claim that all planned authorization workflows
+have been audited or that the application is production-ready.
+
 ## Execution and release boundary
 
 Use existing disposable-schema integration helpers, native Mailpit/MinIO and real
@@ -109,3 +133,11 @@ policy approval, production data access or secrets in version control is allowed
 Each test result is recorded in the PR at its actual tested head. Production
 trusted MFA/qualification/policy sources, operator alert routing, retention and
 complete review/QA/matching acceptance remain release blockers.
+
+## Verification scope and known blockers
+
+- New cases: 11 C083 PostgreSQL/Mailpit, 4 C084 real browser desktop/mobile, 5 C085 native media, 5 C086 staff/commit and 3 C087 provider privacy probes.
+- Existing source tests are preserved, including the 60-second owner URL provider expiry, SMTP confirmation failures, consent/mutation rollback, block/report/moderation audits, C031-C034 lifecycle and C051 concurrent workers.
+- PASS/FAIL counts for full unit/integration/browser/build validation and the exact CI head are recorded in the PR. Failed pre-fix privacy probes are evidence of reproduction, not passing security acceptance.
+- BLOCKED: actual role-elevation/provisioning rotation, private review/edit/submit/independent QA/report/claims/matching/account-deletion APIs; Phuc PRs #18/#20 are not merged into this branch.
+- NOT RUN: deployed HTTPS/proxy and actual trusted MFA/qualification/consent-policy publication, alert routing/outage delivery drill, production retention/backup/restore and full user journey. Production real-data staff access remains BLOCKED.
