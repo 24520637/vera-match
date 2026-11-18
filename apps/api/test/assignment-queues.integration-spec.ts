@@ -1,5 +1,5 @@
 import { StaffAssuranceSource } from "../src/safety/staff-assurance.source";
-import { INestApplication } from "@nestjs/common";
+import { HttpException, INestApplication, ServiceUnavailableException } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import { AccountStatus, Prisma, UserRole } from "@prisma/client";
 import { randomBytes, randomUUID } from "node:crypto";
@@ -289,12 +289,48 @@ describe("C035 assignment queue APIs / disposable PostgreSQL", () => {
       level: "MFA", verifiedAt: new Date(0), expiresAt: new Date(1), testOnly: true });
     expect((await get(seed.expert.cookie, "expert/assignments/me")).status).toBe(403);
   });
+  test.each(["EXPERT", "MODERATOR"] as const)("sanitizes thrown %s MFA provider errors without changing application denials", async role => {
+    const seed = await fixture();
+    const cookie = role === "EXPERT" ? seed.expert.cookie : seed.moderator.cookie;
+    const path = role === "EXPERT" ? "expert/assignments/me" : "expert-admin/assignments";
+    jest.spyOn(app.get(StaffAssuranceSource), "resolve").mockRejectedValue(
+      new ServiceUnavailableException({ message: "synthetic private MFA response", token: "synthetic-mfa-secret" }),
+    );
+    const response = await get(cookie, path);
+    expect(response.status).toBe(503);
+    const body = await response.json();
+    expect(body).toMatchObject({ code: "ASSIGNMENT_ASSURANCE_UNAVAILABLE" });
+    expect(JSON.stringify(body)).not.toMatch(/synthetic private MFA response|synthetic-mfa-secret/);
+    expect(await db.client.auditLog.count({ where: { actorId: role === "EXPERT" ? seed.expert.id : seed.moderator.id,
+      action: "ASSIGNMENT_QUEUE_READ" } })).toBe(0);
+    // Role/session failures originate in the application, outside the provider boundary.
+    expect((await get(seed.owner.cookie, path)).status).toBe(403);
+  });
   test("candidate evidence/source outage fails closed without exposing details", async () => {
     const seed = await fixture();
     jest.spyOn(app.get(ExpertEvidenceSource), "find").mockResolvedValue(undefined);
     const response = await get(seed.moderator.cookie, candidatePath(seed));
     expect(response.status).toBe(503);
     expect(JSON.stringify(await response.json())).not.toContain(seed.trainingEvidenceId);
+  });
+  test.each(["registry", "evidence"] as const)("sanitizes private %s provider exceptions", async provider => {
+    const seed = await fixture();
+    if (provider === "registry") {
+      jest.spyOn(app.get(ExpertApprovalRegistry), "training").mockImplementation(() => {
+        throw new ServiceUnavailableException({ message: "synthetic private registry response", reference: "registry-secret" });
+      });
+    } else {
+      jest.spyOn(app.get(ExpertEvidenceSource), "find").mockRejectedValue(
+        new HttpException({ message: "synthetic private evidence response", objectKey: "private-object-key" }, 403),
+      );
+    }
+    const response = await get(seed.moderator.cookie, candidatePath(seed));
+    expect(response.status).toBe(503);
+    const body = await response.json();
+    expect(body).toMatchObject({ code: "ASSIGNMENT_EVIDENCE_UNAVAILABLE" });
+    expect(JSON.stringify(body)).not.toMatch(/synthetic private|registry-secret|private-object-key/);
+    expect(await db.client.auditLog.count({ where: { actorId: seed.moderator.id,
+      action: { in: ["ASSIGNMENT_QUEUE_READ", "ASSIGNMENT_CANDIDATE_READ"] } } })).toBe(0);
   });
   test("missing scope membership exposes neither own creations nor another moderator's assignments", async () => {
     const own = await fixture(), other = await fixture();

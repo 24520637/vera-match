@@ -22,6 +22,16 @@ export class AssignmentQueuesService {
     private readonly assurance: StaffAssuranceSource, private readonly consent: ConsentAccessService,
     private readonly registry: ExpertApprovalRegistry, private readonly evidence: ExpertEvidenceSource) {}
 
+  private async resolveAssurance(tx: Prisma.TransactionClient, auth: AuthContext) {
+    try { return await this.assurance.resolve(tx, auth); }
+    catch { queueUnavailable("ASSIGNMENT_ASSURANCE_UNAVAILABLE"); }
+  }
+
+  private async resolveAssignmentEvidence(approval: Parameters<typeof assignmentEvidence>[0], expertId: string) {
+    try { return await assignmentEvidence(approval, expertId, this.registry, this.evidence); }
+    catch { queueUnavailable("ASSIGNMENT_EVIDENCE_UNAVAILABLE"); }
+  }
+
   private async read<T>(auth: AuthContext, role: "EXPERT" | "MODERATOR", peers: string[],
     action: (tx: Prisma.TransactionClient, currentTime: () => Promise<Date>) => Promise<T>): Promise<T> {
     // No production metadata/assurance publication contract has been approved.
@@ -37,7 +47,7 @@ export class AssignmentQueuesService {
         if (!actor || actor.status !== "ACTIVE" || !actor.emailVerifiedAt || !session || session.userId !== auth.user.id || session.revokedAt)
           throw new UnauthorizedException({ code: "UNAUTHENTICATED", message: "A valid session is required." });
         if (actor.role !== role) denied();
-        const proof = await this.assurance.resolve(tx, auth);
+        const proof = await this.resolveAssurance(tx, auth);
         if (!proof || proof.userId !== actor.id || proof.sessionId !== session.id || proof.level !== "MFA" || proof.testOnly !== true ||
           !(proof.verifiedAt instanceof Date) || !Number.isFinite(proof.verifiedAt.getTime()) ||
           !(proof.expiresAt instanceof Date) || !Number.isFinite(proof.expiresAt.getTime())) denied();
@@ -94,9 +104,7 @@ export class AssignmentQueuesService {
           return row.now;
         };
         await clock();
-        let proof;
-        try { proof = await this.assurance.resolve(tx, auth); }
-        catch { queueUnavailable("ASSIGNMENT_ASSURANCE_UNAVAILABLE"); }
+        const proof = await this.resolveAssurance(tx, auth);
         if (!proof) queueUnavailable("ASSIGNMENT_ASSURANCE_UNAVAILABLE");
         if (proof.userId !== actor.id || proof.sessionId !== session.id || proof.level !== "MFA" || typeof proof.testOnly !== "boolean" ||
           (proof.testOnly && this.environment.values.nodeEnv !== "test") ||
@@ -160,7 +168,7 @@ export class AssignmentQueuesService {
       const credential = await tx.expertCredential.findUnique({ where: { userId: query.expertId }, include: { approval: true } });
       if (!expert || expert.role !== "EXPERT" || expert.status !== "ACTIVE" || !expert.emailVerifiedAt || !credential ||
         credential.status !== "APPROVED" || !credential.approval || credential.approval.subjectId !== credential.subjectId) unavailable();
-      const limits = await assignmentEvidence(credential.approval, expert.id, this.registry, this.evidence);
+      const limits = await this.resolveAssignmentEvidence(credential.approval, expert.id);
       await tx.$queryRaw`SELECT id FROM "ExpertAssignment" WHERE "videoId"=${video.id} ORDER BY id FOR UPDATE`;
       if (await tx.expertAssignment.count({ where: { videoId: video.id, status: { in: ["ASSIGNED", "IN_PROGRESS", "SUBMITTED"] } } }) ||
         await tx.block.count({ where: { OR: [{ blockerId: video.ownerId, blockedId: expert.id }, { blockerId: expert.id, blockedId: video.ownerId }] } })) unavailable();
