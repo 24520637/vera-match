@@ -4,7 +4,7 @@ import { PrivateStorageService } from "../src/video/private-storage.service";
 import { ExpertPlaybackLimiter } from "../src/expert-admin/expert-playback-request.guard";
 import { INestApplication } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
-import { AccountStatus, UserRole } from "@prisma/client";
+import { AccountStatus, Prisma, PrismaClient, UserRole } from "@prisma/client";
 import { randomBytes, randomUUID } from "node:crypto";
 import { AppModule } from "../src/app.module";
 import { hashSessionToken } from "../src/auth/session-token";
@@ -18,6 +18,17 @@ import { ConsentPolicyRegistry } from "../src/consent/consent.policy";
 import { ExpertApprovalRegistry, ExpertEvidenceSource, ExpertEvidence } from "../src/expert-admin/expert-approval.sources";
 import { createAuthDatabase } from "./disposable-auth-database";
 import { transition, credentialEvent, assignmentEvent } from "./expert-db-fixtures";
+
+
+// Prisma binds Date parameters as timestamptz. Normalize them explicitly to UTC
+// before comparing with the UTC timestamp clock; never use a session-local cast.
+// Call only inside a test-owned transaction: timeout resets on commit/rollback.
+async function waitForDeadline(tx: Prisma.TransactionClient, deadline: Date) {
+  await tx.$executeRawUnsafe("SET LOCAL statement_timeout = '5s'");
+  await tx.$queryRaw`SELECT true AS elapsed FROM pg_sleep(GREATEST(0,
+    EXTRACT(EPOCH FROM ((${deadline}::timestamptz AT TIME ZONE 'UTC') -
+      (clock_timestamp() AT TIME ZONE 'UTC'))))::double precision + 0.05)`;
+}
 
 describe("C034 assignment-bound playback / disposable PostgreSQL", () => {
   let db: Awaited<ReturnType<typeof createAuthDatabase>>, app: INestApplication, base: string;
@@ -226,7 +237,7 @@ describe("C034 assignment-bound playback / disposable PostgreSQL", () => {
     const deadline = new Date(Date.now() + 3000), seed = await fixture(null, deadline), result = await create(seed);
     const source = app.get(ExpertEvidenceSource), original = source.find.bind(source), signer = jest.spyOn(app.get(PrivateStorageService), "playbackGrant");
     jest.spyOn(source, "find").mockImplementationOnce(async id => {
-      await db.client.$queryRaw`SELECT true FROM pg_sleep(GREATEST(0, EXTRACT(EPOCH FROM (${deadline}::timestamp - (clock_timestamp() AT TIME ZONE 'UTC'))))::double precision + 0.05)`;
+      await db.client.$transaction(tx => waitForDeadline(tx, deadline), { timeout: 7000 });
       return original(id);
     });
     expect((await playback(seed.expert.cookie, result.assignment.id)).status).toBe(503);
@@ -256,7 +267,7 @@ describe("C034 assignment-bound playback / disposable PostgreSQL", () => {
         await new Promise(resolve => setTimeout(resolve, 10));
       }
       expect(contended).toBe(true);
-      await db.client.$queryRaw`SELECT true FROM pg_sleep(GREATEST(0, EXTRACT(EPOCH FROM (${deadline}::timestamp - (clock_timestamp() AT TIME ZONE 'UTC'))))::double precision + 0.05)`;
+      await db.client.$transaction(tx => waitForDeadline(tx, deadline), { timeout: 7000 });
     } finally { release(); await holder; }
     expect((await response).status).toBe(401);
     expect(await db.client.auditLog.count({ where: { action: "EXPERT_PLAYBACK_ISSUED", subjectId: result.assignment.id } })).toBe(0);
@@ -350,12 +361,61 @@ describe("C034 assignment-bound playback / disposable PostgreSQL", () => {
     await db.client.session.update({ where: { id: auth.sessionId }, data: { expiresAt: clock.at } });
     const source = app.get(ExpertEvidenceSource), original = source.find.bind(source);
     jest.spyOn(source, "find").mockImplementationOnce(async id => {
-      await db.client.$queryRaw`SELECT true AS elapsed FROM pg_sleep(GREATEST(0, EXTRACT(EPOCH FROM (${clock.at}::timestamp - (clock_timestamp() AT TIME ZONE 'UTC'))))::double precision + 0.05)`;
+      await db.client.$transaction(tx => waitForDeadline(tx, clock.at), { timeout: 7000 });
       return original(id);
     });
     const action = jest.fn();
     await expect(access().withAuthorizedAssignment(auth, result.assignment.id, action)).rejects.toMatchObject({ status: 401 });
     expect(action).not.toHaveBeenCalled();
+  });
+  test.each(["UTC", "Asia/Ho_Chi_Minh"])("deadline wait stays bounded and HTTP remains 401 in %s", async timezone => {
+    const seed = await fixture(), result = await create(seed), auth = await context(seed.expert.id);
+    const url = new URL(db.url);
+    // One physical connection makes the post-transaction restoration assertion meaningful.
+    url.searchParams.set("connection_limit", "1");
+    const waitingClient = new PrismaClient({ datasources: { db: { url: url.toString() } } });
+    const settings = () => waitingClient.$queryRaw<{ timezone: string; timeout: string; pid: number }[]>`
+      SELECT current_setting('TimeZone') AS timezone,
+        current_setting('statement_timeout') AS timeout, pg_backend_pid() AS pid`;
+    const before = await settings();
+    const source = app.get(ExpertEvidenceSource), original = source.find.bind(source);
+    const signer = jest.spyOn(app.get(PrivateStorageService), "playbackGrant");
+    let waited = false;
+    try {
+      const [clock] = await db.client.$queryRaw<{ at: Date }[]>`SELECT
+        (clock_timestamp() AT TIME ZONE 'UTC' + interval '2 seconds')::timestamp(3) AS at`;
+      await db.client.session.update({ where: { id: auth.sessionId }, data: { expiresAt: clock.at } });
+      jest.spyOn(source, "find").mockImplementationOnce(async id => {
+        await waitingClient.$transaction(async tx => {
+          await tx.$queryRaw`SELECT set_config('TimeZone', ${timezone}, true)`;
+          const [zone] = await tx.$queryRaw<{ timezone: string; seconds: number }[]>`SELECT
+            current_setting('TimeZone') AS timezone,
+            EXTRACT(EPOCH FROM ((${clock.at}::timestamptz AT TIME ZONE 'UTC') -
+              (clock_timestamp() AT TIME ZONE 'UTC')))::double precision AS seconds`;
+          expect(zone.timezone).toBe(timezone);
+          expect(zone.seconds).toBeGreaterThan(0);
+          expect(zone.seconds).toBeLessThanOrEqual(2);
+          await waitForDeadline(tx, clock.at);
+          const [after] = await tx.$queryRaw<{ elapsed: boolean; timeout: string }[]>`SELECT
+            (clock_timestamp() AT TIME ZONE 'UTC') >=
+              (${clock.at}::timestamptz AT TIME ZONE 'UTC') AS elapsed,
+            current_setting('statement_timeout') AS timeout`;
+          expect(after).toEqual({ elapsed: true, timeout: "5s" });
+          waited = true;
+        }, { timeout: 7000 });
+        return original(id);
+      });
+      const response = await playback(seed.expert.cookie, result.assignment.id);
+      expect(response.status).toBe(401);
+      expect(waited).toBe(true);
+      expect(signer).not.toHaveBeenCalled();
+      expect(await db.client.auditLog.count({ where: {
+        action: "EXPERT_PLAYBACK_ISSUED", subjectId: result.assignment.id,
+      } })).toBe(0);
+    } finally {
+      try { expect(await settings()).toEqual(before); }
+      finally { await waitingClient.$disconnect(); }
+    }
   });
   test("default MFA source fails closed", async () => {
     const seed = await fixture(), result = await create(seed), action = jest.fn();
