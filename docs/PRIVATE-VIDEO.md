@@ -140,19 +140,20 @@ expert access additionally requires EXPERT_VIDEO_REVIEW and the full expert
 authorization contract. Other purposes remain independent and can stay OFF.
 Own safe metadata reads and deletion intentionally do not require consent again.
 
-### Recommended integration decision: B
+### Owner-media deliverable and expert follow-up
 
-Scope the existing PR #11 as the independently verified owner-media/cleanup
-deliverable. Keep it Draft until Huong and Phuc explicitly agree that scope; do
-not call the entire Private Video feature complete or create a duplicate PR.
+PR #11 merged as the independently verified owner-media/cleanup deliverable.
+This does not complete the entire Private Video feature. C033/C034 are now
+upstream; this branch implements [C051 cancellation](ASSIGNMENT-CANCELLATION.md)
+as a separate follow-up pending review/merge.
 
 The following remain tracked follow-up work after reviewed C031-C036 integration:
 
 - [ ] C050: current-consent, eligibility, assignment and MFA checks on expert
       video/review read, renewal and edit/submit routes.
-- [ ] C051: cancellation of active assignments under CAS, with exact immutable
-      AssignmentEvent/retained actor evidence in the same transaction. No blind bulk
-      status updates; preserve valid terminal states and deletion history.
+- [ ] C051 review/merge: implementation on this branch cancels active assignments
+      under CAS with immutable events/context and per-consumer receipts. Terminal
+      history and newer generations are preserved; full C054 remains incomplete.
 - [ ] C053: redacted denied-assignment and expert privacy audit events.
 - [ ] C054: revoke/delete racing expert read/edit/submit, cancellation/reassignment
       and signed-URL issuance, using the actual merged Phuc workflow.
@@ -171,13 +172,11 @@ integration/E2E acceptance. Existing migrations and shared contracts are unchang
 - The real policy registry currently publishes no approved policies. Runtime
   grants fail closed. Tests inject synthetic test-only policy snapshots into
   the real Consent service; no production grant bypass or pretend policy exists.
-- C050 expert access/edit integration and C051 assignment cancellation are
-  BLOCKED on integration with the remaining C033-C036 routes and the merged
-  C031 credential/assignment CAS/history contract. Develop now has C031/C032;
-  schema availability alone does not complete these checks. This feature exposes
-  no expert playback or review editing. It does not claim to cancel assignments,
-  implement MFA or complete report/matching withdrawal. Phuc must check active
-  assignment, eligibility, owner consent, video state and MFA on every access.
+- C034 now supplies the assigned-playback authorization boundary. This branch
+  implements C051 owner-delete/withdrawal cancellation with actual C033/C034
+  integration checks. C050 remaining review access/edit/submit integration and
+  complete C054 races still need the actual Phuc workflow. No fake assignment,
+  reviewer output, MFA provider or completed whole-feature acceptance is claimed.
 - Before future account hard deletion, enqueue every object locator before
   erasing the consent subject-to-user mapping or cascading Video rows. This
   feature does not implement account deletion.

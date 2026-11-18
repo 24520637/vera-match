@@ -2,10 +2,18 @@
 
 Each feature needs valid inputs, invalid inputs, unauthorized access, state/race tests, UI feedback states, and audit/revoke behavior when relevant.
 
-## C036 - cancellation and reassignment race tests (partial)
+## C036 - cancellation and reassignment race acceptance
 
 Plan-Step: C036. Ticket: T06. Planned subject:
 `test(expert-assign): test cancel and reassignment races`.
+
+Original scope (`5deaf06:docs/COMMIT-PLAN.csv`): "Transitions, version and audit
+tests". Verification: "Canceled assignment access rejected". The ten original
+C036 cases remain intact: four database race/rollback cases, three historical
+receipt cases and three cancelled-playback cases. Acceptance is limited to these
+requirements and combined upstream regression evidence, not production readiness
+or completion of all T06 features. Execution results and PR approval are reported
+separately; this document does not assert a successful future run or PR merge.
 
 Implemented test scope uses disposable PostgreSQL and existing C033/C034 APIs:
 
@@ -28,12 +36,32 @@ Implemented test scope uses disposable PostgreSQL and existing C033/C034 APIs:
 - Existing C031-C034 suites remain regression coverage for lifecycle, unique active
   assignments (including SUBMITTED), authorization, generation, rollback and expiry.
 
-BLOCKED: real C051 cancellation job processing/retry/crash recovery, real cancel or
-reassign HTTP mutations and their authorization/idempotency contracts, and PA2
-scope enforcement. Do not invent worker interfaces or count fixture transitions
-as C051 acceptance. Production MFA/evidence and actual MinIO remain separate gates;
-an already-issued URL may remain usable until expiry. C034 timezone hotfix PR #17
-is separate; do not copy it into C036 or claim non-UTC deadline coverage here.
+C051 is implemented upstream through PR #19 and is now integrated into this branch.
+Run `assignment-cancellation.integration-spec.ts` and
+`assignment-cancellation-migration.integration-spec.ts` alongside C036. They cover
+actual owner DELETE and withdrawal consumers, generation isolation, cancellation
+CAS, audit rollback, worker contention/retry and migration preservation. Actual
+C034 playback succeeds before owner deletion and is denied after atomic C051
+cancellation. These tests supplement, rather than relabel, the C036 DB fixtures.
+The C033 deletion/replay regression must retain C051's CANCELLED/revision/event
+expectations and the unchanged historical creation receipt.
+
+C034's UTC/non-UTC deadline fix is integrated from develop through merged PR #17;
+retain its bounded waits and connection-setting restoration checks. No published
+migration or production authorization behavior is changed by C036.
+
+Manual cancel/reassign HTTP APIs, their transport authorization/idempotency
+contracts, and C035 PA2 administration are outside the original C036 test scope.
+Their absence does not block this acceptance and does not authorize creating them
+here. Review edit/submit races belong to later review work with C050 coordination.
+Real production MFA/provisioning/evidence and provider/retention acceptance remain
+separate gates. Signed URLs already issued may remain usable until expiry; test
+results do not imply immediate URL revocation or physical deletion.
+
+Validation: run the C036 race suite, C033/C034 API suites, C051 domain/migration
+suites and relevant C031/C032/Consent/Auth regressions against disposable schemas.
+Record executed/skipped checks explicitly; CI and human review are still required
+before merging PR #20. No dependency on unmerged C035 code is introduced.
 
 ## C034 - assignment-bound expert playback
 
@@ -51,8 +79,9 @@ Synthetic MFA/evidence and local SigV4 signing are not production acceptance.
 - Parse actual SigV4 date/TTL and compare exact returned expiry; test every TTL
   bound, insufficient time, invalid TTL rejection and owner default 60 seconds.
 - Run C031/C032/C033, Auth, Consent and Video regressions. Real MinIO suites require
-  the service; record NOT RUN when unavailable. C051 real cancellation race tests
-  remain BLOCKED until Huong's implementation is integrated.
+  the service; record NOT RUN when unavailable. C051 is integrated: run the real
+  cancellation/domain/migration suites and their C034 post-cancellation checks.
+  Review edit/submit concurrency remains outside these implemented routes.
 
 ## C033 - READY video assignment
 
@@ -440,3 +469,13 @@ this C012 draft does not implement or execute C019-C024 tests.
 ### T13 security/reliability review
 
 Recovery regressions additionally cover independent real loopback clients, shared native proxy socket quotas, forged forwarding headers, pair-quota isolation and exact boundaries. Native SMTP greeting timeout preserves the previous delivered link and waits for worker shutdown. Actual Mailpit deliveries with controlled acknowledgement ordering verify late-ack safety and concurrent old/new-token reset atomicity. Queue tests cover active-job saturation, draining accepted work during shutdown and redacted failure continuation. No production proxy, multi-instance limiter or crash-durable outbox is claimed by these tests.
+
+## C051 cancellation acceptance
+
+- Real owner DELETE atomically cancels ASSIGNED/IN_PROGRESS/SUBMITTED once; foreign callers are denied and terminal rows remain unchanged.
+- Source-bound storage/review withdrawal, independent immutable receipts, 20-row batches, delayed old tasks and newer re-consent generations.
+- Real PostgreSQL lock contention between workers; CAS zero-row failure, audit rollback, DB retry and missing-mapping reconciliation.
+- Opaque actual-owner versus system executor/initiator evidence; no retroactive history, no raw payload logs and no shared-task completion.
+- Context/history survive live resource removal; migration preserves C031-C034 rows and rolls back post-DDL failure.
+- UTC timestamps under a non-UTC transaction and unchanged real C034 post-cancellation denial.
+- C054 full edit/submit races remain incomplete until actual review APIs exist.

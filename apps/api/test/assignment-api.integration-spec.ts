@@ -215,7 +215,7 @@ describe("C033 assignment API / disposable PostgreSQL", () => {
     const seed = await fixture(), key = randomUUID(), original = await create(seed, key);
     const id = original.assignment.id;
     let revision = 0n;
-    // Valid database lifecycle fixture only: no cancellation API or C051 worker exists.
+    // Database lifecycle fixture only; real C051 consumer coverage is maintained separately.
     if (status !== "ASSIGNED") await transition(db.client, id, revision++, "IN_PROGRESS");
     if (status === "SUBMITTED") await transition(db.client, id, revision++, "SUBMITTED");
     await transition(db.client, id, revision, "CANCELLED");
@@ -418,9 +418,9 @@ describe("C033 assignment API / disposable PostgreSQL", () => {
         expect(replay.status).toBe(201);
         expect(replay.headers.get("idempotency-replayed")).toBe("true");
         expect(await replay.json()).toEqual(originalResult);
-        expect(await db.client.assignmentEvent.count({ where: { assignmentId: row.id } })).toBe(1);
-        // C051 is not implemented here: these checks must not pretend cancellation.
-        expect(row).toMatchObject({ status: "ASSIGNED", revision: 0n });
+        expect(await db.client.assignmentEvent.count({ where: { assignmentId: row.id } })).toBe(operation === "delete" ? 2 : 1);
+        // Owner DELETE now includes C051; withdrawal remains a durable handoff.
+        expect(row).toMatchObject(operation === "delete" ? { status: "CANCELLED", revision: 1n } : { status: "ASSIGNED", revision: 0n });
       } finally { release(); spy.mockRestore(); }
     }
   });

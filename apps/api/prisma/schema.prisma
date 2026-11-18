@@ -268,6 +268,8 @@ model ConsentIdempotency {
   @@index([expiresAt])
 }
 model ConsentWithdrawalTask {
+  assignmentReceipt AssignmentWithdrawalReceipt?
+  assignmentCancellations AssignmentCancellationContext[]
   id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   subjectId String @db.Uuid
   subject ConsentSubject @relation(fields: [subjectId], references: [id], onDelete: Restrict)
@@ -455,6 +457,7 @@ model ExpertCredentialEvent {
 
 // assignmentId is an opaque historical locator, deliberately not a cascading FK.
 model AssignmentEvent {
+  cancellation AssignmentCancellationContext?
   id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   assignmentId String
   revision BigInt
@@ -601,4 +604,33 @@ model AuditLog {
   createdAt DateTime @default(now())
   // No raw video bytes, tokens, password, or sensitive review text in audit.
   @@index([actorId, createdAt])
+}
+
+// C051 evidence survives live assignment/video/account removal via retained events.
+enum AssignmentCancellationReason {
+  VIDEO_DELETED
+  VIDEO_STORAGE_WITHDRAWN
+  EXPERT_VIDEO_REVIEW_WITHDRAWN
+}
+model AssignmentCancellationContext {
+  eventId String @id @db.Uuid
+  event AssignmentEvent @relation(fields: [eventId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  reason AssignmentCancellationReason
+  sourceTaskId String? @db.Uuid
+  sourceTask ConsentWithdrawalTask? @relation(fields: [sourceTaskId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  initiatorEvidence Json
+  createdAt DateTime @default(now())
+  @@index([sourceTaskId])
+}
+model AssignmentWithdrawalReceipt {
+  withdrawalTaskId String @id @db.Uuid
+  withdrawalTask ConsentWithdrawalTask @relation(fields: [withdrawalTaskId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  createdAt DateTime @default(now())
+}
+
+// Mutable scheduling metadata only; never a completion receipt or authorization grant.
+model AssignmentCancellationScan {
+  lane String @id
+  afterId String?
+  throughId String?
 }
