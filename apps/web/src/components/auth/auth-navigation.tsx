@@ -16,10 +16,17 @@ export function AuthNavigation({ onNavigate }: { onNavigate: () => void }) {
       </Link>
     );
   return (
-    <Link href="/account" onClick={onNavigate}>
-      {state.status === "authenticated"
-        ? "Your account"
-        : "Check account access"}
-    </Link>
+    <>
+      <Link href="/account" onClick={onNavigate}>
+        {state.status === "authenticated"
+          ? "Your account"
+          : "Check account access"}
+      </Link>
+      {state.status === "authenticated" && state.user.role === "MODERATOR" && (
+        <Link href="/moderation/reports" onClick={onNavigate}>
+          Report queue
+        </Link>
+      )}
+    </>
   );
 }

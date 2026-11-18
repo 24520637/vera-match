@@ -83,10 +83,10 @@ describe("C033 assignment API / disposable PostgreSQL", () => {
       (clock_timestamp() AT TIME ZONE 'UTC' + ${milliseconds} * interval '1 millisecond')::timestamp(3) AS at`;
     return clock.at;
   }
-  async function passDeadline(deadline: Date) {
+  async function passDeadline(deadline: Date, client: Pick<Prisma.TransactionClient, "$queryRaw"> = db.client) {
     // Database time, not JS fake timers or transaction_timestamp. No service is stopped.
-    await db.client.$queryRaw`SELECT true AS elapsed FROM pg_sleep(GREATEST(0,
-      EXTRACT(EPOCH FROM (${deadline}::timestamp - (clock_timestamp() AT TIME ZONE 'UTC'))))::double precision + 0.05)`;
+    await client.$queryRaw`SELECT true AS elapsed FROM pg_sleep(GREATEST(0,
+      EXTRACT(EPOCH FROM ((${deadline}::timestamptz AT TIME ZONE 'UTC') - (clock_timestamp() AT TIME ZONE 'UTC'))))::double precision + 0.05)`;
   }
   async function waitForUserContention(blockerPid?: number) {
     const until = Date.now() + 5000;
@@ -119,6 +119,18 @@ describe("C033 assignment API / disposable PostgreSQL", () => {
         row.reviewConsentSubjectId, row.reviewConsentVersion, "EXPERT_VIDEO_REVIEW");
     })).rejects.toMatchObject({ status: 403 });
   }
+  it("waits for expiry in UTC even when PostgreSQL uses a non-UTC session timezone", async () => {
+    await db.client.$transaction(async tx => {
+      await tx.$executeRawUnsafe("SET LOCAL TIME ZONE 'Asia/Bangkok'");
+      await tx.$executeRawUnsafe("SET LOCAL statement_timeout = '2s'");
+      const [clock] = await tx.$queryRaw<{ at: Date }[]>
+        `SELECT (clock_timestamp() AT TIME ZONE 'UTC' + interval '150 milliseconds')::timestamp(3) AS at`;
+      await passDeadline(clock.at, tx);
+      const [result] = await tx.$queryRaw<{ elapsed: boolean }[]>
+        `SELECT (clock_timestamp() AT TIME ZONE 'UTC') >= (${clock.at}::timestamptz AT TIME ZONE 'UTC') AS elapsed`;
+      expect(result.elapsed).toBe(true);
+    }, { timeout: 5000 });
+  });
   it("creates one assignment with bound consent, approval, retained actor, immutable event and audit", async () => {
     const seed = await fixture(), result = await create(seed);
     const row = await db.client.expertAssignment.findUniqueOrThrow({ where: { id: result.assignment.id } });

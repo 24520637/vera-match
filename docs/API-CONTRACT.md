@@ -1,5 +1,11 @@
 # API contract — VERA Match
 
+**T11 implementation:** Block/report and scoped moderator endpoints are described
+in [Safety and privacy](SAFETY-PRIVACY.md). Moderator access requires MODERATOR
+plus real session-bound staff assurance; its production source is not configured.
+ADMIN does not inherit these permissions. Account closure/deletion and actual
+matching/expert block integration are explicitly deferred.
+
 **C033 implementation:** [Assignment API](ASSIGNMENT-API.md) defines
 `POST /expert-admin/assignments`, review-consent generation binding and durable
 idempotency. It is synthetic-test-only until real staff assurance is integrated.
@@ -9,7 +15,7 @@ fail-closed evidence-source boundary are documented in
 [Expert approval](EXPERT-APPROVAL.md). It introduces no member video access or MFA
 mechanism and does not change the existing authentication responses below.
 
-**Status:** Health/readiness and `/auth/register`, `/auth/verify-email`, `/auth/resend-verification`, `/auth/login`, `/auth/me`, `/auth/logout`, `/auth/logout-all`, `/auth/forgot-password` and `/auth/reset-password` are implemented. All other business routes below remain DESIGN ONLY. See `EMAIL-AUTH-SESSIONS.md` and [Authentication recovery](AUTH-RECOVERY.md) for tested details.
+**Status:** Health/readiness and `/auth/register`, `/auth/verify-email`, `/auth/resend-verification`, `/auth/login`, `/auth/me`, `/auth/logout`, `/auth/logout-all`, `/auth/forgot-password` and `/auth/reset-password` are implemented. Implemented business scope and release gates are defined by the feature notes above and their linked documents; remaining proposed routes are DESIGN ONLY. See `EMAIL-AUTH-SESSIONS.md` and [Authentication recovery](AUTH-RECOVERY.md) for tested details.
 
 API prefix: `/api`. The browser uses a server-issued HttpOnly session cookie. Mutating cookie-authenticated endpoints require CSRF protection. Implemented auth behavior is described below; `{code, message, details?}` is not a guarantee that every framework error has this shape. Auth DTO validation uses `400`, not `422`. Future feature `409` rules are approved MVP contracts, not implemented routes;
 `422` is not introduced by this contract.

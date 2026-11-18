@@ -1,0 +1,33 @@
+.safety-workspace {
+  padding-block: var(--space-7);
+}
+.safety-workspace > .form,
+.safety-section {
+  max-width: 48rem;
+}
+.safety-section {
+  padding-block: var(--space-6);
+  border-top: 1px solid var(--color-line);
+  margin-top: var(--space-6);
+}
+.safety-list {
+  list-style: none;
+  padding: 0;
+}
+.safety-list > li {
+  padding-block: var(--space-5);
+  border-bottom: 1px solid var(--color-line);
+}
+.safety-workspace p,
+.safety-workspace h3,
+.safety-reference {
+  overflow-wrap: anywhere;
+}
+.safety-details {
+  white-space: pre-wrap;
+  max-width: 65ch;
+}
+.safety-workspace h2[tabindex],
+.safety-workspace h3[tabindex] {
+  scroll-margin-top: var(--space-5);
+}

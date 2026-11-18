@@ -64,7 +64,7 @@ Browser request
 | Approve submitted review | MODERATOR/QA with appropriate access; must not be the review author                      |
 | Read review report       | The owning member; review must be QA-approved                                            |
 | Generate matches         | Active adult MEMBER, current matching consent, no block, only appropriately shared facts |
-| Moderate reports         | Authorized MODERATOR/ADMIN within assigned scope; record audited access                  |
+| Moderate reports         | MODERATOR within case scope plus session-bound MFA; audit reads and transitions. ADMIN does not inherit this implemented permission. |
 
 ## 7. Required safeguards and acceptance criteria
 
