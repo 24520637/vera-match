@@ -81,7 +81,9 @@ still cannot obtain URLs. Review re-consent leaves old bindings cancelled; only
 an explicit new C033 assignment authorizes a new URL.
 
 Both real User-lock orderings of playback versus owner DELETE are observed through
-pg_blocking_pids. A playback authorized first may return a short-lived bearer URL;
+pg_blocking_pids. Each ordering first proves HTTP 200 authorization; the existing
+fixture proof resolver survives barrier-spy cleanup so missing MFA cannot mask
+the second ordering. A playback authorized first may return a short-lived bearer URL;
 a delete committed first returns no URL or successful playback audit. Cancellation
 advances once with one retained context. Existing bearers can work until provider
 removal/expiry; MinIO HEAD verifies final-object removal after cleanup. The cleanup

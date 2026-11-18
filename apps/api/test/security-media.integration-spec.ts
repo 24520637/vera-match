@@ -117,6 +117,11 @@ describe("C085 actual C034/C051 media boundary / native MinIO", () => {
     "C034 versus owner deletion is linearized under real database locks (%s)",
     async (order) => {
       const f = await h.fixture();
+      // Each ordering starts authorized; a missing fixture proof must not mask deletion.
+      expect((await h.play(f.expert.cookie, f.id)).status).toBe(200);
+      const previousAudits = await h.db.client.auditLog.count({
+        where: { action: "EXPERT_PLAYBACK_ISSUED", subjectId: f.id },
+      });
       let entered!: () => void,
         release!: () => void,
         pid = 0;
@@ -130,7 +135,9 @@ describe("C085 actual C034/C051 media boundary / native MinIO", () => {
         source = h.app.get(ExpertMfaSource);
       const originalCancel =
           cancellation.cancelDeletedVideoInTransaction.bind(cancellation),
-        originalProof = source.resolve.bind(source);
+        originalProof = (
+          source.resolve as jest.MockedFunction<ExpertMfaSource["resolve"]>
+        ).getMockImplementation()!;
       const hold = async (
         tx: import("@prisma/client").Prisma.TransactionClient,
       ) => {
@@ -208,7 +215,7 @@ describe("C085 actual C034/C051 media boundary / native MinIO", () => {
           await h.db.client.auditLog.count({
             where: { action: "EXPERT_PLAYBACK_ISSUED", subjectId: f.id },
           }),
-        ).toBe(order === "play-first" ? 1 : 0);
+        ).toBe(previousAudits + (order === "play-first" ? 1 : 0));
         // A previously issued bearer can still work until cleanup or expiry.
         if (grant) expect((await fetch(grant.url)).status).toBe(200);
         await h.app.get(VideoCleanupService).runOnce();
@@ -228,7 +235,13 @@ describe("C085 actual C034/C051 media boundary / native MinIO", () => {
       } finally {
         release();
         await Promise.allSettled([first, ...(second ? [second] : [])]);
-        spy.mockRestore();
+        if (order === "play-first") {
+          // The source was already a fixture spy. mockRestore would remove its
+          // proof resolver and make the following ordering fail for missing MFA.
+          (source.resolve as jest.MockedFunction<ExpertMfaSource["resolve"]>)
+            .mockReset()
+            .mockImplementation(originalProof);
+        } else spy.mockRestore();
         sign.mockRestore();
       }
     },
