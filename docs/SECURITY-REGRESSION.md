@@ -21,7 +21,7 @@ instructions and the archived commit plan are not repository deliverables.
 | C083 | Cross-feature session/IDOR matrix, real login anti-fixation, real Mailpit reset and all-session revocation | PARTIAL: no merged privilege-mutation/session-rotation API or private review resources |
 | C084 | Actual Chromium offline/online and remote logout; existing cookie configuration assertions | PARTIAL: deployed HTTPS/proxy not exercised |
 | C085 | Real C034 -> MinIO expiry, foreign owner/assignment denial and C051 playback/delete races | DONE for implemented media; not full C054 edit/submit acceptance |
-| C086 | Pending staff fail-closed checks | NOT RUN: real MFA/QA unavailable |
+| C086 | Ordinary-runtime staff denial, session-specific proof isolation, post-lookup demotion and post-sign commit rollback | PARTIAL: real MFA/eligibility integration and independent QA remain BLOCKED |
 | C087 | Findings disposition after the matrix | NOT RUN; never invent a fix commit |
 
 ## C083 identity and session boundary
@@ -83,6 +83,23 @@ advances once with one retained context. Existing bearers can work until provide
 removal/expiry; MinIO HEAD verifies final-object removal after cleanup. The cleanup
 task correctly stays PENDING while the incoming PUT URL is still live. This is not
 full erasure, backup invalidation or full C054 review edit/submit race completion.
+
+## C086 staff and commit boundary
+
+security-staff.integration-spec.ts proves ordinary development/production modes
+refuse expert/member/moderator/admin access even when fixture providers supply
+synthetic or real-looking proof flags. A role flag or a different session's proof
+never grants access. This is negative release-gate coverage using synthetic data,
+not evidence that real MFA was integrated or real-data staff access is safe to open.
+Policy-less withdrawal/C051 restrictions still work while production access is closed.
+
+Actual independent login sessions are bound separately; logging one out denies
+that session while the other retains only its own explicit test assurance. A real
+session lookup followed by a database role change is rechecked in C034, so a stale
+server context cannot sign. A PostgreSQL deferred audit failure after actual
+MinIO signing returns no prepared URL and rolls back the successful-read audit;
+retry after removing the fault works. No review draft/QA self-approval test is
+fabricated for absent APIs.
 
 ## Execution and release boundary
 
