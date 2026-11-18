@@ -340,6 +340,28 @@ describe("C034 assignment-bound playback / disposable PostgreSQL", () => {
     await expect(access().withAuthorizedAssignment(auth, result.assignment.id, action)).rejects.toMatchObject({ status: 403 });
     expect(action).not.toHaveBeenCalled();
   });
+  test.each(["ASSIGNED", "IN_PROGRESS", "SUBMITTED"] as const)("C036 HTTP playback after DB cancellation from %s never signs or changes history", async status => {
+    const seed = await fixture(), result = await create(seed), id = result.assignment.id;
+    let revision = 0n;
+    // Database fixture, not an invocation or simulation of the C051 worker.
+    if (status !== "ASSIGNED") await transition(db.client, id, revision++, "IN_PROGRESS");
+    if (status === "SUBMITTED") await transition(db.client, id, revision++, "SUBMITTED");
+    await transition(db.client, id, revision, "CANCELLED");
+    const before = await db.client.expertAssignment.findUniqueOrThrow({ where: { id } });
+    const events = await db.client.assignmentEvent.findMany({ where: { assignmentId: id }, orderBy: { revision: "asc" } });
+    const receipts = await db.client.assignmentIdempotency.findMany({ where: { assignmentId: id } });
+    const signer = jest.spyOn(app.get(PrivateStorageService), "playbackGrant");
+    try {
+      const response = await playback(seed.expert.cookie, id);
+      expect(response.status).toBe(403); privateHeaders(response);
+      expect(await response.json()).toMatchObject({ code: "ASSIGNMENT_ACCESS_DENIED" });
+      expect(signer).not.toHaveBeenCalled();
+      expect(await db.client.auditLog.count({ where: { action: "EXPERT_PLAYBACK_ISSUED", subjectId: id } })).toBe(0);
+      expect(await db.client.expertAssignment.findUnique({ where: { id } })).toEqual(before);
+      expect(await db.client.assignmentEvent.findMany({ where: { assignmentId: id }, orderBy: { revision: "asc" } })).toEqual(events);
+      expect(await db.client.assignmentIdempotency.findMany({ where: { assignmentId: id } })).toEqual(receipts);
+    } finally { signer.mockRestore(); }
+  });
   test("cancelled assignment is denied", async () => {
     const seed = await fixture(), result = await create(seed);
     await transition(db.client, result.assignment.id, 0n, "CANCELLED");

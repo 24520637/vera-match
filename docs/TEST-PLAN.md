@@ -2,6 +2,67 @@
 
 Each feature needs valid inputs, invalid inputs, unauthorized access, state/race tests, UI feedback states, and audit/revoke behavior when relevant.
 
+## C036 - cancellation and reassignment race acceptance
+
+Plan-Step: C036. Ticket: T06. Planned subject:
+`test(expert-assign): test cancel and reassignment races`.
+
+Original scope (`5deaf06:docs/COMMIT-PLAN.csv`): "Transitions, version and audit
+tests". Verification: "Canceled assignment access rejected". The ten original
+C036 cases remain intact: four database race/rollback cases, three historical
+receipt cases and three cancelled-playback cases. Acceptance is limited to these
+requirements and combined upstream regression evidence, not production readiness
+or completion of all T06 features. Execution results and PR approval are reported
+separately; this document does not assert a successful future run or PR merge.
+
+Implemented test scope uses disposable PostgreSQL and existing C033/C034 APIs:
+
+- `assignment-races.integration-spec.ts` observes actual PostgreSQL assignment lock
+  contention before releasing the winner. Verify both advance/cancel CAS outcomes,
+  one complete replacement, exact revisions/from/to/snapshots, no loser event or
+  ID reservation, and append-only history. These are DB fixtures, not authorization
+  or a production cancellation/reassignment service.
+- Deliberately omit the replacement event only after cancellation, replacement and
+  reservation writes succeed. Deferred COMMIT failure must roll everything back;
+  a later valid transaction can reuse the rolled-back reservation.
+- C036 cases in `assignment-api.integration-spec.ts` cancel valid assignments from
+  each active state via DB fixtures, create a new assignment using C033, and replay
+  the old key concurrently. Original receipts never change the cancelled history,
+  replacement, audit count or idempotency results; changed payload still returns 409.
+  Separate cancel/create operations do not establish atomic HTTP reassignment.
+- C036 cases in `assignment-access.integration-spec.ts` call actual playback HTTP
+  after valid DB cancellation from each active state. Expect 403/private headers,
+  no signer call/success audit, and unchanged row/revision/events/receipts.
+- Existing C031-C034 suites remain regression coverage for lifecycle, unique active
+  assignments (including SUBMITTED), authorization, generation, rollback and expiry.
+
+C051 is implemented upstream through PR #19 and is now integrated into this branch.
+Run `assignment-cancellation.integration-spec.ts` and
+`assignment-cancellation-migration.integration-spec.ts` alongside C036. They cover
+actual owner DELETE and withdrawal consumers, generation isolation, cancellation
+CAS, audit rollback, worker contention/retry and migration preservation. Actual
+C034 playback succeeds before owner deletion and is denied after atomic C051
+cancellation. These tests supplement, rather than relabel, the C036 DB fixtures.
+The C033 deletion/replay regression must retain C051's CANCELLED/revision/event
+expectations and the unchanged historical creation receipt.
+
+C034's UTC/non-UTC deadline fix is integrated from develop through merged PR #17;
+retain its bounded waits and connection-setting restoration checks. No published
+migration or production authorization behavior is changed by C036.
+
+Manual cancel/reassign HTTP APIs, their transport authorization/idempotency
+contracts, and C035 PA2 administration are outside the original C036 test scope.
+Their absence does not block this acceptance and does not authorize creating them
+here. Review edit/submit races belong to later review work with C050 coordination.
+Real production MFA/provisioning/evidence and provider/retention acceptance remain
+separate gates. Signed URLs already issued may remain usable until expiry; test
+results do not imply immediate URL revocation or physical deletion.
+
+Validation: run the C036 race suite, C033/C034 API suites, C051 domain/migration
+suites and relevant C031/C032/Consent/Auth regressions against disposable schemas.
+Record executed/skipped checks explicitly; CI and human review are still required
+before merging PR #20. No dependency on unmerged C035 code is introduced.
+
 ## C034 - assignment-bound expert playback
 
 Contract: [EXPERT-PLAYBACK-API.md](EXPERT-PLAYBACK-API.md). Run
@@ -18,8 +79,9 @@ Synthetic MFA/evidence and local SigV4 signing are not production acceptance.
 - Parse actual SigV4 date/TTL and compare exact returned expiry; test every TTL
   bound, insufficient time, invalid TTL rejection and owner default 60 seconds.
 - Run C031/C032/C033, Auth, Consent and Video regressions. Real MinIO suites require
-  the service; record NOT RUN when unavailable. C051 real cancellation race tests
-  remain BLOCKED until Huong's implementation is integrated.
+  the service; record NOT RUN when unavailable. C051 is integrated: run the real
+  cancellation/domain/migration suites and their C034 post-cancellation checks.
+  Review edit/submit concurrency remains outside these implemented routes.
 
 ## C033 - READY video assignment
 
