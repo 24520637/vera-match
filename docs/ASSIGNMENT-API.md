@@ -12,7 +12,7 @@ granted by this API. C051 cancellation remains Huong-owned and is not implemente
 email-verified MODERATOR. ADMIN does not inherit this permission. The session
 supplies the actor; body/query authority, snapshots, status, revision, timestamps,
 approval IDs and client MFA assertions are rejected. No legacy POST alias exists
-at `/expert/assignments`; expert reads are future C034 work.
+at `/expert/assignments`; C034 playback is documented in [EXPERT-PLAYBACK-API.md](EXPERT-PLAYBACK-API.md).
 
 Require configured Origin, JSON, and an Idempotency-Key of 16-128 ASCII letters,
 digits, hyphens or underscores, following the existing consent header convention.
@@ -57,7 +57,8 @@ No 90-day/365-day defaults, workload limits or availability rules are invented.
 
 It contains no playback URL, object locator, member profile, notes, qualification
 snapshot or internal transaction witness. Video status remains READY: assignment
-creation does not introduce an UNDER_REVIEW transition or expert playback route.
+creation does not introduce an UNDER_REVIEW transition. C034 provides a separate,
+assignment-bound playback route without changing assignment or video status.
 
 ## Eligibility and generation
 
