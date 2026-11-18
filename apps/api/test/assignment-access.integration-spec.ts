@@ -110,6 +110,138 @@ describe("C034 assignment-bound playback / disposable PostgreSQL", () => {
     expect(response.headers.get("vary")).toContain("Cookie");
     expect(response.headers.get("referrer-policy")).toBe("no-referrer");
   }
+  const draftRequest = (cookie: string, path: string, method = "GET", body?: unknown) =>
+    fetch(`${base}/api/expert/${path}`, { method, headers: {
+      Cookie: cookie, Origin: origin, ...(body === undefined ? {} : { "Content-Type": "application/json" }),
+    }, body: body === undefined ? undefined : JSON.stringify(body) });
+  const draftPath = (id: string) => `assignments/${id}/draft`;
+  const savePath = (id: string) => `reviews/${id}/draft`;
+  const observation = { category: "EYE", startMs: 0, endMs: 1000, observation: "Looks left.", context: "During the opening prompt." };
+
+  async function draftJson(response: Response) {
+    expect(response.status).toBe(200);
+    return await response.json() as { draft: { id: string; version: number; observations: { category: string }[] }; durationMs: number };
+  }
+
+  async function reviewFixture() {
+    const seed = await fixture(), { assignment } = await create(seed);
+    const path = draftPath(assignment.id);
+    await db.client.video.update({ where: { id: seed.video.id }, data: { durationMs: 5000 } });
+    return { ...seed, path, assignment };
+  }
+
+  test("T08 initializes once and persists all five categories across independent HTTP reads", async () => {
+    const { expert, path, assignment } = await reviewFixture();
+    const empty = await draftRequest(expert.cookie, path);
+    expect(empty.status).toBe(200); privateHeaders(empty);
+    expect(await empty.json()).toEqual({ draft: null, durationMs: 5000 });
+    expect(await db.client.expertReview.count({ where: { assignmentId: assignment.id } })).toBe(0);
+    const openings = await Promise.all([0, 1].map(() => draftRequest(expert.cookie, path, "POST", {})));
+    expect(openings.map(response => response.status)).toEqual([200, 200]);
+    const [first, second] = await Promise.all(openings.map(draftJson));
+    expect(second.draft.id).toBe(first.draft.id);
+    const categories = ["EYE", "FACIAL", "BODY", "SPEECH", "CROSS_MODAL"];
+    const saved = await draftRequest(expert.cookie, savePath(first.draft.id), "PATCH", {
+      expectedVersion: 1, observations: categories.map((category, index) => ({ ...observation, category, startMs: index * 1000, endMs: (index + 1) * 1000 })),
+    });
+    expect(saved.status).toBe(200);
+    const loaded = await draftRequest(expert.cookie, path);
+    const result = await draftJson(loaded);
+    expect(result.draft.version).toBe(2);
+    expect(result.draft.observations.map((row: { category: string }) => row.category)).toEqual(categories);
+    expect(Object.keys(result).sort()).toEqual(["draft", "durationMs"]);
+  });
+
+  test("T08 rejects out-of-range and forged fields without partial writes, and appends against current version", async () => {
+    const { expert, path, video } = await reviewFixture();
+    const opening = await draftRequest(expert.cookie, path, "POST", {});
+    const { draft } = await draftJson(opening);
+    const endpoint = `reviews/${draft.id}/observations`;
+    for (const [value, status] of [
+      [{ ...observation, endMs: 5001 }, 422],
+      [{ ...observation, startMs: -1 }, 422],
+      [{ ...observation, endMs: 0.5 }, 422],
+      [{ ...observation, context: "  " }, 400],
+      [{ ...observation, category: "UNKNOWN" }, 400],
+      [{ ...observation, durationMs: 9000 }, 400],
+    ] as const) {
+      const result = await draftRequest(expert.cookie, endpoint, "POST", { expectedVersion: 1, observation: value });
+      expect(result.status).toBe(status); privateHeaders(result);
+    }
+    await db.client.video.update({ where: { id: video.id }, data: { durationMs: null } });
+    const unknown = await draftRequest(expert.cookie, endpoint, "POST", { expectedVersion: 1, observation });
+    expect(unknown.status).toBe(503);
+    expect(await unknown.json()).toMatchObject({ code: "REVIEW_DURATION_UNAVAILABLE" });
+    expect(await db.client.expertObservation.count({ where: { reviewId: draft.id } })).toBe(0);
+    expect((await db.client.expertReview.findUniqueOrThrow({ where: { id: draft.id } })).version).toBe(1);
+    await db.client.video.update({ where: { id: video.id }, data: { durationMs: 1000 } });
+    expect((await draftRequest(expert.cookie, endpoint, "POST", { expectedVersion: 1, observation })).status).toBe(200);
+  });
+
+  test("T08 competing draft autosaves have one winner and one stale version denial", async () => {
+    const { expert, path } = await reviewFixture();
+    const { draft } = await draftJson(await draftRequest(expert.cookie, path, "POST", {}));
+    const values = ["first private summary", "second private summary"];
+    const responses = await Promise.all(values.map(summary =>
+      draftRequest(expert.cookie, savePath(draft.id), "PATCH", { expectedVersion: 1, summary, observations: [observation] })));
+    expect(responses.map(response => response.status).sort()).toEqual([200, 409]);
+    const loser = responses.find(response => response.status === 409)!;
+    expect(await loser.json()).toMatchObject({ code: "REVIEW_VERSION_CONFLICT" });
+    expect(await db.client.expertReview.findUniqueOrThrow({ where: { id: draft.id } }))
+      .toMatchObject({ version: 2, summary: values[responses.findIndex(response => response.status === 200)] });
+    expect(await db.client.expertObservation.count({ where: { reviewId: draft.id } })).toBe(1);
+    expect(await db.client.auditLog.count({ where: { subjectId: draft.id, action: "EXPERT_DRAFT_SAVED" } })).toBe(1);
+  });
+
+  test("T08 denies foreign, member, moderator and unauthenticated draft access; withdrawal prevents editing after regrant", async () => {
+    const { expert, owner, moderator, path } = await reviewFixture();
+    const { draft } = await draftJson(await draftRequest(expert.cookie, path, "POST", {}));
+    expect((await draftRequest("", path)).status).toBe(401);
+    for (const account of [owner, moderator, await user("ADMIN")])
+      expect((await draftRequest(account.cookie, path)).status).toBe(403);
+    const other = await user("EXPERT");
+    expect((await draftRequest(other.cookie, path)).status).toBe(404);
+    const patch = { expectedVersion: 1, summary: "Private" };
+    const foreign = await draftRequest(other.cookie, savePath(draft.id), "PATCH", patch);
+    const missing = await draftRequest(other.cookie, savePath(randomUUID()), "PATCH", patch);
+    expect(foreign.status).toBe(404); expect(await foreign.json()).toEqual(await missing.json()); privateHeaders(foreign);
+    await patchConsent(owner.id, 1, "EXPERT_VIDEO_REVIEW", false);
+    expect((await draftRequest(expert.cookie, path)).status).toBe(403);
+    await patchConsent(owner.id, 2, "EXPERT_VIDEO_REVIEW", true);
+    expect((await draftRequest(expert.cookie, savePath(draft.id), "PATCH", patch)).status).toBe(403);
+    expect((await db.client.expertReview.findUniqueOrThrow({ where: { id: draft.id } })).version).toBe(1);
+  });
+
+  test("T08 DB constraints enforce positive versions and ordered timecodes", async () => {
+    const { expert, path } = await reviewFixture();
+    const { draft } = await draftJson(await draftRequest(expert.cookie, path, "POST", {}));
+    await expect(db.client.$executeRaw`UPDATE "ExpertReview" SET version=0 WHERE id=${draft.id}`)
+      .rejects.toThrow(/ExpertReview_positive_version/);
+    await expect(db.client.$executeRaw`INSERT INTO "ExpertObservation"
+      (id,"reviewId",category,"startMs","endMs",observation) VALUES
+      (${randomUUID()},${draft.id},'EYE',100,0,'synthetic')`).rejects.toThrow(/ExpertObservation_ordered_timecodes/);
+  });
+
+  test("T08 audit failure rolls draft text, observations and version back", async () => {
+    const { expert, path } = await reviewFixture();
+    const { draft } = await draftJson(await draftRequest(expert.cookie, path, "POST", {}));
+    await db.client.$executeRawUnsafe(`CREATE FUNCTION t08_reject_audit() RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN IF NEW.action='EXPERT_DRAFT_SAVED' THEN RAISE EXCEPTION 'synthetic audit failure'; END IF; RETURN NEW; END $$`);
+    await db.client.$executeRawUnsafe('CREATE TRIGGER t08_reject_audit BEFORE INSERT ON "AuditLog" FOR EACH ROW EXECUTE FUNCTION t08_reject_audit()');
+    try {
+      const response = await draftRequest(expert.cookie, savePath(draft.id), "PATCH", {
+        expectedVersion: 1, summary: "private draft", observations: [observation],
+      });
+      expect(response.status).toBe(503);
+      expect(await response.text()).not.toContain("synthetic audit failure");
+      expect(await db.client.expertReview.findUniqueOrThrow({ where: { id: draft.id } })).toMatchObject({ version: 1, summary: null });
+      expect(await db.client.expertObservation.count({ where: { reviewId: draft.id } })).toBe(0);
+    } finally {
+      await db.client.$executeRawUnsafe('DROP TRIGGER t08_reject_audit ON "AuditLog"');
+      await db.client.$executeRawUnsafe("DROP FUNCTION t08_reject_audit()");
+    }
+  });
+
   test("HTTP playback signs only the assigned video and records minimum audit without changing status", async () => {
     const seed = await fixture(), result = await create(seed);
     const response = await playback(seed.expert.cookie, result.assignment.id);

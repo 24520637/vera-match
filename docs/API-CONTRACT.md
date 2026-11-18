@@ -84,6 +84,8 @@ not changes to current auth.
 | POST      | `/expert-admin/assignments`        | Moderator               | C033: strict DTO, both consents, generation, qualification revision and Idempotency-Key; synthetic only    |
 | POST      | `/expert/assignments/:assignmentId/playback` | Expert | C034 assignment-bound playback; synthetic-only until trusted MFA and approved evidence integrations exist; see [contract](EXPERT-PLAYBACK-API.md) |
 | GET       | `/expert/assignments/me`           | Expert (planned)        | Queue metadata remains unimplemented; not part of C034 playback                                          |
+| GET       | `/expert/assignments/:id/draft`    | Assigned expert         | T08: private draft or null, plus server-owned duration; does not initialize a draft |
+| POST      | `/expert/assignments/:id/draft`    | Assigned expert         | T08: explicit initialization, one DRAFT at version 1 per assignment |
 | POST      | `/expert/reviews/:id/observations` | Assigned expert         | Time range, category, evidence/context, optimistic version                                                |
 | PATCH     | `/expert/reviews/:id/draft`        | Assigned expert         | Draft-only edit; version check and audit                                                                  |
 | POST      | `/expert/reviews/:id/submit`       | Assigned expert         | Required summary/limitations; freeze submitted snapshot                                                   |

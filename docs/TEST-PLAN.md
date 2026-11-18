@@ -2,6 +2,19 @@
 
 Each feature needs valid inputs, invalid inputs, unauthorized access, state/race tests, UI feedback states, and audit/revoke behavior when relevant.
 
+## T08 private draft workspace
+
+- Run `assignment-access.integration-spec.ts` against disposable PostgreSQL.
+  Verify the existing C034 playback cases, draft initialization, all five
+  categories, duration and context validation, optimistic conflicts, rollback on
+  audit failure, and isolation after consent withdrawal and regrant.
+- Run `review-draft.validation.spec.ts` for DTO and numeric boundary checks.
+- Run `expert-review.spec.ts` on desktop and mobile. It uses the real UI and
+  client with isolated HTTP mocks to check playback routing, timeline controls,
+  saved draft reload, conflict recovery, and hidden content after denial.
+- Full browser/API/storage integration and production authorization remain
+  separate acceptance gates. See [T08 delivery](T08-DELIVERY.md).
+
 ## C036 - cancellation and reassignment race acceptance
 
 Plan-Step: C036. Ticket: T06. Planned subject:

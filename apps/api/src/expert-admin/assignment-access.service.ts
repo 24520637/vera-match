@@ -16,6 +16,10 @@ function unavailable(): never {
   throw new ServiceUnavailableException({ code: "EXPERT_ACCESS_UNAVAILABLE", message: "Expert access could not be safely confirmed." });
 }
 
+async function privateSource<T>(load: () => Promise<T>): Promise<T> {
+  try { return await load(); } catch { unavailable(); }
+}
+
 /** Authorization is transaction-bound, never a reusable access token. */
 @Injectable()
 export class AssignmentAccessService {
@@ -23,12 +27,16 @@ export class AssignmentAccessService {
     private readonly environment: EnvironmentService, private readonly registry: ExpertApprovalRegistry,
     private readonly evidence: ExpertEvidenceSource, private readonly mfa: ExpertMfaSource) {}
 
-  async withAuthorizedAssignment<T>(auth: AuthContext, assignmentId: string,
-    action: (tx: Prisma.TransactionClient, access: Readonly<{ assignmentId: string; videoId: string;
-      video: { bucket: string; objectKey: string; mimeType: string }; validateTime: () => Promise<{ now: Date; expiresAt: Date }> }>) => Promise<T>): Promise<T> {
+  requireRuntimeExpert(auth: AuthContext) {
     if (auth.user.role !== "EXPERT") denied();
     // NODE_ENV=test never authorizes real-policy records below. No production MFA source exists.
     if (this.environment.values.nodeEnv !== "test") denied();
+  }
+
+  async withAuthorizedAssignment<T>(auth: AuthContext, assignmentId: string,
+    action: (tx: Prisma.TransactionClient, access: Readonly<{ assignmentId: string; videoId: string;
+      video: { bucket: string; objectKey: string; mimeType: string; durationMs: number | null }; validateTime: () => Promise<{ now: Date; expiresAt: Date }> }>) => Promise<T>): Promise<T> {
+    this.requireRuntimeExpert(auth);
     // Match C033 resource identifiers; validate before any assignment DB lookup.
     if (typeof assignmentId !== "string" || !/^[A-Za-z0-9_-]{1,200}$/.test(assignmentId))
       approvalInvalid("assignmentId", "Send a valid identifier.");
@@ -43,7 +51,7 @@ export class AssignmentAccessService {
         const expert = await tx.user.findUnique({ where: { id: auth.user.id } });
         if (!session || session.userId !== auth.user.id || session.revokedAt) throw new UnauthorizedException({ code: "UNAUTHENTICATED", message: "A valid session is required." });
         if (!expert || expert.role !== "EXPERT" || expert.status !== "ACTIVE" || !expert.emailVerifiedAt) denied();
-        const assurance = await this.mfa.resolve(auth, tx);
+        const assurance = await privateSource(() => this.mfa.resolve(auth, tx));
         if (!assurance || assurance.userId !== expert.id || assurance.sessionId !== session.id ||
           assurance.testOnly !== true || !(assurance.expiresAt instanceof Date) || !Number.isFinite(assurance.expiresAt.getTime())) denied();
         await tx.$queryRaw`SELECT id FROM "Video" WHERE id=${locator.videoId} FOR UPDATE`;
@@ -64,7 +72,7 @@ export class AssignmentAccessService {
         await this.consent.requireGenerationInTransaction(tx, ownerId, assignment.reviewConsentSubjectId, assignment.reviewConsentVersion, "EXPERT_VIDEO_REVIEW");
         const boundApproval = credential.approval;
         if (!boundApproval || boundApproval.subjectId !== credential.subjectId) denied();
-        const boundLimits = await assignmentEvidence(boundApproval, expert.id, this.registry, this.evidence);
+        const boundLimits = await privateSource(() => assignmentEvidence(boundApproval, expert.id, this.registry, this.evidence));
         if (await tx.block.count({ where: { OR: [{ blockerId: ownerId, blockedId: expert.id }, { blockerId: expert.id, blockedId: ownerId }] } })) denied();
         const validateTime = async () => {
           const [clock] = await tx.$queryRaw<{ now: Date }[]>`SELECT (clock_timestamp() AT TIME ZONE 'UTC')::timestamp(3) AS now`;
@@ -78,7 +86,7 @@ export class AssignmentAccessService {
         };
         await validateTime();
         return action(tx, Object.freeze({ assignmentId, videoId: video.id,
-          video: { bucket: video.bucket, objectKey: video.objectKey, mimeType: video.mimeType }, validateTime }));
+          video: { bucket: video.bucket, objectKey: video.objectKey, mimeType: video.mimeType, durationMs: video.durationMs }, validateTime }));
       }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted, timeout: 10000 });
     } catch (error) {
       if (error instanceof HttpException) throw error;
