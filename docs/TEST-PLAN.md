@@ -2,6 +2,39 @@
 
 Each feature needs valid inputs, invalid inputs, unauthorized access, state/race tests, UI feedback states, and audit/revoke behavior when relevant.
 
+## C036 - cancellation and reassignment race tests (partial)
+
+Plan-Step: C036. Ticket: T06. Planned subject:
+`test(expert-assign): test cancel and reassignment races`.
+
+Implemented test scope uses disposable PostgreSQL and existing C033/C034 APIs:
+
+- `assignment-races.integration-spec.ts` observes actual PostgreSQL assignment lock
+  contention before releasing the winner. Verify both advance/cancel CAS outcomes,
+  one complete replacement, exact revisions/from/to/snapshots, no loser event or
+  ID reservation, and append-only history. These are DB fixtures, not authorization
+  or a production cancellation/reassignment service.
+- Deliberately omit the replacement event only after cancellation, replacement and
+  reservation writes succeed. Deferred COMMIT failure must roll everything back;
+  a later valid transaction can reuse the rolled-back reservation.
+- C036 cases in `assignment-api.integration-spec.ts` cancel valid assignments from
+  each active state via DB fixtures, create a new assignment using C033, and replay
+  the old key concurrently. Original receipts never change the cancelled history,
+  replacement, audit count or idempotency results; changed payload still returns 409.
+  Separate cancel/create operations do not establish atomic HTTP reassignment.
+- C036 cases in `assignment-access.integration-spec.ts` call actual playback HTTP
+  after valid DB cancellation from each active state. Expect 403/private headers,
+  no signer call/success audit, and unchanged row/revision/events/receipts.
+- Existing C031-C034 suites remain regression coverage for lifecycle, unique active
+  assignments (including SUBMITTED), authorization, generation, rollback and expiry.
+
+BLOCKED: real C051 cancellation job processing/retry/crash recovery, real cancel or
+reassign HTTP mutations and their authorization/idempotency contracts, and PA2
+scope enforcement. Do not invent worker interfaces or count fixture transitions
+as C051 acceptance. Production MFA/evidence and actual MinIO remain separate gates;
+an already-issued URL may remain usable until expiry. C034 timezone hotfix PR #17
+is separate; do not copy it into C036 or claim non-UTC deadline coverage here.
+
 ## C034 - assignment-bound expert playback
 
 Contract: [EXPERT-PLAYBACK-API.md](EXPERT-PLAYBACK-API.md). Run

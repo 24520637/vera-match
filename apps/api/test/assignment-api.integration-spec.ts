@@ -211,6 +211,42 @@ describe("C033 assignment API / disposable PostgreSQL", () => {
     expect(await db.client.assignmentEvent.count({ where: { assignmentId: row.id } })).toBe(1);
     expect((await request(seed.moderator.cookie, seed.body)).status).toBe(409);
   });
+  it.each(["ASSIGNED", "IN_PROGRESS", "SUBMITTED"] as const)("C036 replays a historical receipt after DB cancellation from %s without touching the replacement", async status => {
+    const seed = await fixture(), key = randomUUID(), original = await create(seed, key);
+    const id = original.assignment.id;
+    let revision = 0n;
+    // Valid database lifecycle fixture only: no cancellation API or C051 worker exists.
+    if (status !== "ASSIGNED") await transition(db.client, id, revision++, "IN_PROGRESS");
+    if (status === "SUBMITTED") await transition(db.client, id, revision++, "SUBMITTED");
+    await transition(db.client, id, revision, "CANCELLED");
+    const cancelled = await db.client.expertAssignment.findUniqueOrThrow({ where: { id } });
+    const history = await db.client.assignmentEvent.findMany({ where: { assignmentId: id }, orderBy: { revision: "asc" } });
+    expect(history.at(-1)).toMatchObject({ fromStatus: status, toStatus: "CANCELLED", revision: revision + 1n });
+    // A new create after cancellation is not an atomic reassignment endpoint.
+    const replacement = await create(seed);
+    expect(replacement.assignment.id).not.toBe(id);
+    const before = {
+      assignments: await db.client.expertAssignment.findMany({ where: { videoId: seed.video.id }, orderBy: { id: "asc" } }),
+      events: await db.client.assignmentEvent.findMany({ where: { assignmentId: { in: [id, replacement.assignment.id] } }, orderBy: { id: "asc" } }),
+      receipts: await db.client.assignmentIdempotency.findMany({ where: { assignmentId: { in: [id, replacement.assignment.id] } }, orderBy: { assignmentId: "asc" } }),
+      audits: await db.client.auditLog.count({ where: { action: "EXPERT_ASSIGNMENT_CREATED", subjectId: { in: [id, replacement.assignment.id] } } }),
+    };
+    const replies = await Promise.all([request(seed.moderator.cookie, seed.body, key), request(seed.moderator.cookie, seed.body, key)]);
+    for (const reply of replies) {
+      expect(reply.status).toBe(201);
+      expect(reply.headers.get("idempotency-replayed")).toBe("true");
+      expect(await reply.json()).toEqual(original);
+    }
+    expect(await db.client.expertAssignment.findMany({ where: { videoId: seed.video.id }, orderBy: { id: "asc" } })).toEqual(before.assignments);
+    expect(await db.client.assignmentEvent.findMany({ where: { assignmentId: { in: [id, replacement.assignment.id] } }, orderBy: { id: "asc" } })).toEqual(before.events);
+    expect(await db.client.assignmentIdempotency.findMany({ where: { assignmentId: { in: [id, replacement.assignment.id] } }, orderBy: { assignmentId: "asc" } })).toEqual(before.receipts);
+    expect(await db.client.auditLog.count({ where: { action: "EXPERT_ASSIGNMENT_CREATED", subjectId: { in: [id, replacement.assignment.id] } } })).toBe(before.audits);
+    expect(await db.client.expertAssignment.findUnique({ where: { id } })).toEqual(cancelled);
+    const changed = await request(seed.moderator.cookie, { ...seed.body, dueAt: "2090-01-01T00:00:00.000Z" }, key);
+    expect(changed.status).toBe(409);
+    expect(await changed.json()).toMatchObject({ code: "IDEMPOTENCY_KEY_REUSED" });
+    expect(await db.client.expertAssignment.count({ where: { videoId: seed.video.id, status: { in: ["ASSIGNED", "IN_PROGRESS", "SUBMITTED"] } } })).toBe(1);
+  });
   it("replays the original receipt after soft or hard video deletion without restoring rows or events", async () => {
     const seed = await fixture(), key = randomUUID(), result = await create(seed, key);
     await db.client.video.update({ where: { id: seed.video.id }, data: { status: "DELETED", deletedAt: new Date() } });
