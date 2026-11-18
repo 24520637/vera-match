@@ -13,7 +13,7 @@ import { createAuthDatabase } from "./disposable-auth-database";
 /** Real application/login/session guard, synthetic accounts in a disposable schema.
  * Default policy, evidence and MFA providers stay closed. No success auth handler.
  */
-export async function securityHarness() {
+export async function securityHarness(bucket?: string) {
   const db = await createAuthDatabase();
   const origin = "http://localhost:3000";
   const values = parseEnvironment({
@@ -21,6 +21,7 @@ export async function securityHarness() {
     NODE_ENV: "test",
     DATABASE_URL: db.url,
     CORS_ORIGIN: origin,
+    ...(bucket ? { MINIO_BUCKET: bucket } : {}),
   });
   const module = await Test.createTestingModule({ imports: [AppModule] })
     .overrideProvider(EnvironmentService)

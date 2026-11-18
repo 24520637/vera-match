@@ -20,7 +20,7 @@ instructions and the archived commit plan are not repository deliverables.
 | --- | --- | --- |
 | C083 | Cross-feature session/IDOR matrix, real login anti-fixation, real Mailpit reset and all-session revocation | PARTIAL: no merged privilege-mutation/session-rotation API or private review resources |
 | C084 | Actual Chromium offline/online and remote logout; existing cookie configuration assertions | PARTIAL: deployed HTTPS/proxy not exercised |
-| C085 | Pending real media boundary checks | NOT RUN |
+| C085 | Real C034 -> MinIO expiry, foreign owner/assignment denial and C051 playback/delete races | DONE for implemented media; not full C054 edit/submit acceptance |
 | C086 | Pending staff fail-closed checks | NOT RUN: real MFA/QA unavailable |
 | C087 | Findings disposition after the matrix | NOT RUN; never invent a fix commit |
 
@@ -60,6 +60,29 @@ configuration. Existing auth-security/proxy/redirect tests cover 401/403/500,
 request aborts and unsafe next paths. Those checks are retained, not duplicated.
 Actual deployed HTTPS cookie acceptance and reverse-proxy topology are NOT RUN;
 configuration assertions are not an HTTPS deployment smoke test.
+
+## C085 native media boundary
+
+security-media.integration-spec.ts drives actual login, C032 qualification approval,
+Consent API, upload/confirm, C033 assignment, C034 signing and C051 cancellation.
+Only policy/qualification/MFA fixture sources are synthetic, explicitly testOnly
+and bound to fixture identities/sessions. No success authentication/assignment
+handler is substituted and production access stays closed.
+
+Native MinIO rejects unsigned GET/HEAD and altered signature TTL, serves a signed
+range with private/no-store, and rejects the real issued C034 URL after the bound
+assignment expiry. Existing owner 60-second provider expiry tests are retained.
+Positive-consent foreign owners and correctly session-bound unassigned experts
+still cannot obtain URLs. Review re-consent leaves old bindings cancelled; only
+an explicit new C033 assignment authorizes a new URL.
+
+Both real User-lock orderings of playback versus owner DELETE are observed through
+pg_blocking_pids. A playback authorized first may return a short-lived bearer URL;
+a delete committed first returns no URL or successful playback audit. Cancellation
+advances once with one retained context. Existing bearers can work until provider
+removal/expiry; MinIO HEAD verifies final-object removal after cleanup. The cleanup
+task correctly stays PENDING while the incoming PUT URL is still live. This is not
+full erasure, backup invalidation or full C054 review edit/submit race completion.
 
 ## Execution and release boundary
 
