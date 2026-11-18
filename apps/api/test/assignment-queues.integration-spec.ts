@@ -16,6 +16,11 @@ import { ExpertApprovalRegistry, ExpertEvidenceSource, ExpertEvidence } from "..
 import { createAuthDatabase } from "./disposable-auth-database";
 import { credentialEvent, transition } from "./expert-db-fixtures";
 import { VideoService } from "../src/video/video.service";
+import type { AuthContext } from "../src/auth/auth-context";
+import { AssignmentCancellationService } from "../src/assignment-cancellation/assignment-cancellation.service";
+import { AssignmentGrantProvisioningSource } from "../src/expert-admin/assignment-grant-provisioning.source";
+import { AssignmentGrantsService } from "../src/expert-admin/assignment-grants.service";
+import { assignmentEvent } from "./expert-db-fixtures";
 
 describe("C035 assignment queue APIs / disposable PostgreSQL", () => {
   let db: Awaited<ReturnType<typeof createAuthDatabase>>, app: INestApplication, base: string;
@@ -30,6 +35,8 @@ describe("C035 assignment queue APIs / disposable PostgreSQL", () => {
     const module = await Test.createTestingModule({ imports: [AppModule] })
       .overrideProvider(EnvironmentService).useValue({ values })
       .overrideProvider(PrismaService).useValue(db.client)
+      .overrideProvider(AssignmentGrantProvisioningSource).useValue({ resolve: async (_tx: unknown, auth: AuthContext) => ({
+        userId: auth.user.id, role: "ADMIN", active: true, reference: "synthetic-c035-c051-admin", testOnly: true }) })
       .overrideProvider(StaffAssuranceSource).useValue({ resolve: async (_tx: unknown, auth: { sessionId: string; user: { id: string } }) => ({ userId: auth.user.id, sessionId: auth.sessionId, level: "MFA", verifiedAt: new Date("2026-01-01"), expiresAt: new Date(Date.now() + 600000), testOnly: true }) })
       .overrideProvider(ConsentPolicyRegistry).useValue({ current: (purpose: string) => ({ purpose, policyVersion, locale: "en",
         content: `SYNTHETIC ${purpose} POLICY`, testOnly }) })
@@ -77,6 +84,186 @@ describe("C035 assignment queue APIs / disposable PostgreSQL", () => {
   }
   const get = (cookie: string, path: string) => fetch(`${base}/api/${path}`, { headers: { Cookie: cookie, Origin: origin } });
   const candidatePath = (seed: Awaited<ReturnType<typeof fixture>>) => `expert-admin/assignments/candidate?videoId=${seed.video.id}&expertId=${seed.expert.id}`;
+  type Queue = { assignments: { id: string; status: string; dueAt: string | null }[]; nextCursor: string | null };
+  async function queue(cookie: string, role: "EXPERT" | "MODERATOR", query = ""): Promise<Queue> {
+    const response = await get(cookie, (role === "EXPERT" ? "expert/assignments/me" : "expert-admin/assignments") + query);
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
+    expect(response.headers.get("vary")).toContain("Cookie");
+    const body = await response.json() as Queue;
+    expect(body.assignments.every(row => Object.keys(row).sort().join() === "dueAt,id,status")).toBe(true);
+    return body;
+  }
+  async function auth(actor: Awaited<ReturnType<typeof user>>): Promise<AuthContext> {
+    const session = await db.client.session.findFirstOrThrow({ where: { userId: actor.id } });
+    return { sessionId: session.id, user: { id: actor.id, email: actor.email, role: actor.role, displayName: actor.displayName } };
+  }
+  async function authorize(admin: AuthContext, assignmentId: string, moderatorId: string) {
+    const [clock] = await db.client.$queryRaw<{ expires: Date }[]>`SELECT clock_timestamp() + interval '10 minutes' AS expires`;
+    return app.get(AssignmentGrantsService).grant(admin, { assignmentId, moderatorId, expectedRevision: 0, expiresAt: clock.expires.toISOString() });
+  }
+  async function deleteVideo(seed: Awaited<ReturnType<typeof fixture>>) {
+    const response = await fetch(`${base}/api/videos/${seed.video.id}`, { method: "DELETE",
+      headers: { Cookie: seed.owner.cookie, Origin: origin, "Content-Type": "application/json" }, body: "{}" });
+    expect(response.status).toBe(202);
+    expect(response.headers.get("cache-control")).toContain("no-store");
+    expect(await db.client.video.findUniqueOrThrow({ where: { id: seed.video.id } })).toMatchObject({ status: "DELETED" });
+  }
+  async function withdraw(seed: Awaited<ReturnType<typeof fixture>>, purpose: "VIDEO_STORAGE" | "EXPERT_VIDEO_REVIEW") {
+    const response = await fetch(`${base}/api/consents/me`, { method: "PATCH", headers: { Cookie: seed.owner.cookie,
+      Origin: origin, "Content-Type": "application/json", "Idempotency-Key": randomUUID() },
+      body: JSON.stringify({ expectedVersion: 1, consents: [{ purpose, granted: false }] }) });
+    expect(response.status).toBe(200);
+    const ledger = await db.client.consentLedger.findUniqueOrThrow({ where: { userId: seed.owner.id } });
+    return db.client.consentWithdrawalTask.findFirstOrThrow({ where: { subjectId: ledger.subjectId, version: 2n, purpose } });
+  }
+  // Real HTTP cancellation/withdrawal and the real C051 consumer, not fixture status
+  // updates. Synthetic policy/provisioning/MFA sources never enable production.
+  test.each((["ASSIGNED", "IN_PROGRESS", "SUBMITTED"] as const).flatMap(status =>
+    (["delete", "VIDEO_STORAGE", "EXPERT_VIDEO_REVIEW"] as const).map(cause => ({ status, cause }))))(
+    "C051 $cause from $status preserves authorized historical queue metadata", async ({ status, cause }) => {
+      const seed = await fixture(), result = await create(seed), viewer = await user("MODERATOR"), outsider = await user("EXPERT");
+      const admin = await auth(await user("ADMIN")), id = result.assignment.id;
+      const grant = await authorize(admin, id, viewer.id);
+      const grantEvidence = await db.client.assignmentModeratorGrantEvent.findUniqueOrThrow({ where: { id: grant.grantId } });
+      let revision = 0n;
+      if (status !== "ASSIGNED") await transition(db.client, id, revision++, "IN_PROGRESS");
+      if (status === "SUBMITTED") await transition(db.client, id, revision++, "SUBMITTED");
+      const before = { assignments: [{ id, status, dueAt: null }], nextCursor: null };
+      expect(await queue(seed.expert.cookie, "EXPERT")).toEqual(before);
+      expect(await queue(viewer.cookie, "MODERATOR")).toEqual(before);
+      if (cause === "delete") await deleteVideo(seed);
+      else {
+        const task = await withdraw(seed, cause);
+        // Current consent denies access before the asynchronous consumer changes
+        // status; queue metadata itself is not a media access grant.
+        await expect(db.client.$transaction(async tx => {
+          await tx.$queryRaw`SELECT id FROM "User" WHERE id=${seed.owner.id} FOR UPDATE`;
+          return app.get(ConsentAccessService).requireInTransaction(tx, seed.owner.id, [cause]);
+        })).rejects.toMatchObject({ status: 403, response: { code: "CONSENT_REQUIRED" } });
+        expect(await queue(viewer.cookie, "MODERATOR")).toEqual(before);
+        expect(await app.get(AssignmentCancellationService).processWithdrawal(task.id)).toMatchObject({ completed: true, cancelled: 1 });
+        expect(await db.client.assignmentWithdrawalReceipt.findUnique({ where: { withdrawalTaskId: task.id } })).not.toBeNull();
+        await patchConsent(seed.owner.id, 2, cause, true);
+        expect(await app.get(AssignmentCancellationService).processWithdrawal(task.id)).toMatchObject({ completed: true, cancelled: 0 });
+        await expect(db.client.$transaction(async tx => {
+          await tx.$queryRaw`SELECT id FROM "User" WHERE id=${seed.owner.id} FOR UPDATE`;
+          return app.get(ConsentAccessService).requireGenerationInTransaction(tx, seed.owner.id, task.subjectId, 1n, cause);
+        })).rejects.toMatchObject({ status: 403, response: { code: "CONSENT_GENERATION_WITHDRAWN" } });
+      }
+      const after = { assignments: [{ id, status: "CANCELLED", dueAt: null }], nextCursor: null };
+      expect(await queue(seed.expert.cookie, "EXPERT")).toEqual(after);
+      expect(await queue(viewer.cookie, "MODERATOR")).toEqual(after);
+      expect(await queue(seed.expert.cookie, "EXPERT", `?status=${status}`)).toEqual({ assignments: [], nextCursor: null });
+      expect(await queue(viewer.cookie, "MODERATOR", `?status=${status}`)).toEqual({ assignments: [], nextCursor: null });
+      expect(await queue(seed.moderator.cookie, "MODERATOR")).toEqual({ assignments: [], nextCursor: null });
+      expect(await queue(outsider.cookie, "EXPERT")).toEqual({ assignments: [], nextCursor: null });
+      expect(await db.client.expertAssignment.findUniqueOrThrow({ where: { id } })).toMatchObject({ status: "CANCELLED", revision: revision + 1n });
+      const event = await db.client.assignmentEvent.findFirstOrThrow({ where: { assignmentId: id, revision: revision + 1n }, include: { cancellation: true } });
+      expect(await db.client.assignmentEvent.count({ where: { assignmentId: id } })).toBe(Number(revision) + 2);
+      expect(event).toMatchObject({ fromStatus: status, toStatus: "CANCELLED", cancellation: { reason: cause === "delete" ? "VIDEO_DELETED" : `${cause}_WITHDRAWN` } });
+      expect(await db.client.assignmentModeratorGrantEvent.findUniqueOrThrow({ where: { id: grant.grantId } })).toEqual(grantEvidence);
+      expect(await db.client.assignmentModeratorScope.findUniqueOrThrow({ where: { id: grant.scopeId } })).toMatchObject({ revision: 1n, currentGrantId: grant.grantId });
+      const playback = await fetch(`${base}/api/expert/assignments/${id}/playback`, { method: "POST",
+        headers: { Cookie: viewer.cookie, Origin: origin, "Content-Type": "application/json" }, body: "{}" });
+      expect(playback.status).toBe(403);
+      expect(await db.client.auditLog.count({ where: { action: "EXPERT_PLAYBACK_ISSUED", subjectId: id } })).toBe(0);
+    });
+
+  test("C051 cancellation batches preserve scoped pagination and do not revive a revoked next-page grant", async () => {
+    const seed = await fixture(), foreign = await fixture(), viewer = await user("MODERATOR"), other = await user("MODERATOR");
+    const admin = await auth(await user("ADMIN")), ledger = await db.client.consentLedger.findUniqueOrThrow({ where: { userId: seed.owner.id } });
+    const approval = await db.client.expertCredential.findUniqueOrThrow({ where: { userId: seed.expert.id } });
+    const foreignApproval = await db.client.expertCredential.findUniqueOrThrow({ where: { userId: foreign.expert.id } });
+    const prefix = randomUUID().replaceAll("-", ""), allowed: string[] = [], hidden: string[] = [], grants = [];
+    // Bulk initialization is a valid database fixture. Cancellation and queue reads
+    // below use actual C051/PA2 services and HTTP, not fabricated terminal states.
+    for (let index = 0; index < 54; index++) {
+      const own = index < 51, id = `${own ? "queue" : "zz_hidden"}_${prefix}_${String(index).padStart(3, "0")}`;
+      await db.client.$transaction(async tx => {
+        const video = await tx.video.create({ data: { ownerId: seed.owner.id, bucket: "synthetic-private", objectKey: randomUUID(),
+          mimeType: "video/mp4", status: "READY", storageConsentVersion: 1n } });
+        await tx.expertAssignment.create({ data: { id, videoId: video.id, expertId: own ? seed.expert.id : foreign.expert.id,
+          credentialApprovalId: own ? approval.approvalId : foreignApproval.approvalId, assignedById: seed.moderator.id,
+          assignedByEvidence: { subject: "synthetic-creator" }, reviewConsentSubjectId: ledger.subjectId, reviewConsentVersion: 1n,
+          dueAt: new Date("2090-01-01T00:00:00.000Z") } });
+        await assignmentEvent(tx, id, null);
+      });
+      (own ? allowed : hidden).push(id);
+      const result = await authorize(admin, id, own ? viewer.id : other.id);
+      if (own) grants.push(result);
+    }
+    const task = await withdraw(seed, "EXPERT_VIDEO_REVIEW"), consumer = app.get(AssignmentCancellationService);
+    for (const [index, count] of [20, 20, 14].entries()) {
+      expect(await consumer.processWithdrawal(task.id)).toMatchObject({ cancelled: count, completed: index === 2 });
+      expect(await db.client.assignmentWithdrawalReceipt.count({ where: { withdrawalTaskId: task.id } })).toBe(index === 2 ? 1 : 0);
+    }
+    const first = await queue(viewer.cookie, "MODERATOR", "?status=CANCELLED");
+    expect(first.assignments.map(row => row.id)).toEqual([...allowed].reverse().slice(0, 50));
+    expect(first.assignments.every(row => row.dueAt === "2090-01-01T00:00:00.000Z")).toBe(true);
+    expect(first.nextCursor).toBeTruthy();
+    const query = "?status=CANCELLED&cursor=" + encodeURIComponent(first.nextCursor!);
+    expect((await queue(viewer.cookie, "MODERATOR", query)).assignments.map(row => row.id)).toEqual([allowed[0]]);
+    const expertFirst = await queue(seed.expert.cookie, "EXPERT", "?status=CANCELLED");
+    expect(expertFirst.assignments).toEqual(first.assignments);
+    expect((await queue(seed.expert.cookie, "EXPERT", "?status=CANCELLED&cursor=" + encodeURIComponent(expertFirst.nextCursor!))).assignments.map(row => row.id)).toEqual([allowed[0]]);
+    expect((await queue(other.cookie, "MODERATOR", "?status=CANCELLED")).assignments.map(row => row.id)).toEqual([...hidden].reverse());
+    expect(await queue(seed.moderator.cookie, "MODERATOR")).toEqual({ assignments: [], nextCursor: null });
+    const terminalEvents = await db.client.assignmentEvent.findMany({ where: { assignmentId: { in: [...allowed, ...hidden] } }, orderBy: { id: "asc" } });
+    await app.get(AssignmentGrantsService).revoke(admin, { scopeId: grants[0].scopeId, grantId: grants[0].grantId, expectedRevision: 1 });
+    expect(await queue(viewer.cookie, "MODERATOR", query)).toEqual({ assignments: [], nextCursor: null });
+    expect(await consumer.processWithdrawal(task.id)).toMatchObject({ completed: true, cancelled: 0 });
+    expect(await queue(viewer.cookie, "MODERATOR", query)).toEqual({ assignments: [], nextCursor: null });
+    expect(await db.client.assignmentEvent.findMany({ where: { assignmentId: { in: [...allowed, ...hidden] } }, orderBy: { id: "asc" } })).toEqual(terminalEvents);
+  }, 90000);
+
+  test.each(["read-first", "revoke-first"] as const)("C051 cancelled metadata serializes %s without restoring revoked scope", async order => {
+    const seed = await fixture(), result = await create(seed), viewer = await user("MODERATOR"), admin = await auth(await user("ADMIN"));
+    const service = app.get(AssignmentGrantsService), g = await authorize(admin, result.assignment.id, viewer.id);
+    await deleteVideo(seed);
+    const history = await db.client.assignmentEvent.findMany({ where: { assignmentId: result.assignment.id }, orderBy: { revision: "asc" } });
+    const source = app.get(StaffAssuranceSource), original = source.resolve.bind(source);
+    let entered!: () => void, release!: () => void, pid = 0, held = false;
+    const ready = new Promise<void>(resolve => { entered = resolve; }), barrier = new Promise<void>(resolve => { release = resolve; });
+    const proof = jest.spyOn(source, "resolve").mockImplementation(async (tx, current) => {
+      if (!held && current.user.id === (order === "read-first" ? viewer.id : admin.user.id)) {
+        held = true; const [backend] = await tx.$queryRaw<{ pid: number }[]>`SELECT pg_backend_pid() AS pid`;
+        pid = backend.pid; entered(); await barrier;
+      }
+      return original(tx, current);
+    });
+    const read = () => get(viewer.cookie, "expert-admin/assignments?status=CANCELLED");
+    const revoke = () => service.revoke(admin, { scopeId: g.scopeId, grantId: g.grantId, expectedRevision: 1 });
+    const first = order === "read-first" ? read() : revoke(), observed = first.then(value => ({ value }), error => ({ error }));
+    let second: Promise<{ value?: unknown; error?: unknown }> | undefined;
+    try {
+      await Promise.race([ready, first]);
+      second = (order === "read-first" ? revoke() : read()).then(value => ({ value }), error => ({ error }));
+      let contended = false;
+      for (const deadline = Date.now() + 5000; Date.now() < deadline;) {
+        const rows = await db.client.$queryRaw<{ pid: number }[]>`SELECT a.pid FROM pg_stat_activity a
+          WHERE a.wait_event_type='Lock' AND ${pid}=ANY(pg_blocking_pids(a.pid)) AND position('FROM "User"' IN a.query)>0
+            AND EXISTS (SELECT 1 FROM pg_locks l WHERE l.pid=a.pid AND l.relation='"User"'::regclass)`;
+        if (rows.length) { contended = true; break; }
+        await new Promise(resolve => setTimeout(resolve, 10));
+      }
+      expect(contended).toBe(true); release();
+      const a = await observed, b = await second;
+      expect(a).toHaveProperty("value"); expect(b).toHaveProperty("value");
+      if (!("value" in a)) throw a.error;
+      const response = (order === "read-first" ? a.value : b.value) as Response;
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ assignments: order === "read-first" ? [{ id: result.assignment.id, status: "CANCELLED", dueAt: null }] : [], nextCursor: null });
+      expect(order === "read-first" ? b.value : a.value).toMatchObject({ kind: "REVOKED", revision: 2 });
+      expect(await queue(viewer.cookie, "MODERATOR")).toEqual({ assignments: [], nextCursor: null });
+      await expect(service.grant(admin, { assignmentId: result.assignment.id, moderatorId: viewer.id, expectedRevision: 0,
+        expiresAt: new Date(Date.now() + 600000).toISOString() })).rejects.toMatchObject({ status: 409 });
+      expect(await db.client.assignmentModeratorScope.findUniqueOrThrow({ where: { id: g.scopeId } })).toMatchObject({ revision: 2n, currentGrantId: null });
+      expect(await db.client.assignmentModeratorGrantEvent.count({ where: { scopeId: g.scopeId } })).toBe(2);
+      expect(await db.client.assignmentEvent.findMany({ where: { assignmentId: result.assignment.id }, orderBy: { revision: "asc" } })).toEqual(history);
+      expect((await queue(seed.expert.cookie, "EXPERT")).assignments).toEqual([{ id: result.assignment.id, status: "CANCELLED", dueAt: null }]);
+    } finally { release(); await Promise.allSettled([first, ...(second ? [second] : [])]); proof.mockRestore(); }
+  });
   test("expert queue contains only own safe metadata", async () => {
     const seed = await fixture(), other = await fixture(), own = await create(seed); await create(other);
     const response = await get(seed.expert.cookie, "expert/assignments/me");
@@ -113,6 +300,7 @@ describe("C035 assignment queue APIs / disposable PostgreSQL", () => {
     const own = await fixture(), other = await fixture();
     const first = await create(own), second = await create(other);
     expect(await db.client.expertAssignment.count({ where: { id: { in: [first.assignment.id, second.assignment.id] } } })).toBe(2);
+    const scopesBefore = await db.client.assignmentModeratorScope.count();
       const response = await get(own.moderator.cookie, "expert-admin/assignments?status=ASSIGNED");
       expect(response.status).toBe(200);
       expect(response.headers.get("cache-control")).toBe("private, no-store");
@@ -120,7 +308,8 @@ describe("C035 assignment queue APIs / disposable PostgreSQL", () => {
       expect(body).toEqual({ assignments: [], nextCursor: null });
       expect(JSON.stringify(body)).not.toContain(first.assignment.id);
       expect(JSON.stringify(body)).not.toContain(second.assignment.id);
-      expect(await db.client.assignmentModeratorScope.count()).toBe(0);
+      expect(await db.client.assignmentModeratorScope.count({ where: { assignmentId: { in: [first.assignment.id, second.assignment.id] } } })).toBe(0);
+      expect(await db.client.assignmentModeratorScope.count()).toBe(scopesBefore);
       expect(await db.client.auditLog.count({ where: { actorId: own.moderator.id, action: "ASSIGNMENT_QUEUE_READ" } })).toBe(1);
   });
   test.each(["MEMBER", "ADMIN", "EXPERT"] as const)("%s cannot list moderator assignments", async role => {
