@@ -17,6 +17,24 @@
 
 ## Data and security invariants
 
+### C033 additive assignment persistence
+
+`20261118010000_assignment_consent_and_idempotency` adds paired nullable
+reviewConsentSubjectId/reviewConsentVersion to ExpertAssignment. Existing rows
+remain NULL without invented grants; the new API supplies both. A CHECK bounds
+the version, a RESTRICT FK binds the retained ConsentSubject, and an UPDATE trigger
+prevents rebinding. The existing C031 event snapshot projection includes the new
+columns for new mutations without rewriting prior events.
+
+AssignmentIdempotency has a PostgreSQL composite primary key on actorSubjectId,
+operation and keyHash; canonical fingerprint, original assignment ID/result and
+createdAt commit with assignment/event/audit. Its assignment reference targets the
+independent ExpertAssignmentIdentity registry, so Video/account deletion cannot
+cascade-delete receipts or release keys. UPDATE/DELETE/TRUNCATE are denied.
+No automatic expiry or production retention period is introduced. Production use
+and retention/de-identification still require review; see [Assignment API](ASSIGNMENT-API.md).
+All earlier migrations, C031 lifecycle constraints and C051 ownership are preserved.
+
 - Store video **objects** in private object storage; store only metadata and opaque keys in SQL. Signed URLs must expire quickly.
 - Store **hashes** of session, activation and password-reset tokens, never raw token strings. Store password hashes using Argon2id.
 - Canonicalize each pair as `(userLowId, userHighId)` to prevent duplicate reversed pairs.

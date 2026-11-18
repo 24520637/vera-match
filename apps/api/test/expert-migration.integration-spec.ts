@@ -25,12 +25,12 @@ describe("C031 additive migration upgrade", () => {
         id: original.id, videoId: original.videoId, expertId: original.expertId,
         assignedById: original.assignedById, assignedByEvidence: actor,
         credentialApprovalId: original.credentialApprovalId, createdAt: original.createdAt,
-      } });
-      await db.client.expertAssignment.delete({ where: { id: original.id } });
+      }, select: { id: true, revision: true, status: true } });
+      await db.client.expertAssignment.delete({ where: { id: original.id }, select: { id: true } });
       // Reproduce the original exploit on the exact reviewed schema: the old
       // revision-zero event incorrectly satisfies the deferred mutation check.
       expect(await recreate()).toMatchObject({ id: original.id, revision: 0n, status: "ASSIGNED" });
-      await db.client.expertAssignment.delete({ where: { id: original.id } });
+      await db.client.expertAssignment.delete({ where: { id: original.id }, select: { id: true } });
       const live = await assign(db.client, seed);
       const eventsBefore = await db.client.assignmentEvent.findMany({ orderBy: { id: "asc" } });
       db.deploy();

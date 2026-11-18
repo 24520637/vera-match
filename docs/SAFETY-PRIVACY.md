@@ -135,7 +135,27 @@ and environment files are preserved.
 ### Executed local checks
 
 - PASS: Prisma validation and client generation; API/Next production builds; both TypeScript lint commands.
-- PASS: 204 unit tests.
-- PASS: all 199 API/PostgreSQL/native-storage integration cases across 17 suites, including 22 safety database/API cases. The initial broad run had 19 SMTP-related failures while Mailpit was stopped; after restarting native Mailpit, both affected suites passed (26/26).
+- PASS: 224 unit tests after integrating C033.
+- PASS: 228 API/PostgreSQL/native-storage integration cases across 20 suites on the combined Safety/C033 schema, including both migration deployment orders. The first combined run exposed the C033 test-only timezone wait defect and timed out; after its UTC correction, the complete rerun passed.
 - PASS: four safety browser cases across desktop/mobile, with real API/PostgreSQL, keyboard checks, axe checks and synthetic screenshots.
 - NOT RUN: real production MFA, account closure/erasure and matching/expert block enforcement; dependencies remain explicit above. No migration was applied to the developer public schema.
+
+## Integration with merged C033
+
+C033 assignment creation is upstream. Its authenticated moderator transaction
+checks reciprocal owner/expert Block rows under sorted participant User locks;
+this merge preserves that implementation, consent-generation bindings, immutable
+assignment events and durable idempotency. It does not implement C034 expert
+playback, Matching/Expert Review block enforcement, real staff MFA, account
+lifecycle or account-deletion UI. C062/C064/C065/C066 boundaries above remain.
+
+The migration chain contains ten additive migrations. Normal chronological deploy
+applies Safety before C033. A separate PostgreSQL regression first deploys C033
+without Safety, then applies the pending Safety migration; assignment generation
+bindings, receipts, history and legacy report content must remain unchanged.
+All fixtures use fresh UUID schemas; no developer public-schema deployment occurs.
+
+The combined native regression also fixes the C033 test-only deadline wait: cast
+Date parameters through timestamptz AT TIME ZONE UTC before comparing to the UTC
+database clock. A transaction-local UTC+7 test with a short statement timeout
+prevents the former multi-hour wait. Assignment production code is unchanged.
