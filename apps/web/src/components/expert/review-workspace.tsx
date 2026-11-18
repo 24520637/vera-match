@@ -48,6 +48,7 @@ function Workspace({ assignmentId }: { assignmentId: string }) {
   const [data, setData] = useState<DraftResponse>();
   const [form, setForm] = useState<ReturnType<typeof fields>>();
   const [busy, setBusy] = useState(true), [dirty, setDirty] = useState(false);
+  const [notesDirty, setNotesDirty] = useState(false);
   const [error, setError] = useState(""), [version, reload] = useState(0);
   const [media, setMedia] = useState<Playback>(), [playbackBusy, setPlaybackBusy] = useState(false);
   const video = useRef<HTMLVideoElement>(null);
@@ -56,7 +57,7 @@ function Workspace({ assignmentId }: { assignmentId: string }) {
   function report(err: unknown) {
     if (err instanceof ApiError) {
       if ([401, 403, 404].includes(err.status ?? 0)) {
-        setData(undefined); setForm(undefined); setMedia(undefined); setDirty(false);
+        setData(undefined); setForm(undefined); setMedia(undefined); setDirty(false); setNotesDirty(false);
         setError("Review access could not be confirmed. Check your session and assignment.");
         return;
       }
@@ -74,7 +75,7 @@ function Workspace({ assignmentId }: { assignmentId: string }) {
     void apiJson<DraftResponse>(path + "/draft", { signal: controller.signal }).then(result => {
       if (controller.signal.aborted) return;
       if (!result) throw new Error("Missing draft response.");
-      setData(result); setForm(result.draft ? fields(result.draft) : undefined); setDirty(false);
+      setData(result); setForm(result.draft ? fields(result.draft) : undefined); setDirty(false); setNotesDirty(false);
     }).catch(err => { if (!controller.signal.aborted) report(err); })
       .finally(() => { if (!controller.signal.aborted) setBusy(false); });
     return () => controller.abort();
@@ -118,23 +119,23 @@ function Workspace({ assignmentId }: { assignmentId: string }) {
     const draft = data?.draft;
     if (!dirty || busy || playbackBusy || error || !form || !draft) return;
     // Incomplete observations stay local until the whole draft is valid.
-    if (!notesAreValid(form.notes, data?.durationMs)) return;
+    if (notesDirty && !notesAreValid(form.notes, data?.durationMs)) return;
     const timer = window.setTimeout(async () => {
       const signal = requests.current!.signal;
       setBusy(true);
       try {
         const result = await apiJson<DraftResponse>(`/expert/reviews/${draft.id}/draft`, { method: "PATCH", signal, json: {
           expectedVersion: draft.version, summary: form.summary || null, limitations: form.limitations || null,
-          observations: form.notes.map(note => ({ ...note, startMs: Number(note.startMs), endMs: Number(note.endMs) })),
+          ...(notesDirty ? { observations: form.notes.map(note => ({ ...note, startMs: Number(note.startMs), endMs: Number(note.endMs) })) } : {}),
         } });
         if (signal.aborted) return;
         if (!result?.draft) throw new Error("Missing draft.");
-        setData(result); setDirty(false);
+        setData(result); setDirty(false); setNotesDirty(false);
       } catch (err) { if (!signal.aborted) report(err); }
       finally { if (!signal.aborted) setBusy(false); }
     }, 650);
     return () => window.clearTimeout(timer);
-  }, [data, form, dirty, busy, playbackBusy, error]);
+  }, [data, form, dirty, notesDirty, busy, playbackBusy, error]);
 
   function edit(next: React.SetStateAction<NonNullable<typeof form>>) {
     setForm(current => current && (typeof next === "function" ? next(current) : next));
@@ -142,6 +143,7 @@ function Workspace({ assignmentId }: { assignmentId: string }) {
   }
 
   function editNote(index: number, update: Partial<Note>) {
+    setNotesDirty(true);
     edit(current => ({ ...current, notes: current.notes.map((note, i) => i === index ? { ...note, ...update } : note) }));
   }
 
@@ -161,7 +163,7 @@ function Workspace({ assignmentId }: { assignmentId: string }) {
       {data.draft && form && <fieldset disabled={busy || playbackBusy}>
         <legend>Private review draft</legend>
         <p role="status">{busy ? "Saving…" : dirty ? "Unsaved changes" : `Saved version ${data.draft.version}`}</p>
-        {dirty && !notesAreValid(form.notes, data.durationMs) &&
+        {notesDirty && !notesAreValid(form.notes, data.durationMs) &&
           <p role="status">Enter evidence, context and valid start and end times to save your changes.</p>}
         {error && dirty && <Button onClick={() => setError("")} disabled={error.startsWith("This draft changed")}>Retry save</Button>}
         <p>Describe only what is observable. Explain context and avoid diagnostic or personality labels.</p>
@@ -181,11 +183,15 @@ function Workspace({ assignmentId }: { assignmentId: string }) {
               </Button>
               <p><label>Observable evidence<br /><textarea value={note.observation} onChange={e => editNote(index, { observation: e.target.value })} /></label></p>
               <p><label>Context<br /><textarea value={note.context} onChange={e => editNote(index, { context: e.target.value })} /></label></p>
-              <Button onClick={() => edit(current => ({ ...current, notes: current.notes.filter((_, i) => i !== index) }))}>Remove observation</Button>
+              <Button onClick={() => {
+                setNotesDirty(true);
+                edit(current => ({ ...current, notes: current.notes.filter((_, i) => i !== index) }));
+              }}>Remove observation</Button>
             </fieldset>
           </li>)}
         </ol>
         <Button disabled={!data.durationMs} onClick={() => {
+          setNotesDirty(true);
           const stamp = String(Math.floor((video.current?.currentTime ?? 0) * 1000));
           edit(current => ({ ...current, notes: [...current.notes, { category: "EYE", startMs: stamp, endMs: stamp, observation: "", context: "" }] }));
         }}>Add observation</Button>

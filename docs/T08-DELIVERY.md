@@ -12,11 +12,11 @@ implementation SHA without changing its code or tests.
 | Step | Scope and actual delivery | Status |
 | --- | --- | --- |
 | C043 | Reuse the initial migration's ExpertReview and ExpertObservation entities. Add database checks for positive versions and nonnegative, ordered evidence timestamps. | DONE for database foundation |
-| C044 | Private assignment route, playback through C034, expiring video source, timestamps and keyboard-accessible jumps. Foreign assignments are denied. | PARTIAL pending end-to-end playback with real services and release authorization |
-| C045 | Persist EYE, FACIAL, BODY, SPEECH and CROSS_MODAL observations with explicit evidence and context. | PARTIAL because uploaded video currently has no verified duration producer |
+| C044 | Private assignment route, playback through C034, expiring video source, timestamps and keyboard-accessible jumps. Added a browser scenario that requires native MinIO and actual signed playback. | PARTIAL pending new native E2E result and release authorization |
+| C045 | Persist EYE, FACIAL, BODY, SPEECH and CROSS_MODAL observations with explicit evidence and context. Text-only autosave now omits observations, preserving existing notes even when duration is absent. | PARTIAL because uploaded video currently has no verified duration producer |
 | C046 | Validate integer milliseconds, order and stored duration. Out-of-range timecodes return 422. Unknown or nonpositive duration blocks new timecoded notes with 503. | DONE for validation contract; verified-duration ingest remains a dependency |
 | C047 | Versioned PATCH autosave; a stale version returns 409. A transaction includes the matching write and audit. | DONE for private draft behavior in the verified test environment |
-| C048 | Verify real HTTP/PostgreSQL draft persistence, foreign/member/staff denial and consent withdrawal. Verify browser reload and error states with HTTP mocks. | PARTIAL pending full browser/API/private-storage verification |
+| C048 | Verify real HTTP/PostgreSQL persistence and reviewer isolation. Added native browser scenarios for upload, assignment, playback, autosave, reload, cross-reviewer denial and withdrawal. | PARTIAL pending execution of the new full-stack scenarios |
 
 ## Contract
 
@@ -93,3 +93,32 @@ timecoded notes. Never substitute browser media metadata. Production storage
 enforcement and retention also remain unverified. C051 is integrated upstream.
 This change covers real draft endpoints and withdrawal denial but does not
 complete all C050/C053/C054 races or publish a production review policy.
+
+### Follow-up for Draft PR #22
+
+The local PostgreSQL test endpoint on port 5433 was available. Native MinIO on
+port 9000 was unavailable. The existing repository runner builds Nest and
+Next, then starts them on ports 4100 and 3100. In CI it uses native MinIO and
+PostgreSQL with a disposable schema and private bucket. The new desktop/mobile
+test is picked up by that runner without a CI workflow change.
+
+The current upload confirmation code only validates size, MIME, a container
+signature, and object identity before promotion. It does not parse playback
+duration. An approved server-side media inspection path needs to derive duration
+from the promoted object within a bounded and isolated process and coordinate
+its write with deletion and consent. The browser suite explicitly seeds duration
+only inside its disposable schema, after checking the ordinary upload behavior.
+No production code trusts client duration or changes the upload boundary.
+
+| Follow-up check | Result |
+| --- | --- |
+| Prisma validation and generation, API/web TypeScript and production builds | PASS |
+| API unit tests | 257/257 PASS |
+| `npm run test:integration --workspace apps/api -- --runTestsByPath test/assignment-access.integration-spec.ts test/assignment-api.integration-spec.ts test/assignment-races.integration-spec.ts test/assignment-cancellation.integration-spec.ts test/assignment-cancellation-migration.integration-spec.ts test/consent-api.integration-spec.ts` | 145/145 PASS across six suites |
+| `npm run test:ui --workspace apps/web -- --config=playwright.t08-local.config.ts tests/expert-review.spec.ts` | 8/8 PASS with mocked HTTP. The temporary config attached to the existing fixture server |
+| `node --check scripts/video-e2e-server.cjs` and `npm run test:ui --workspace apps/web -- --config=playwright.video.config.ts --list` | PASS. Two T08 cases discovered, one per project, alongside two existing owner-video cases |
+| `node scripts/run-video-e2e.cjs expert-review.video-e2e.ts` | NOT RUN locally. Port 9000 was unavailable. Track execution separately on the updated PR head |
+
+[CI #74](https://github.com/24520637/vera-match/actions/runs/44368423038) passed
+on the previous PR head `f2dc78e`. Check GitHub Actions on the follow-up head
+for execution of the new reviewer scenarios.

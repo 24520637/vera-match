@@ -2,6 +2,10 @@
 
 **Implementation status:** PARTIAL. T08 implements the assigned workspace and private draft lifecycle. See [T08 delivery and verification](T08-DELIVERY.md). Submission, QA, member reports, and claims remain separate. Human reviewers perform and document assessments through the VERA Match application. No pretrained personality model performs the analysis.
 
+Server-owned video duration gates timecoded observation edits. Until the media
+ingest path supplies verified duration, reviewers can save text-only changes
+without rewriting existing observations.
+
 ## 1. Participants and safeguards
 
 - **MEMBER:** owns the video, grants and revokes permissions, receives a QA-approved report, may respond/dispute, and controls sharing of eligible factual statements.

@@ -87,7 +87,7 @@ not changes to current auth.
 | GET       | `/expert/assignments/:id/draft`    | Assigned expert         | T08: private draft or null, plus server-owned duration; does not initialize a draft |
 | POST      | `/expert/assignments/:id/draft`    | Assigned expert         | T08: explicit initialization, one DRAFT at version 1 per assignment |
 | POST      | `/expert/reviews/:id/observations` | Assigned expert         | Time range, category, evidence/context, optimistic version                                                |
-| PATCH     | `/expert/reviews/:id/draft`        | Assigned expert         | Draft-only edit; version check and audit                                                                  |
+| PATCH     | `/expert/reviews/:id/draft`        | Assigned expert         | Draft-only edit with version check and audit. Omit observations to preserve them. Nonempty observation edits require a verified server duration. |
 | POST      | `/expert/reviews/:id/submit`       | Assigned expert         | Required summary/limitations; freeze submitted snapshot                                                   |
 | POST      | `/qa/reviews/:id/return`           | Moderator               | Not original author; actionable reason required                                                           |
 | POST      | `/qa/reviews/:id/approve`          | Moderator               | Not original author; enforce independent QA and valid transition                                          |

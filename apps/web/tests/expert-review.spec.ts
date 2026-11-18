@@ -2,6 +2,28 @@ import { expect, test } from "@playwright/test";
 
 const fixture = "http://127.0.0.1:3101/expert-review";
 
+test("summary autosave preserves existing observations when verified duration is unavailable", async ({ page }) => {
+  let draft = { id: "legacy-draft", version: 1, summary: null as string | null, limitations: null,
+    observations: [{ category: "EYE", startMs: 0, endMs: 100, observation: "Turns left.", context: null }] };
+  let savedBody: unknown;
+  await page.route("**/api/**", async route => {
+    const request = route.request();
+    if (request.url().endsWith("/auth/me"))
+      return route.fulfill({ json: { id: "expert-one", role: "EXPERT", email: "expert@example.invalid", displayName: null } });
+    if (request.method() === "PATCH") {
+      savedBody = request.postDataJSON();
+      draft = { ...draft, summary: "Updated summary", version: 2 };
+    }
+    return route.fulfill({ json: { draft, durationMs: null } });
+  });
+  await page.goto(fixture);
+  await expect(page.getByRole("button", { name: "Add observation" })).toBeDisabled();
+  await page.getByLabel("Summary").fill("Updated summary");
+  await expect(page.getByText("Saved version 2")).toBeVisible();
+  expect(savedBody).toEqual({ expectedVersion: 1, summary: "Updated summary", limitations: null });
+  await expect(page.getByLabel("Observable evidence")).toHaveValue("Turns left.");
+});
+
 test("private workspace reloads the draft and never overwrites a stale version", async ({ page }) => {
   let draft = { id: "review-one", version: 1, summary: null as string | null, limitations: null, observations: [] };
   let stale = false, writes = 0;

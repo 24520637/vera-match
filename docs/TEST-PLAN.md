@@ -12,8 +12,13 @@ Each feature needs valid inputs, invalid inputs, unauthorized access, state/race
 - Run `expert-review.spec.ts` on desktop and mobile. It uses the real UI and
   client with isolated HTTP mocks to check playback routing, timeline controls,
   saved draft reload, conflict recovery, and hidden content after denial.
-- Full browser/API/storage integration and production authorization remain
-  separate acceptance gates. See [T08 delivery](T08-DELIVERY.md).
+- Run `node scripts/run-video-e2e.cjs expert-review.video-e2e.ts` with the
+  existing loopback PostgreSQL and native MinIO services. CI also discovers the
+  test through the existing video runner on desktop and mobile. Verify signed
+  playback, denied anonymous media access, draft reload, foreign expert denial
+  and withdrawal. The test seeds a duration for draft edits after verifying that
+  ordinary uploads lack it. This does not verify duration extraction or
+  production authorization. See [T08 delivery](T08-DELIVERY.md).
 
 ## C036 - cancellation and reassignment race acceptance
 
