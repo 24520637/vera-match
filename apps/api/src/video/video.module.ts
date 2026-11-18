@@ -1,3 +1,4 @@
+import { AssignmentCancellationModule } from "../assignment-cancellation/assignment-cancellation.module";
 import { Module } from "@nestjs/common";
 import { AuthModule } from "../auth/auth.module";
 import { ConsentModule } from "../consent/consent.module";
@@ -10,7 +11,12 @@ import { VideoAuditInterceptor } from "./video-audit.interceptor";
 import { VideoRateLimiter, VideoRequestGuard } from "./video-request.guard";
 
 @Module({
-  imports: [AuthModule, ConsentModule, EnvironmentModule],
+  imports: [
+    AuthModule,
+    ConsentModule,
+    EnvironmentModule,
+    AssignmentCancellationModule,
+  ],
   controllers: [VideoController],
   providers: [
     VideoAuditInterceptor,

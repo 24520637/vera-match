@@ -1,5 +1,9 @@
 # API contract — VERA Match
 
+**C051 implementation:** [Assignment cancellation](ASSIGNMENT-CANCELLATION.md) adds
+transactional cancellation to owner video deletion and a durable, source-bound
+consumer for storage/review withdrawals. It grants no new access or account deletion.
+
 **T11 implementation:** Block/report and scoped moderator endpoints are described
 in [Safety and privacy](SAFETY-PRIVACY.md). Moderator access requires MODERATOR
 plus real session-bound staff assurance; its production source is not configured.
@@ -76,7 +80,7 @@ not changes to current auth.
 | POST      | `/videos/:id/confirm`              | Owner                   | Check actual object metadata; set READY only after verification                                           |
 | GET       | `/videos/me`                       | Owner                   | Private metadata list                                                                                     |
 | POST      | `/videos/:id/playback`             | Owner                   | Owner-only playback; expert access uses the assignment-bound route below                                  |
-| DELETE    | `/videos/:id`                      | Owner                   | Revoke owner access and enqueue cleanup; dependent assignment cancellation remains C051                   |
+| DELETE    | `/videos/:id`                      | Owner                   | Revoke owner access, atomically cancel active assignments (C051), and enqueue cleanup                   |
 | POST      | `/expert-admin/assignments`        | Moderator               | C033: strict DTO, both consents, generation, qualification revision and Idempotency-Key; synthetic only    |
 | POST      | `/expert/assignments/:assignmentId/playback` | Expert | C034 assignment-bound playback; synthetic-only until trusted MFA and approved evidence integrations exist; see [contract](EXPERT-PLAYBACK-API.md) |
 | GET       | `/expert/assignments/me`           | Expert                  | C035 own metadata only, server identity, assurance and cursor pagination; see [queue contract](ASSIGNMENT-QUEUES-API.md) |

@@ -456,3 +456,13 @@ this C012 draft does not implement or execute C019-C024 tests.
 ### T13 security/reliability review
 
 Recovery regressions additionally cover independent real loopback clients, shared native proxy socket quotas, forged forwarding headers, pair-quota isolation and exact boundaries. Native SMTP greeting timeout preserves the previous delivered link and waits for worker shutdown. Actual Mailpit deliveries with controlled acknowledgement ordering verify late-ack safety and concurrent old/new-token reset atomicity. Queue tests cover active-job saturation, draining accepted work during shutdown and redacted failure continuation. No production proxy, multi-instance limiter or crash-durable outbox is claimed by these tests.
+
+## C051 cancellation acceptance
+
+- Real owner DELETE atomically cancels ASSIGNED/IN_PROGRESS/SUBMITTED once; foreign callers are denied and terminal rows remain unchanged.
+- Source-bound storage/review withdrawal, independent immutable receipts, 20-row batches, delayed old tasks and newer re-consent generations.
+- Real PostgreSQL lock contention between workers; CAS zero-row failure, audit rollback, DB retry and missing-mapping reconciliation.
+- Opaque actual-owner versus system executor/initiator evidence; no retroactive history, no raw payload logs and no shared-task completion.
+- Context/history survive live resource removal; migration preserves C031-C034 rows and rolls back post-DDL failure.
+- UTC timestamps under a non-UTC transaction and unchanged real C034 post-cancellation denial.
+- C054 full edit/submit races remain incomplete until actual review APIs exist.
