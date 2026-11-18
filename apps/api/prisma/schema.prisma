@@ -381,6 +381,50 @@ enum ExpertCredentialStatus {
 model ExpertAssignmentIdentity {
   assignmentId String @id
   receipts AssignmentIdempotency[]
+  moderatorScopes AssignmentModeratorScope[]
+}
+
+// PA2 persistence only. Live moderator identity resolves through ExpertActorIdentity;
+// retained opaque subjects deliberately do not cascade with User deletion.
+model AssignmentModeratorScope {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  assignmentId String
+  identity ExpertAssignmentIdentity @relation(fields: [assignmentId], references: [assignmentId], onDelete: Restrict, onUpdate: NoAction)
+  moderatorSubjectId String @db.Uuid
+  revision BigInt @default(0)
+  currentGrantId String? @unique @db.Uuid
+  currentGrant AssignmentModeratorGrantEvent? @relation("CurrentModeratorGrant", fields: [currentGrantId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  // Database-owned mutation witnesses; never external DTO fields.
+  eventFromGrantId String? @db.Uuid
+  eventTransactionId String?
+  events AssignmentModeratorGrantEvent[] @relation("ModeratorScopeEvents")
+  @@unique([assignmentId, moderatorSubjectId])
+  @@index([moderatorSubjectId, assignmentId])
+}
+
+enum AssignmentModeratorGrantKind {
+  GRANTED
+  REVOKED
+}
+
+// GRANTED events are immutable authorization lifecycles. REVOKED references the
+// original grant; expiry is mandatory even on the retained revocation evidence.
+model AssignmentModeratorGrantEvent {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  scopeId String @db.Uuid
+  scope AssignmentModeratorScope @relation("ModeratorScopeEvents", fields: [scopeId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  revision BigInt
+  kind AssignmentModeratorGrantKind
+  grantId String @db.Uuid
+  grant AssignmentModeratorGrantEvent @relation("ModeratorGrantOrigin", fields: [grantId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  linkedEvents AssignmentModeratorGrantEvent[] @relation("ModeratorGrantOrigin")
+  currentFor AssignmentModeratorScope? @relation("CurrentModeratorGrant")
+  fromGrantId String? @db.Uuid
+  expiresAt DateTime @db.Timestamptz(3)
+  actorEvidence Json
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  @@unique([scopeId, revision])
+  @@index([grantId, kind])
 }
 
 // Live identity mapping only; retained evidence carries the opaque subject.

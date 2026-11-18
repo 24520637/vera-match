@@ -2,10 +2,17 @@
 
 Ticket: T06. Planned subject: `feat(expert-ui): build assignment and moderation queues`.
 The original foundation is preserved and extended with real read adapters and a
-known-pair creation workflow. Option 2 moderator visibility is approved, but scope
-membership/provisioning/verification and production assurance remain unavailable;
+known-pair creation workflow. PA2 scope persistence/services/queue filtering are
+implemented, but real provisioning, production assurance and external grant administration remain unavailable;
 this does not claim completion of C035/T06. Current contracts:
 [ASSIGNMENT-QUEUES-API.md](ASSIGNMENT-QUEUES-API.md).
+
+PA2 stage 1 adds per-assignment PostgreSQL scope and immutable grant/revoke
+history with mandatory expiry and distinct regrant lifecycles. Stage 2 adds the
+internal ADMIN grant/revoke service with default-deny trusted sources and atomic
+audit. Stage 3 connects the queue to valid per-assignment grants and atomic read
+audit. No grant/revoke HTTP endpoint exists. Trusted-provisioned ADMIN and real session-bound
+MFA remain required; no new external grant/revoke endpoint is approved by this stage.
 
 ## Product routes
 
@@ -43,13 +50,13 @@ key/payload for manual retry. Cancellation and reassignment remain unavailable.
 
 ## Dependencies still requiring approval/integration
 
-- A real server-managed scope mechanism for approved Option 2, including who grants
-  membership, how assignments map to scopes and how membership is verified/revoked.
-  The list remains fail-closed; approved direction does not mean global access.
+- Real trusted ADMIN provisioning and session-bound MFA sources, reviewed grant
+  provenance and external administration/idempotency. PA2 SQL filtering is tested;
+  production remains fail-closed, with no global/creator fallback.
 - Candidate discovery/directory contracts beyond the implemented known-pair check.
 - Manual cancellation contract/ownership and its C051 coordination boundary.
 - Trusted MFA, approved qualification/consent evidence and metadata-access policy.
-- C034 is included through the pending origin/develop merge, preserving its
+- C034 is included through the completed origin/develop merge, preserving its
   implementation. Playback remains outside C035; production and C051 integration
   limitations still apply.
 
@@ -64,5 +71,6 @@ the test host. Browser tests cover desktop/mobile rendering, loading/empty/error
 permission states, pagination, account switching, stale results, session failure,
 manual rate-limit retry, confirmation focus and scoped axe accessibility checks.
 The browser cases use API contract mocks. Separate disposable PostgreSQL API tests
-exercise real own-queue ownership/pagination, known-pair eligibility and assurance
-denials. This does not claim combined browser/database E2E, production MFA or C051.
+exercise real own-queue ownership/pagination, PA2 cross-scope/expiry/revocation/read
+audit/races, known-pair eligibility and assurance denials. This does not claim
+combined browser/database E2E, production MFA/provisioning or C051.

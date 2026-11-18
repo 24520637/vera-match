@@ -4,19 +4,45 @@ Each feature needs valid inputs, invalid inputs, unauthorized access, state/race
 
 ## C035 assignment queue integration (partial)
 
+PA2 persistence stage: `assignment-grants-database.integration-spec.ts` and
+`assignment-grants-migration.integration-spec.ts` use isolated PostgreSQL schemas.
+Verify no implicit legacy grants, mandatory finite DB-time expiry, distinct
+regrant lifecycles, immutable history, CAS conflicts, transaction witnesses,
+rollback, audit-clock overriding, and User/Video deletion evidence retention.
+Fresh deployment and upgrade must preserve existing assignment/event/identity data;
+a collision after DDL must roll the new objects back; redeployment is a no-op.
+These are persistence fixtures, not trusted-provisioned ADMIN or real MFA evidence.
+Stage 2 service authorization is covered by
+`assignment-grants-service.integration-spec.ts`: exact ADMIN/account/session checks,
+default-deny provisioning/MFA, synthetic-proof production rejection, forged fields,
+expiry after source I/O, current target eligibility, distinct regrant lifecycles,
+CAS/observed User-lock races, atomic audit rollback and retained-scope revocation.
+Tests inject synthetic sources only in disposable schemas; they do not establish
+real production provisioning/MFA or an external mutation API contract.
+Stage 3: `moderator-assignment-queue.integration-spec.ts` calls the actual HTTP
+reader using grants/revokes from the internal service and disposable PostgreSQL.
+Verify creator denial, exact roles, current MFA, no-grant empty responses, minimal
+projection, grant/status predicates before cursor limits, cross-scope pages,
+revocation between pages, expiry/regrant, failed/slow audit rollback and both
+read/revoke transaction orderings with observed PostgreSQL contention. Use fresh
+DB time after lock waits and audit, including non-UTC bounded deadline waits.
+Forged query/header scopes and cursors never confer authority. Missing sources/DB
+return 503 rather than empty success; expired proofs deny; production synthetic
+proofs and real-looking MFA without integrated provisioning remain closed.
+HTTP grant/revoke authorization/guards/idempotency and real provisioning/MFA remain
+NOT IMPLEMENTED. Queue UI keeps its DTO; browser checks use HTTP mocks, not real
+browser/database E2E. Production and C050/C051 remain blocked.
+
 Contract: [ASSIGNMENT-QUEUES-API.md](ASSIGNMENT-QUEUES-API.md).
 API tests: `test/assignment-queues.integration-spec.ts`, using disposable PostgreSQL
 and synthetic assurance/evidence only. Cover ownership, exact-role denials, missing
 and expired assurance, strict scope/query rejection, cursor pagination, safe field
 projection, both consents/generation, READY state, qualified experts, active
-assignment conflicts and blocks. Option 2 visibility is approved, but moderator
-list remains explicitly blocked until a real scope membership mechanism exists.
-Verify 503 exposes neither the caller's creations nor another moderator's rows,
-does not query assignment rows, rejects forged scope parameters and preserves
-401/403/429/503 behavior and private headers. Authorized-scope/cross-scope and
-moderator scope-aware pagination tests are BLOCKED until real membership issuance,
-mapping, verification and revocation are defined; synthetic scope labels are not
-implementation evidence. Existing expert ownership/pagination tests still run.
+assignment conflicts and blocks. PA2 lists use explicit grant membership; creators
+without grants receive empty queues. Verify forged scope rejection, exact role and
+private headers with 401/403/429/503 behavior. Expert ownership/pagination remains
+unchanged. Real SQL/HTTP tests prove scope enforcement using isolated grants;
+synthetic sources are not real production assurance or C051 implementation evidence.
 
 Browser tests: `expert-queue-api.spec.ts`, `expert-queue-integration.spec.ts` and
 the preserved foundation tests. They use real apiJson adapters with HTTP contract

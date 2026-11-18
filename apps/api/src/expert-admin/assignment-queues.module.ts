@@ -4,16 +4,19 @@ import { AuthModule } from "../auth/auth.module";
 import { DatabaseModule } from "../database/database.module";
 import { EnvironmentModule } from "../config/environment.module";
 import { ConsentModule } from "../consent/consent.module";
-import { StaffAssuranceSource } from "../safety/staff-assurance.source";
+import { SafetyModule } from "../safety/safety.module";
 import { ExpertApprovalRegistry, ExpertEvidenceSource } from "./expert-approval.sources";
 import { ExpertQueueController, ModeratorQueueController } from "./assignment-queues.controller";
 import { AssignmentQueuesService } from "./assignment-queues.service";
 import { AssignmentQueuesLimiter, AssignmentQueuesRequestGuard } from "./assignment-queues-request.guard";
+import { AssignmentGrantProvisioningSource } from "./assignment-grant-provisioning.source";
+import { AssignmentGrantsService } from "./assignment-grants.service";
 
-@Module({ imports: [AuthModule, DatabaseModule, EnvironmentModule, ConsentModule],
+@Module({ imports: [AuthModule, DatabaseModule, EnvironmentModule, ConsentModule, SafetyModule],
   controllers: [ExpertQueueController, ModeratorQueueController],
   providers: [AssignmentQueuesService, AssignmentQueuesLimiter, AssignmentQueuesRequestGuard,
-    StaffAssuranceSource, ExpertApprovalRegistry, ExpertEvidenceSource] })
+    ExpertApprovalRegistry, ExpertEvidenceSource,
+    AssignmentGrantProvisioningSource, AssignmentGrantsService], exports: [AssignmentGrantsService] })
 export class AssignmentQueuesModule implements NestModule {
   configure(consumer: MiddlewareConsumer) {
     consumer.apply((_request: Request, response: Response, next: NextFunction) => {

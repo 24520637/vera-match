@@ -4,7 +4,7 @@ const url = "http://127.0.0.1:3101/expert-queues?mode=live";
 async function setup(page: Page, role = "EXPERT") {
   const auth = { id: "actor-a", role, unavailable: false };
   const calls: { body: unknown; key: string | undefined }[] = [];
-  const server = { failPost: false, queueStatus: 200, postGate: undefined as Promise<void> | undefined };
+  const server = { failPost: false, queueStatus: 200, queueRows: [{ id: "own-job", status: "ASSIGNED", dueAt: null }], postGate: undefined as Promise<void> | undefined };
   await page.route("**/api/**", async route => {
     const request = route.request(), path = new URL(request.url()).pathname;
     if (path === "/api/auth/me") return route.fulfill(auth.unavailable ? { status: 503, json: {} } : { json: { id: auth.id, role: auth.role, displayName: null, email: "synthetic@example.invalid" } });
@@ -18,7 +18,7 @@ async function setup(page: Page, role = "EXPERT") {
       if (server.failPost) return route.abort("failed");
       return route.fulfill({ status: 201, json: { assignment: { ...body, id: "created-job", credentialApprovalId: "synthetic-approval", revision: 0, status: "ASSIGNED" } } });
     }
-    return route.fulfill({ status: server.queueStatus, json: server.queueStatus === 200 ? { assignments: [{ id: "own-job", status: "ASSIGNED", dueAt: null }], nextCursor: null } : { code: "MODERATOR_QUEUE_SCOPE_PENDING" } });
+    return route.fulfill({ status: server.queueStatus, json: server.queueStatus === 200 ? { assignments: server.queueRows, nextCursor: null } : { code: "ASSIGNMENT_ASSURANCE_UNAVAILABLE" } });
   });
   return { auth, calls, server };
 }
@@ -62,13 +62,20 @@ test("ADMIN never sees moderator creation controls", async ({ page }) => {
   await expect(page.getByText("Assignment access denied", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Check candidate pair" })).toHaveCount(0);
 });
-test("missing moderator scope membership is explicit and never appears as a successful empty queue", async ({ page }) => {
+test("unavailable moderator assurance is explicit and never appears as a successful empty queue", async ({ page }) => {
   const { server } = await setup(page, "MODERATOR"); server.queueStatus = 503;
   await page.goto(url + "&role=moderator");
-  await expect(page.getByText("Moderator scope unavailable", { exact: true })).toBeVisible();
-  await expect(page.getByText("Server-managed scope membership is not configured. No assignments were loaded.", { exact: true })).toBeVisible();
+  await expect(page.getByText("Assignment queue unavailable", { exact: true })).toBeVisible();
+  await expect(page.getByText("The service could not confirm access or availability. Retry later.", { exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Assignment own-job" })).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "No assignments in this queue" })).toHaveCount(0);
+});
+
+test("a moderator with no authorized assignments sees the confirmed empty state", async ({ page }) => {
+  const { server } = await setup(page, "MODERATOR"); server.queueRows = [];
+  await page.goto(url + "&role=moderator");
+  await expect(page.getByRole("heading", { name: "No assignments in this queue" })).toBeVisible();
+  await expect(page.getByText("Assignment queue unavailable", { exact: true })).toHaveCount(0);
 });
 test("pending operations are hidden from another account and restored only to the original moderator", async ({ page }) => {
   const { auth, calls, server } = await setup(page, "MODERATOR"); server.failPost = true;

@@ -113,19 +113,15 @@ describe("C035 assignment queue APIs / disposable PostgreSQL", () => {
     const own = await fixture(), other = await fixture();
     const first = await create(own), second = await create(other);
     expect(await db.client.expertAssignment.count({ where: { id: { in: [first.assignment.id, second.assignment.id] } } })).toBe(2);
-    const lookup = jest.spyOn(db.client.expertAssignment, "findMany");
-    try {
       const response = await get(own.moderator.cookie, "expert-admin/assignments?status=ASSIGNED");
-      expect(response.status).toBe(503);
+      expect(response.status).toBe(200);
       expect(response.headers.get("cache-control")).toBe("private, no-store");
       const body = await response.json() as Record<string, unknown>;
-      expect(body).toMatchObject({ code: "MODERATOR_QUEUE_SCOPE_PENDING" });
-      expect(body).not.toHaveProperty("assignments");
+      expect(body).toEqual({ assignments: [], nextCursor: null });
       expect(JSON.stringify(body)).not.toContain(first.assignment.id);
       expect(JSON.stringify(body)).not.toContain(second.assignment.id);
-      expect(lookup).not.toHaveBeenCalled();
-      expect(await db.client.auditLog.count({ where: { actorId: own.moderator.id, action: "ASSIGNMENT_QUEUE_READ" } })).toBe(0);
-    } finally { lookup.mockRestore(); }
+      expect(await db.client.assignmentModeratorScope.count()).toBe(0);
+      expect(await db.client.auditLog.count({ where: { actorId: own.moderator.id, action: "ASSIGNMENT_QUEUE_READ" } })).toBe(1);
   });
   test.each(["MEMBER", "ADMIN", "EXPERT"] as const)("%s cannot list moderator assignments", async role => {
     expect((await get((await user(role)).cookie, "expert-admin/assignments")).status).toBe(403);
@@ -134,7 +130,7 @@ describe("C035 assignment queue APIs / disposable PostgreSQL", () => {
     const moderator = await user("MODERATOR");
     expect((await get(moderator.cookie, "expert-admin/assignments?" + query)).status).toBe(400);
   });
-  test("moderator list preserves missing-session and rate-limit behavior before the scope gate", async () => {
+  test("moderator list preserves missing-session and rate-limit behavior before scope reads", async () => {
     expect((await get("", "expert-admin/assignments")).status).toBe(401);
     const moderator = await user("MODERATOR");
     const { AssignmentQueuesLimiter } = await import("../src/expert-admin/assignment-queues-request.guard");
