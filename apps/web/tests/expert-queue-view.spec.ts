@@ -18,3 +18,13 @@ test("errors preserve recovery categories without reflecting private server text
     expect(result.title).not.toBe(queueFailure(new Error()).title);
   }
 });
+test("known production assurance gates explain fail-closed behavior without blaming the member role", () => {
+  expect(queueFailure(new ApiError("http", "private body", 403, "ASSIGNMENT_ASSURANCE_REQUIRED"))).toEqual({
+    title: "Assignment confirmation unavailable",
+    message: "The server could not confirm the required staff assurance. No candidate was confirmed and no assignment was created.",
+  });
+  expect(queueFailure(new ApiError("http", "private body", 503, "ASSIGNMENT_ASSURANCE_UNAVAILABLE")).message)
+    .toContain("No assignment was created");
+  expect(queueFailure(new ApiError("http", "private body", 503, "MODERATOR_QUEUE_PROVISIONING_UNAVAILABLE")).message)
+    .toContain("No assignments were loaded");
+});

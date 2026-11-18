@@ -15,10 +15,12 @@ async function setup(page: Page, role = "EXPERT") {
   });
   return { auth, queue };
 }
-test("unconnected production presentation is explicit, never a fabricated empty queue", async ({ page }) => {
+test("unconnected presentation is explicit, never a fabricated empty queue or stale contract claim", async ({ page }) => {
   const { queue } = await setup(page);
   await page.goto(fixture + "?mode=unconnected");
-  await expect(page.getByText("Assignment queue is not connected", { exact: true })).toBeVisible();
+  await expect(page.getByText("Assignment queue unavailable", { exact: true })).toBeVisible();
+  await expect(page.getByText(/No server-backed queue adapter is configured for this view/)).toBeVisible();
+  await expect(page.getByText(/contracts are not implemented yet/)).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Load assignments", exact: true })).toBeDisabled();
   await expect(page.getByText("No assignments in this queue", { exact: true })).toHaveCount(0);
   expect(queue.calls).toBe(0);

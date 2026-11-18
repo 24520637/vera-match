@@ -42,6 +42,10 @@ export function validateQueueView(page: AssignmentQueuePage): void {
 export function queueFailure(error: unknown): { title: string; message: string } {
   if (error instanceof ApiError) {
     if (error.code === "MODERATOR_QUEUE_SCOPE_PENDING") return { title: "Moderator scope unavailable", message: "Server-managed scope membership is not configured. No assignments were loaded." };
+    if (error.code === "MODERATOR_QUEUE_PROVISIONING_UNAVAILABLE") return { title: "Moderator queue unavailable", message: "Trusted moderator provisioning is not configured for this deployment. No assignments were loaded." };
+    if (error.code === "ASSIGNMENT_ASSURANCE_REQUIRED") return { title: "Assignment confirmation unavailable", message: "The server could not confirm the required staff assurance. No candidate was confirmed and no assignment was created." };
+    if (error.code === "ASSIGNMENT_ASSURANCE_UNAVAILABLE") return { title: "Assignment was not created", message: "Trusted staff assurance is unavailable for this deployment. No assignment was created; try again only after the service is configured." };
+    if (error.code === "ASSIGNMENT_EVIDENCE_UNAVAILABLE") return { title: "Candidate could not be confirmed", message: "The server could not verify the required qualification evidence. No candidate was confirmed and no assignment was created." };
     if (error.status === 401) return { title: "Sign in required", message: "Verify your session before loading assignments again." };
     if (error.status === 403) return { title: "Assignment access denied", message: "Your session does not have the required permissions or assurance." };
     if (error.status === 429) return { title: "Please wait before retrying", message: "The queue request was rate limited. Retry manually when the wait ends." };

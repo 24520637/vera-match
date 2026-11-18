@@ -4,11 +4,13 @@ const url = "http://127.0.0.1:3101/expert-queues?mode=live";
 async function setup(page: Page, role = "EXPERT") {
   const auth = { id: "actor-a", role, unavailable: false };
   const calls: { body: unknown; key: string | undefined }[] = [];
-  const server = { failPost: false, queueStatus: 200, queueRows: [{ id: "own-job", status: "ASSIGNED", dueAt: null }], postGate: undefined as Promise<void> | undefined };
+  const server = { failPost: false, queueStatus: 200, candidateStatus: 200, postStatus: 201,
+    queueRows: [{ id: "own-job", status: "ASSIGNED", dueAt: null }], postGate: undefined as Promise<void> | undefined };
   await page.route("**/api/**", async route => {
     const request = route.request(), path = new URL(request.url()).pathname;
     if (path === "/api/auth/me") return route.fulfill(auth.unavailable ? { status: 503, json: {} } : { json: { id: auth.id, role: auth.role, displayName: null, email: "synthetic@example.invalid" } });
     if (path.endsWith("/candidate")) {
+      if (server.candidateStatus !== 200) return route.fulfill({ status: server.candidateStatus, json: { code: "ASSIGNMENT_ASSURANCE_REQUIRED", message: "synthetic private detail" } });
       const query = new URL(request.url()).searchParams;
       return route.fulfill({ json: { candidate: { videoId: query.get("videoId"), expertId: query.get("expertId"), expectedCredentialRevision: 7 } } });
     }
@@ -16,9 +18,10 @@ async function setup(page: Page, role = "EXPERT") {
       const body = request.postDataJSON(); calls.push({ body, key: request.headers()["idempotency-key"] });
       if (server.postGate) await server.postGate;
       if (server.failPost) return route.abort("failed");
+      if (server.postStatus !== 201) return route.fulfill({ status: server.postStatus, json: { code: "ASSIGNMENT_ASSURANCE_UNAVAILABLE", message: "synthetic private detail" } });
       return route.fulfill({ status: 201, json: { assignment: { ...body, id: "created-job", credentialApprovalId: "synthetic-approval", revision: 0, status: "ASSIGNED" } } });
     }
-    return route.fulfill({ status: server.queueStatus, json: server.queueStatus === 200 ? { assignments: server.queueRows, nextCursor: null } : { code: "ASSIGNMENT_ASSURANCE_UNAVAILABLE" } });
+    return route.fulfill({ status: server.queueStatus, json: server.queueStatus === 200 ? { assignments: server.queueRows, nextCursor: null } : { code: "MODERATOR_QUEUE_PROVISIONING_UNAVAILABLE" } });
   });
   return { auth, calls, server };
 }
@@ -43,6 +46,28 @@ test("moderator confirms the server checked pair using the exact C033 body", asy
   expect(calls[0].body).toEqual({ videoId: "known-video", expertId: "known-expert", expectedCredentialRevision: 7, dueAt: null, expiresAt: null });
   expect(calls[0].key).toBeTruthy();
 });
+test("moderator candidate form explains the production assurance gate and sends no create request", async ({ page }) => {
+  const { calls, server } = await setup(page, "MODERATOR"); server.candidateStatus = 403;
+  await page.goto(url + "&role=moderator");
+  await page.getByLabel("Video reference", { exact: true }).fill("known-video");
+  await page.getByLabel("Expert reference", { exact: true }).fill("known-expert");
+  await page.getByRole("button", { name: "Check candidate pair" }).click();
+  await expect(page.getByText("Candidate could not be confirmed", { exact: true })).toBeVisible();
+  await expect(page.getByText(/No candidate was confirmed and no assignment was created\./)).toBeVisible();
+  await expect(page.getByText("Candidate pair verified", { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Confirm assignment", exact: true })).toHaveCount(0);
+  expect(calls).toHaveLength(0);
+});
+test("confirmed assurance release-gate rejection clears the request instead of showing an unknown pending operation", async ({ page }) => {
+  const { calls, server } = await setup(page, "MODERATOR"); server.postStatus = 503;
+  await page.goto(url + "&role=moderator"); await prepare(page);
+  await page.getByRole("button", { name: "Confirm assignment", exact: true }).click();
+  await expect(page.getByText("Assignment was not created", { exact: true })).toBeVisible();
+  await expect(page.getByText(/No assignment was created; try again only after the service is configured\./)).toBeVisible();
+  await expect(page.getByText("Original assignment request retained", { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Retry original request" })).toHaveCount(0);
+  expect(calls).toHaveLength(1);
+});
 test("uncertain POST keeps the original operation across session failure and manual retry", async ({ page }) => {
   const { auth, calls, server } = await setup(page, "MODERATOR"); server.failPost = true;
   await page.goto(url + "&role=moderator"); await prepare(page); await page.getByRole("button", { name: "Confirm assignment", exact: true }).click();
@@ -65,8 +90,8 @@ test("ADMIN never sees moderator creation controls", async ({ page }) => {
 test("unavailable moderator assurance is explicit and never appears as a successful empty queue", async ({ page }) => {
   const { server } = await setup(page, "MODERATOR"); server.queueStatus = 503;
   await page.goto(url + "&role=moderator");
-  await expect(page.getByText("Assignment queue unavailable", { exact: true })).toBeVisible();
-  await expect(page.getByText("The service could not confirm access or availability. Retry later.", { exact: true })).toBeVisible();
+  await expect(page.getByText("Moderator queue unavailable", { exact: true })).toBeVisible();
+  await expect(page.getByText("Trusted moderator provisioning is not configured for this deployment. No assignments were loaded.", { exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Assignment own-job" })).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "No assignments in this queue" })).toHaveCount(0);
 });

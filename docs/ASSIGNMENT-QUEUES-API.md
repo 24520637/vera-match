@@ -200,7 +200,10 @@ current media access. A document reload loses browser memory; C033's database
 uniqueness/idempotency remains authoritative. Review server state before replacing
 an unknown operation. Production endpoints remain unavailable without reviewed sources.
 
-Manual cancellation, reassignment, media playback, C050/C051 and Safety Report
-moderation are not implemented. The combined working tree includes C034 from
-origin/develop through the completed C035 integration merge; validation does not approve
-production assurance, moderator scope or C050/C051 behavior.
+Manual moderator cancellation/reassignment and C050 review editing/submission are
+not implemented by C035. C034 playback authorization and the C051 owner-deletion /
+consent-withdrawal cancellation implementation are integrated from develop, along
+with the C034 timezone regression fix and C036 race-test coverage. Existing
+Safety Report moderation remains a separate Safety feature; this PR does not add
+or change its behavior. Validation does not approve production assurance or
+trusted moderator provisioning.

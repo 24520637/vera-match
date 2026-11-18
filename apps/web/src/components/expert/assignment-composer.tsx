@@ -25,14 +25,14 @@ export function AssignmentComposer({ ownerId }: { ownerId: string }) {
   const [due, setDue] = useState(""), [expires, setExpires] = useState("");
   const [candidate, setCandidate] = useState<AssignmentCandidate>(), [preview, setPreview] = useState<AssignmentRequest>();
   const [pending, setPending] = useState<Operation | undefined>(() => unresolved.get(ownerId));
-  const [busy, setBusy] = useState(false), [error, setError] = useState(""), [receipt, setReceipt] = useState("");
+  const [busy, setBusy] = useState(false), [error, setError] = useState(""), [errorTitle, setErrorTitle] = useState("Assignment not confirmed"), [receipt, setReceipt] = useState("");
   const [knownRejected, setKnownRejected] = useState(false);
   const retry = useRetryAfter(), alive = useRef(true), working = useRef(false), source = useRef<AbortController | undefined>(undefined);
   useEffect(() => { alive.current = true; return () => { alive.current = false; source.current?.abort(); }; }, []);
   function changed() { setCandidate(undefined); setPreview(undefined); setReceipt(""); }
   async function check() {
     if (working.current || pending || retry.seconds) return;
-    working.current = true; setBusy(true); setError(""); setCandidate(undefined);
+    working.current = true; setBusy(true); setError(""); setErrorTitle("Candidate could not be confirmed"); setCandidate(undefined);
     const controller = new AbortController(); source.current?.abort(); source.current = controller;
     try {
       const value = await checkAssignmentCandidate(video, expert, controller.signal);
@@ -52,29 +52,37 @@ export function AssignmentComposer({ ownerId }: { ownerId: string }) {
     if (working.current || retry.seconds || (!original && !preview)) return;
     const operation = original ?? { key: crypto.randomUUID(), body: preview! };
     unresolved.set(ownerId, operation); setPending(operation); setPreview(undefined);
-    working.current = true; setBusy(true); setError(""); setKnownRejected(false);
+    working.current = true; setBusy(true); setError(""); setErrorTitle("Assignment not confirmed"); setKnownRejected(false);
     try {
       const value = await createAssignment(operation.body, operation.key);
       if (unresolved.get(ownerId)?.key === operation.key) unresolved.delete(ownerId);
       if (alive.current) { setPending(undefined); setCandidate(undefined); setReceipt(value!.assignment.id); }
     } catch (failure) {
-      const uncertain = !(failure instanceof ApiError) || failure.kind !== "http" || (failure.status ?? 500) >= 500;
+      // C033 emits this release-gate response before opening its mutation
+      // transaction, so it is a confirmed no-write outcome, not an unknown receipt.
+      const confirmedNoWrite = failure instanceof ApiError && failure.code === "ASSIGNMENT_ASSURANCE_UNAVAILABLE";
+      const uncertain = !confirmedNoWrite && (!(failure instanceof ApiError) || failure.kind !== "http" || (failure.status ?? 500) >= 500);
       const current = unresolved.get(ownerId);
       const retained = { ...operation, uncertain: current?.uncertain || operation.uncertain || uncertain };
       // A request from an unmounted screen must not overwrite a newer operation,
       // or resurrect one already reconciled by another mounted instance.
-      if (current?.key === operation.key) unresolved.set(ownerId, retained);
+      if (current?.key === operation.key) {
+        if (confirmedNoWrite) unresolved.delete(ownerId);
+        else unresolved.set(ownerId, retained);
+      }
       if (alive.current) {
-        setPending(retained);
-        setError(queueFailure(failure).message + " The original request is retained; do not start a replacement while its outcome is unknown."); retry.fromError(failure);
-        setKnownRejected(!retained.uncertain && failure instanceof ApiError && [400, 404, 409].includes(failure.status ?? 0) && failure.code !== "IDEMPOTENCY_KEY_REUSED");
+        setPending(confirmedNoWrite ? undefined : retained);
+        setErrorTitle(confirmedNoWrite ? "Assignment was not created" : "Assignment not confirmed");
+        if (confirmedNoWrite) setCandidate(undefined);
+        setError(confirmedNoWrite ? queueFailure(failure).message : queueFailure(failure).message + " The original request is retained; do not start a replacement while its outcome is unknown."); retry.fromError(failure);
+        setKnownRejected(!retained.uncertain && failure instanceof ApiError && ([400, 404, 409].includes(failure.status ?? 0) || confirmedNoWrite) && failure.code !== "IDEMPOTENCY_KEY_REUSED");
       }
     } finally { working.current = false; if (alive.current) setBusy(false); }
   }
   return <section className="container expert-queue" aria-labelledby="assignment-create-heading">
     <h2 id="assignment-create-heading">Create an assignment</h2>
     <p>Use known opaque references. This checks one pair; it is not a public search or a directory of members. Eligibility is rechecked on creation.</p>
-    {error && <Notice tone="error" title="Assignment not confirmed">{error}</Notice>}
+    {error && <Notice tone="error" title={errorTitle}>{error}</Notice>}
     {receipt && <Notice tone="success" title="Creation receipt confirmed">Reference: {receipt}. This is a historical receipt, not current access authorization. Refresh the queue.</Notice>}
     <RetryAfterFeedback id="assignment-create-retry" seconds={retry.seconds} />
     {pending ? <Notice tone="warning" title="Original assignment request retained">

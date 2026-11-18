@@ -60,9 +60,9 @@ function QueueContent({ loader }: { loader?: AssignmentQueueLoader }) {
     return () => { alive.current = false; ++sequence.current; request.current?.abort(); };
   }, [load]);
 
-  if (!loader) return <Notice title="Assignment queue is not connected">
-    The server-authorized assignment list and pagination contracts are not implemented yet.
-    No assignments have been loaded. Assignment creation and cancellation are unavailable here.
+  if (!loader) return <Notice title="Assignment queue unavailable">
+    No server-backed queue adapter is configured for this view. No assignments have been loaded,
+    and no assignment action has been submitted.
     <div className="form-actions"><Button disabled>Load assignments</Button></div>
   </Notice>;
   const failure = error ? queueFailure(error) : undefined;
