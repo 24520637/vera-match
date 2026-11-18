@@ -14,6 +14,12 @@ export function configureApplication(app: INestApplication) {
     exposedHeaders: ["Retry-After"],
   });
   app.use((request: Request, response: Response, next: NextFunction) => {
+    // Before body parsing: malformed JSON denials must also remain private.
+    if (request.path.startsWith("/api/expert/assignments")) {
+      response.setHeader("Cache-Control", "private, no-store");
+      response.setHeader("Referrer-Policy", "no-referrer");
+      response.vary("Cookie");
+    }
     if (request.path.startsWith("/api/auth")) {
       response.setHeader("Cache-Control", "no-store");
       response.setHeader("Referrer-Policy", "no-referrer");

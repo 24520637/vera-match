@@ -69,10 +69,11 @@ not changes to current auth.
 | POST      | `/videos/upload-intent`            | Member                  | Consent, MIME/size validation; short-lived owner-scoped upload URL                                        |
 | POST      | `/videos/:id/confirm`              | Owner                   | Check actual object metadata; set READY only after verification                                           |
 | GET       | `/videos/me`                       | Owner                   | Private metadata list                                                                                     |
-| POST      | `/videos/:id/playback`             | Owner                   | Current authorization and consent; expert playback deferred to C034/C050                                  |
+| POST      | `/videos/:id/playback`             | Owner                   | Owner-only playback; expert access uses the assignment-bound route below                                  |
 | DELETE    | `/videos/:id`                      | Owner                   | Revoke owner access and enqueue cleanup; dependent assignment cancellation remains C051                   |
 | POST      | `/expert-admin/assignments`        | Moderator               | C033: strict DTO, both consents, generation, qualification revision and Idempotency-Key; synthetic only    |
-| GET       | `/expert/assignments/me`           | Expert (planned)        | C034 future route, not implemented by C033                                                                |
+| POST      | `/expert/assignments/:assignmentId/playback` | Expert | C034 assignment-bound playback; synthetic-only until trusted MFA and approved evidence integrations exist; see [contract](EXPERT-PLAYBACK-API.md) |
+| GET       | `/expert/assignments/me`           | Expert (planned)        | Queue metadata remains unimplemented; not part of C034 playback                                          |
 | POST      | `/expert/reviews/:id/observations` | Assigned expert         | Time range, category, evidence/context, optimistic version                                                |
 | PATCH     | `/expert/reviews/:id/draft`        | Assigned expert         | Draft-only edit; version check and audit                                                                  |
 | POST      | `/expert/reviews/:id/submit`       | Assigned expert         | Required summary/limitations; freeze submitted snapshot                                                   |

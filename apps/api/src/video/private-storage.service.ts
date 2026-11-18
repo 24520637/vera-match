@@ -157,21 +157,35 @@ export class PrivateStorageService {
       ),
     );
   }
-  async playbackUrl(key: string, mimeType: string) {
+  private validatePlaybackTtl(ttl: number) {
+    if (!Number.isInteger(ttl) || ttl < 1 || ttl > PLAYBACK_TTL_SECONDS)
+      throw new Error("Playback TTL must be an integer from 1 to 60 seconds");
+  }
+  private signPlayback(key: string, mimeType: string, ttl: number, signingDate: Date) {
+    this.validatePlaybackTtl(ttl);
+    return this.safe(() => getSignedUrl(this.client, new GetObjectCommand({
+      Bucket: this.bucket, Key: key, ResponseContentType: mimeType,
+      ResponseCacheControl: "private, no-store", ResponseContentDisposition: "inline",
+    }), { expiresIn: ttl, signingDate }));
+  }
+  async playbackUrl(key: string, mimeType: string, ttl = PLAYBACK_TTL_SECONDS) {
+    this.validatePlaybackTtl(ttl);
     await this.assertPrivate();
-    return this.safe(() =>
-      getSignedUrl(
-        this.client,
-        new GetObjectCommand({
-          Bucket: this.bucket,
-          Key: key,
-          ResponseContentType: mimeType,
-          ResponseCacheControl: "private, no-store",
-          ResponseContentDisposition: "inline",
-        }),
-        { expiresIn: PLAYBACK_TTL_SECONDS },
-      ),
-    );
+    return this.signPlayback(key, mimeType, ttl, new Date());
+  }
+  /** Internal authorization callback runs after storage I/O. SigV4 records whole
+   * seconds: derive the returned expiry from that exact signing date and TTL.
+   */
+  async playbackGrant(key: string, mimeType: string,
+    authorize: () => Promise<{ now: Date; expiresAt: Date }>) {
+    await this.assertPrivate();
+    const bounds = await authorize();
+    const signingDate = new Date(Math.floor(bounds.now.getTime() / 1000) * 1000);
+    const ttl = Math.min(PLAYBACK_TTL_SECONDS, Math.floor((bounds.expiresAt.getTime() - signingDate.getTime()) / 1000));
+    const expiresAt = new Date(signingDate.getTime() + ttl * 1000);
+    if (!Number.isFinite(ttl) || ttl < 1 || expiresAt.getTime() - bounds.now.getTime() < 1000) this.unavailable();
+    const url = await this.signPlayback(key, mimeType, ttl, signingDate);
+    return { url, expiresAt: expiresAt.toISOString() };
   }
   async remove(key: string) {
     await this.safe(async () => {

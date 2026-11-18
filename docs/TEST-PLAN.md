@@ -2,6 +2,25 @@
 
 Each feature needs valid inputs, invalid inputs, unauthorized access, state/race tests, UI feedback states, and audit/revoke behavior when relevant.
 
+## C034 - assignment-bound expert playback
+
+Contract: [EXPERT-PLAYBACK-API.md](EXPERT-PLAYBACK-API.md). Run
+`test/assignment-access.integration-spec.ts` against disposable PostgreSQL schemas.
+Synthetic MFA/evidence and local SigV4 signing are not production acceptance.
+
+- Verify session/role/IDOR denials, identical missing/foreign 404s, strict empty
+  JSON, Origin policy, private headers and independent rate limits.
+- Verify ASSIGNED/IN_PROGRESS only, READY/non-deleted video, eligible owner/expert,
+  current approval binding, bilateral blocks, expiry and authoritative generations.
+- Withdrawal/re-consent must not resurrect either storage or review authorization.
+- Verify expiry after evidence I/O and observed PostgreSQL lock contention; failures
+  return no URL or success audit. Audit failure prevents signing and rolls back.
+- Parse actual SigV4 date/TTL and compare exact returned expiry; test every TTL
+  bound, insufficient time, invalid TTL rejection and owner default 60 seconds.
+- Run C031/C032/C033, Auth, Consent and Video regressions. Real MinIO suites require
+  the service; record NOT RUN when unavailable. C051 real cancellation race tests
+  remain BLOCKED until Huong's implementation is integrated.
+
 ## C033 - READY video assignment
 
 Contract: [ASSIGNMENT-API.md](ASSIGNMENT-API.md). Use synthetic qualification and
