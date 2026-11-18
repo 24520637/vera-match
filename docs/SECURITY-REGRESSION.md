@@ -1,6 +1,7 @@
 # T15 security regression — independently verifiable subset
 
-Branch: huong/test/security-regression. Baseline: a14ae10 (develop).
+Branch: huong/test/security-regression. Initial baseline: a14ae10 (develop).
+During validation, merged develop 0c8d86e (PR #20) was integrated non-destructively.
 This is not Feature 06 completion or production approval. Private execution
 instructions and the archived commit plan are not repository deliverables.
 
@@ -8,9 +9,12 @@ instructions and the archived commit plan are not repository deliverables.
 
 - PR #17 is merged: C034 timezone-fixture correction is included.
 - PR #19 is merged: real C051 cancellation/evidence/rotation/observation is included.
-- PR #18 (C035/PA2) and PR #20 (C036 races) remain unmerged at this inspection.
-  Their changes are not imported. PA2 HTTP administration/provisioning is not a
-  tested merged API. The PR #18 provider-boundary fix belongs to that PR.
+- PR #18 (C035/PA2) remains open at 609f813; its code is not imported. PA2
+  HTTP administration/provisioning is not a tested merged API. Its C035
+  provider-boundary correction belongs to that PR.
+- PR #20 (C036) merged during this run into develop 0c8d86e. Only after that
+  merge, its existing database/receipt/cancelled-playback tests were integrated
+  from develop and rechecked. This does not invent manual cancel/reassign APIs.
 - Review workspace/submit/independent QA/report/claims/matching APIs and account
   deletion remain absent. A Prisma model or a missing route is not an API test.
 
@@ -22,7 +26,7 @@ instructions and the archived commit plan are not repository deliverables.
 | C084 | Actual Chromium offline/online and remote logout; existing cookie configuration assertions | PARTIAL: deployed HTTPS/proxy not exercised |
 | C085 | Real C034 -> MinIO expiry, foreign owner/assignment denial and C051 playback/delete races | DONE for implemented media; not full C054 edit/submit acceptance |
 | C086 | Ordinary-runtime staff denial, session-specific proof isolation, post-lookup demotion and post-sign commit rollback | PARTIAL: real MFA/eligibility integration and independent QA remain BLOCKED |
-| C087 | Confirmed provider-exception privacy defect reproduced and sanitized in C034 | DONE for this finding; whole-feature/release acceptance remains BLOCKED |
+| C087 | Confirmed provider-exception privacy defect reproduced and sanitized in C034 | PARTIAL: confirmed finding fixed; dependency highs and full-workflow acceptance remain BLOCKED |
 
 ## C083 identity and session boundary
 
@@ -118,7 +122,7 @@ probes FAIL before the correction and PASS afterward; normal retry signs only
 after valid authorization and writes its normal minimal audit. Default source
 providers and release gates are unchanged. Phuc was notified before changing the
 shared C034 boundary in the PR #18 coordination comment; his review of this T15
-PR remains required. No unmerged C035/C036 code is copied or imported.
+PR remains required. No open C035 code is copied or imported; C036 is inherited only through merged develop.
 
 No fake fix/history is created for missing QA, Matching, real MFA, role provisioning
 or account deletion. C087 fixes the concrete privacy finding found during this
@@ -139,7 +143,7 @@ complete review/QA/matching acceptance remain release blockers.
 - New cases: 11 C083 PostgreSQL/Mailpit, 4 C084 real browser desktop/mobile, 5 C085 native media, 5 C086 staff/commit and 3 C087 provider privacy probes.
 - Existing source tests are preserved, including the 60-second owner URL provider expiry, SMTP confirmation failures, consent/mutation rollback, block/report/moderation audits, C031-C034 lifecycle and C051 concurrent workers.
 - PASS/FAIL counts for full unit/integration/browser/build validation and the exact CI head are recorded in the PR. Failed pre-fix privacy probes are evidence of reproduction, not passing security acceptance.
-- BLOCKED: actual role-elevation/provisioning rotation, private review/edit/submit/independent QA/report/claims/matching/account-deletion APIs; Phuc PRs #18/#20 are not merged into this branch.
+- BLOCKED: actual role-elevation/provisioning rotation, private review/edit/submit/independent QA/report/claims/matching/account-deletion APIs; Open PR #18 is not merged into this branch; C036 PR #20 is now part of the merged baseline.
 - NOT RUN: deployed HTTPS/proxy and actual trusted MFA/qualification/consent-policy publication, alert routing/outage delivery drill, production retention/backup/restore and full user journey. Production real-data staff access remains BLOCKED.
 
 ## Dependency audit — FAIL / production gate remains open
@@ -166,3 +170,14 @@ all gates and record remaining accepted risks before release. Audit is FAIL even
 when scoped regression tests/CI pass; Feature 06 and production security are not
 complete. The C087 provider-body correction is completed independently of this
 unresolved dependency gate.
+
+## Local verification record
+
+- PASS: Prisma validate/generate, API/web TypeScript lint and production builds.
+- PASS: 250 unit tests.
+- PASS: full 340/340 integration cases across 27 suites before the later C036
+  baseline merge. After integrating merged C036, all 92 C033/C034/C036 cases
+  pass across three suites. Exact-head full CI is required.
+- PASS: complete Auth browser suite 36/36 and native Video E2E 2/2, desktop/mobile.
+- FAIL: both dependency audits above. NOT RUN/BLOCKED production/full-workflow
+  acceptance is unchanged by passing test/build checks.
