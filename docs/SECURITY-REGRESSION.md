@@ -19,7 +19,7 @@ instructions and the archived commit plan are not repository deliverables.
 | Step | Implemented evidence | Status / missing acceptance |
 | --- | --- | --- |
 | C083 | Cross-feature session/IDOR matrix, real login anti-fixation, real Mailpit reset and all-session revocation | PARTIAL: no merged privilege-mutation/session-rotation API or private review resources |
-| C084 | Pending browser/cookie checks | NOT RUN |
+| C084 | Actual Chromium offline/online and remote logout; existing cookie configuration assertions | PARTIAL: deployed HTTPS/proxy not exercised |
 | C085 | Pending real media boundary checks | NOT RUN |
 | C086 | Pending staff fail-closed checks | NOT RUN: real MFA/QA unavailable |
 | C087 | Findings disposition after the matrix | NOT RUN; never invent a fix commit |
@@ -44,6 +44,22 @@ another account's block. Media confirm/playback without consent deny at the
 existing 403 consent precheck; foreign delete is 404. Positive-consent media
 ownership is checked separately in C085. No nonexistent review route is used as
 proof of authorization.
+
+## C084 browser transport and cookie boundary
+
+security-regression.auth-e2e.ts uses real registration, Mailpit activation, login,
+Next proxy and Chromium network-offline mode on desktop/mobile. Offline session
+revalidation hides private content without redirecting or removing the cookie.
+Online recovery restores the original session; an independent browser's real
+logout-all while offline instead yields 401 and the normal login redirect.
+
+The browser verifies HttpOnly, host-only, Path=/ and local HTTP SameSite=Lax /
+Secure=false without reflecting token values. Existing session-cookie.spec.ts
+checks Secure/HttpOnly/SameSite/host-prefix-compatible options for production
+configuration. Existing auth-security/proxy/redirect tests cover 401/403/500,
+request aborts and unsafe next paths. Those checks are retained, not duplicated.
+Actual deployed HTTPS cookie acceptance and reverse-proxy topology are NOT RUN;
+configuration assertions are not an HTTPS deployment smoke test.
 
 ## Execution and release boundary
 
