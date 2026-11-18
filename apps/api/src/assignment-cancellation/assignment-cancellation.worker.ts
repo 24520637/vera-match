@@ -65,14 +65,7 @@ export class AssignmentCancellationWorker
         >`
         SELECT "afterId", "throughId" FROM "AssignmentCancellationScan"
         WHERE lane=${lane} FOR UPDATE`;
-        const source =
-          lane === "withdrawal"
-            ? Prisma.sql`SELECT t.id::text COLLATE "C" AS id FROM "ConsentWithdrawalTask" t
-            WHERE t.purpose IN ('VIDEO_STORAGE','EXPERT_VIDEO_REVIEW') AND NOT EXISTS
-              (SELECT 1 FROM "AssignmentWithdrawalReceipt" r WHERE r."withdrawalTaskId"=t.id)`
-            : Prisma.sql`SELECT v.id COLLATE "C" AS id FROM "Video" v
-            WHERE v.status='DELETED' AND EXISTS (SELECT 1 FROM "ExpertAssignment" a
-              WHERE a."videoId"=v.id AND a.status IN ('ASSIGNED','IN_PROGRESS','SUBMITTED'))`;
+        const source = this.pending(lane);
         const page = (after: string | null, through: string | null) =>
           tx.$queryRaw<{ id: string }[]>(Prisma.sql`
         SELECT id FROM (${source}) pending
@@ -101,6 +94,52 @@ export class AssignmentCancellationWorker
       { timeout: 10000 },
     );
   }
+  private pending(lane: "withdrawal" | "deleted-video") {
+    return lane === "withdrawal"
+      ? Prisma.sql`SELECT t.id::text COLLATE "C" AS id, t."createdAt" AS "queuedAt"
+          FROM "ConsentWithdrawalTask" t
+          WHERE t.purpose IN ('VIDEO_STORAGE','EXPERT_VIDEO_REVIEW') AND NOT EXISTS
+            (SELECT 1 FROM "AssignmentWithdrawalReceipt" r WHERE r."withdrawalTaskId"=t.id)`
+      : Prisma.sql`SELECT v.id COLLATE "C" AS id, COALESCE(v."deletedAt",v."createdAt") AS "queuedAt"
+          FROM "Video" v WHERE v.status='DELETED' AND EXISTS
+            (SELECT 1 FROM "ExpertAssignment" a WHERE a."videoId"=v.id
+              AND a.status IN ('ASSIGNED','IN_PROGRESS','SUBMITTED'))`;
+  }
+  /** Aggregates only: no source IDs, SQL exceptions or media/account payloads. */
+  private async observeBacklog() {
+    const summary = (lane: "withdrawal" | "deleted-video") => Prisma.sql`
+      SELECT ${lane}::text AS lane, count(*)::double precision AS pending,
+        GREATEST(0,COALESCE(FLOOR(EXTRACT(EPOCH FROM
+          ((clock_timestamp() AT TIME ZONE 'UTC') - min("queuedAt")))),0))::double precision AS "oldestSeconds"
+      FROM (${this.pending(lane)}) pending`;
+    const rows = await this.prisma.$queryRaw<
+      {
+        lane: "withdrawal" | "deleted-video";
+        pending: number;
+        oldestSeconds: number;
+      }[]
+    >(
+      Prisma.sql`${summary("withdrawal")} UNION ALL ${summary("deleted-video")}`,
+    );
+    const withdrawal = rows.find((r) => r.lane === "withdrawal")!,
+      deleted = rows.find((r) => r.lane === "deleted-video")!;
+    this.logger.log({
+      code: "ASSIGNMENT_CANCELLATION_HEARTBEAT",
+      withdrawalPending: withdrawal.pending,
+      withdrawalOldestSeconds: withdrawal.oldestSeconds,
+      deletedVideoPending: deleted.pending,
+      deletedVideoOldestSeconds: deleted.oldestSeconds,
+    });
+    for (const row of rows)
+      if (row.pending > 0 && row.oldestSeconds >= 900)
+        this.logger.warn({
+          code: "ASSIGNMENT_CANCELLATION_BACKLOG_OVERDUE",
+          lane: row.lane,
+          pending: row.pending,
+          oldestSeconds: row.oldestSeconds,
+          thresholdSeconds: 900,
+        });
+  }
   private async process() {
     const tasks = await this.nextBatch("withdrawal");
     let retry = false,
@@ -122,5 +161,6 @@ export class AssignmentCancellationWorker
     if (mappingMissing)
       this.logger.warn("ASSIGNMENT_CANCELLATION_MAPPING_UNAVAILABLE");
     if (retry) this.logger.warn("ASSIGNMENT_CANCELLATION_RETRY_SCHEDULED");
+    await this.observeBacklog();
   }
 }

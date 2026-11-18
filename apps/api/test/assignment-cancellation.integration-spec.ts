@@ -5,7 +5,7 @@ import {
 import { AssignmentCancellationWorker } from "../src/assignment-cancellation/assignment-cancellation.worker";
 import { ExpertMfaSource } from "../src/expert-admin/expert-mfa.source";
 import { PrivateStorageService } from "../src/video/private-storage.service";
-import { INestApplication } from "@nestjs/common";
+import { INestApplication, Logger } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import { AccountStatus, UserRole } from "@prisma/client";
 import { randomBytes, randomUUID } from "node:crypto";
@@ -288,6 +288,124 @@ describe("C051 assignment cancellation / disposable PostgreSQL", () => {
       },
       body: "{}",
     });
+  test("persistently failing backlog emits private aggregate alerts across restart and UTC+7, then clears on real recovery", async () => {
+    const a = await fixture(),
+      aa = await create(a),
+      task = await withdrawal(a, "EXPERT_VIDEO_REVIEW"),
+      b = await fixture(),
+      ba = await create(b),
+      aged = new Date(Date.now() - 1200000);
+    await db.client.consentWithdrawalTask.update({
+      where: { id: task.id },
+      data: { createdAt: aged },
+    });
+    await db.client.video.update({
+      where: { id: b.video.id },
+      data: { status: "DELETED", deletedAt: aged },
+    });
+    const warn = jest
+        .spyOn(Logger.prototype, "warn")
+        .mockImplementation(() => undefined),
+      log = jest
+        .spyOn(Logger.prototype, "log")
+        .mockImplementation(() => undefined);
+    await db.client
+      .$executeRawUnsafe(`CREATE FUNCTION c051_observation_fail() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN
+      IF NEW.action='ASSIGNMENT_PRIVACY_CANCELLED' THEN RAISE EXCEPTION 'PRIVATE SQL or media payload'; END IF; RETURN NEW; END $$`);
+    await db.client.$executeRawUnsafe(
+      'CREATE TRIGGER c051_observation_fail BEFORE INSERT ON "AuditLog" FOR EACH ROW EXECUTE FUNCTION c051_observation_fail()',
+    );
+    try {
+      await worker().runOnce();
+      await new AssignmentCancellationWorker(
+        db.client as unknown as PrismaService,
+        cancellation(),
+        app.get(EnvironmentService),
+      ).runOnce();
+      // Legacy missing deletion dates use a conservative durable creation age.
+      await db.client.video.update({
+        where: { id: b.video.id },
+        data: { deletedAt: null, createdAt: aged },
+      });
+      await db.client.$transaction(async (tx) => {
+        await tx.$executeRawUnsafe("SET LOCAL TIME ZONE 'Asia/Bangkok'");
+        const observer = new AssignmentCancellationWorker(
+          tx as unknown as PrismaService,
+          cancellation(),
+          app.get(EnvironmentService),
+        ) as unknown as { observeBacklog(): Promise<void> };
+        await observer.observeBacklog();
+      });
+      const alerts = warn.mock.calls
+        .map((c) => c[0])
+        .filter((c) => typeof c === "object");
+      expect(alerts).toHaveLength(6);
+      for (const alert of alerts)
+        expect(alert).toEqual({
+          code: "ASSIGNMENT_CANCELLATION_BACKLOG_OVERDUE",
+          lane: expect.stringMatching(/^(withdrawal|deleted-video)$/),
+          pending: 1,
+          oldestSeconds: expect.any(Number),
+          thresholdSeconds: 900,
+        });
+      for (const alert of alerts)
+        expect(
+          (alert as { oldestSeconds: number }).oldestSeconds,
+        ).toBeGreaterThanOrEqual(1200);
+      for (const call of log.mock.calls)
+        expect(call[0]).toMatchObject({
+          code: "ASSIGNMENT_CANCELLATION_HEARTBEAT",
+          withdrawalPending: 1,
+          deletedVideoPending: 1,
+        });
+      expect(
+        JSON.stringify([...log.mock.calls, ...warn.mock.calls]),
+      ).not.toMatch(
+        new RegExp([task.id, a.owner.id, b.video.id, "PRIVATE"].join("|")),
+      );
+      expect(
+        await db.client.assignmentWithdrawalReceipt.findUnique({
+          where: { withdrawalTaskId: task.id },
+        }),
+      ).toBeNull();
+    } finally {
+      await db.client.$executeRawUnsafe(
+        'DROP TRIGGER c051_observation_fail ON "AuditLog"',
+      );
+      await db.client.$executeRawUnsafe(
+        "DROP FUNCTION c051_observation_fail()",
+      );
+      warn.mockClear();
+      log.mockClear();
+    }
+    try {
+      await worker().runOnce();
+      expect(log.mock.calls).toEqual([
+        [
+          {
+            code: "ASSIGNMENT_CANCELLATION_HEARTBEAT",
+            withdrawalPending: 0,
+            withdrawalOldestSeconds: 0,
+            deletedVideoPending: 0,
+            deletedVideoOldestSeconds: 0,
+          },
+        ],
+      ]);
+      expect(warn).not.toHaveBeenCalled();
+      expect(
+        await db.client.expertAssignment.count({
+          where: {
+            id: { in: [aa.assignment.id, ba.assignment.id] },
+            status: "CANCELLED",
+            revision: 1n,
+          },
+        }),
+      ).toBe(2);
+    } finally {
+      warn.mockRestore();
+      log.mockRestore();
+    }
+  });
   test.each(["withdrawal", "deleted-video"] as const)(
     "%s scan passes 25 persistent failures, survives worker restart and retries safely",
     async (lane) => {

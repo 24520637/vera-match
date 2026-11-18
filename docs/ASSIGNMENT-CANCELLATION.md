@@ -115,6 +115,75 @@ The worker awaits an in-flight scan on shutdown. Operational reconciliation and
 monitoring remain necessary for persistent failures; no new queue/Redis/Docker or
 production retry SLA is claimed.
 
+## Operational detection and pre-production checklist
+
+After each fully observed scan, ASSIGNMENT_CANCELLATION_HEARTBEAT logs only the
+two lane counts and oldest pending ages in seconds. Each lane with pending work
+aged at least 900 seconds emits ASSIGNMENT_CANCELLATION_BACKLOG_OVERDUE on that
+scan, even when other items succeed. This is an engineering alert threshold,
+not an approved customer completion SLA or a claim that every old item failed.
+The query uses the same eligibility predicate as selection and PostgreSQL UTC
+time. Withdrawal age starts at task creation. Deleted-video age starts at
+video.deletedAt, falling back conservatively to createdAt for legacy missing dates.
+Missing mappings count as pending; immutable receipts and terminal assignments
+remove only work this consumer has actually reconciled. Ages are recomputed from
+durable sources after restart. No per-account/source details are logged or exposed
+through a public health endpoint.
+
+A failed backlog observation emits SCAN_FAILED and no successful heartbeat for
+that scan. A heartbeat is process liveness plus a backlog observation, not a
+healthy-queue assertion: overdue alerts may accompany it. Existing fixed-code
+SCAN_FAILED/SCAN_RECOVERED, RETRY_SCHEDULED and MAPPING_UNAVAILABLE remain available.
+Do not interpret successful heartbeats from one process as proof all workers live.
+
+Before a real deployment, the operator must configure and drill these rules in
+its actual log/monitoring system; no external alert destination is provisioned by
+this PR:
+
+| Signal | Initial engineering escalation rule | Operator response |
+| --- | --- | --- |
+| BACKLOG_OVERDUE | Alert on any occurrence (15-minute source age) | Investigate latency, persistent transactions or missing lineage; track until count/age clears |
+| SCAN_FAILED | Alert on 3 occurrences in 10 minutes per deployed process | Check DB availability, deployment/schema compatibility and worker lifecycle |
+| HEARTBEAT absent | Alert after 10 minutes per expected worker process | Check process/scheduler/log pipeline; a stopped process cannot report its own outage |
+| MAPPING_UNAVAILABLE | Investigate when accompanied by overdue backlog | Reconcile through an approved workflow; never guess an owner or fabricate a receipt |
+
+These are initial engineering defaults for deployment review, not evidence that
+alerts have been routed or production latency/load has been accepted. Heartbeats
+follow completed scans; the 15-second timer coalesces while a scan is running.
+Each scan selects at most 20 sources per lane; a withdrawal source processes at
+most 20 assignments per visit. Item transactions have the existing 10-second
+execution timeout. Queue size, lock waits, connection acquisition, outages and
+restarts affect latency. Benchmark the supported workload, agree a completion SLO
+and an incident owner, and verify alert receipt with a synthetic outage before
+opening production. No finite completion SLA is promised for a permanent fault.
+Failed work remains eligible with unbounded retries; there is no retry cap,
+implicit dead-letter completion, or manual COMPLETE workaround.
+
+For an incident: preserve fail-closed media authorization; check DB health and the
+reviewed migration chain; inspect only restricted aggregate monitoring first;
+restore the underlying service and allow later laps to reconcile. Verify pending
+counts/ages return to the expected level and existing cancellation/receipt checks
+pass. Investigate individual synthetic/restricted cases only through approved
+operator access. Do not log raw errors or private identifiers, edit CAS revisions,
+reset live data, purge pending sources, rewrite evidence, or insert receipts by
+hand. Do not stop privacy restriction processing merely to silence an alert.
+
+Migration review is still mandatory: Phuc must review the two-lane scheduling
+DDL, paired bounds, binary ordering and cursor/domain-lock separation. Existing
+C051 evidence migration stays unchanged. Apply additive migrations through the
+reviewed deployment workflow before this worker starts; test restoration/upgrade
+in an isolated environment, never reset the developer/shared database. A review
+request or passing upgrade test is not another person's approval.
+
+| Gate | Current delivery | Required before claiming completion |
+| --- | --- | --- |
+| C051 concurrency / starvation | PostgreSQL tests and durable rotation implemented | Phuc reviews shared cancellation and migration contract |
+| Operations | Aggregate detection, heartbeat and incident rules implemented | Actual monitoring routing, outage drill, workload/SLO and incident owner sign-off |
+| C050 / C053 / C054 | Deferred work, not completed by this PR | Real access/edit/submit/QA consumers and full race/audit acceptance in follow-ups |
+| Staff MFA / qualification evidence | Production access remains fail-closed | Trusted session-bound providers and real evidence, reviewed by both owners |
+| Consent policies | No production policy invented or approved here | Approved policy IDs/versions/content configured in the actual policy registry |
+| Retention / account deletion | No retention duration or deletion workflow approved here | Agreed retention/minimization/backup/legal-hold rules before lifecycle/purge work |
+
 ## Migration and remaining gates
 
 20261118050000_assignment_cancellation_evidence is additive. Existing scalar
@@ -148,8 +217,9 @@ synthetic handler or missing API is presented as completed workflow acceptance.
 ## Executed verification
 
 - PASS: Prisma validate/generate; API/Next production builds and both TypeScript lint commands.
-- PASS: 247 unit tests; 313 API/PostgreSQL/native-storage integration cases across 23 suites, including 29 C051 domain cases and two migration rollback/upgrade cases.
+- PASS: 250 unit tests and 32 targeted C051 PostgreSQL cases (30 domain/worker cases and two migration rollback/upgrade cases). Fresh PR CI records the full integration/native-storage result.
 - PASS: two real Video Playwright cases desktop/mobile, including recording, upload, playback, deletion and withdrawal with native MinIO/API.
 - The complete local integration run uses UTC connection options to avoid the pre-existing C034 timezone-fixture defect tracked in Phuc PR #17; no local .env/database timezone is changed. C051 additionally proves its own timestamps under a transaction-local UTC+7 timezone.
 - PASS: starvation regressions first failed on the original worker (zero of three valid items reconciled after six scans behind 25 poisoned items in each lane), then passed with durable rotation. Concurrent fresh worker instances, post-selection abandonment, bounded arrivals, failed cursor writes and recovery without duplicate events are covered using disposable PostgreSQL schemas.
-- NOT RUN: full review edit/submit C054 races, real MFA/policy publication and production storage/backup enforcement. No developer public-schema migration is run.
+- PASS: aggregate 900-second alert boundary/redaction, real PostgreSQL persistent-failure detection, restart/UTC+7 ages and recovery without false completion.
+- NOT RUN: production alert routing/outage drill, workload completion-SLO acceptance, full review edit/submit C054 races, real MFA/policy publication and production storage/backup enforcement. No developer public-schema migration is run.
