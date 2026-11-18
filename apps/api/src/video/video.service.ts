@@ -1,3 +1,4 @@
+import { AssignmentCancellationService } from "../assignment-cancellation/assignment-cancellation.service";
 import {
   ConflictException,
   Injectable,
@@ -54,6 +55,7 @@ export class VideoService {
       this.prisma.$transaction(async (tx) => {
         await tx.$queryRaw`SELECT id FROM "User" WHERE id = ${ownerId} FOR UPDATE`;
         await requireConsentMember(tx, ownerId);
+        await tx.$queryRaw`SELECT id FROM "Video" WHERE id = ${id} AND "ownerId" = ${ownerId} FOR UPDATE`;
         const video = await tx.video.findFirst({ where: { id, ownerId } });
         if (!video)
           throw new NotFoundException({
@@ -78,6 +80,12 @@ export class VideoService {
             },
           });
         }
+        await this.cancellation.cancelDeletedVideoInTransaction(
+          tx,
+          ownerId,
+          id,
+          true,
+        );
         await tx.videoCleanupTask.upsert({
           where: { videoId: id },
           create: {
@@ -238,6 +246,7 @@ export class VideoService {
     private readonly prisma: PrismaService,
     private readonly consent: ConsentAccessService,
     private readonly storage: PrivateStorageService,
+    private readonly cancellation: AssignmentCancellationService,
   ) {}
   intent(ownerId: string, input: unknown) {
     const data = uploadInput(input);
