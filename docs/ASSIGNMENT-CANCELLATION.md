@@ -83,12 +83,31 @@ expert User locks after a Video lock. Owner locking serializes it with assignmen
 creation, playback, reapproval and withdrawal. Locators authorize nothing and
 relationships/state are reread under lock. No nested consent transaction is opened.
 
-The native Nest worker runs every 15 seconds, scans up to 20 withdrawal tasks and
-20 deleted videos, and continues after per-item failures. Missing mappings sort
-behind mapped work. Successful receipts suppress repeat work; failed transactions
-leave no receipt, so later scans retry from the durable source. Local scans coalesce;
-row locks and receipts handle concurrent workers/processes. Tests drive runOnce
-explicitly; only the scheduler is disabled in test mode, not authorization.
+The native Nest worker runs every 15 seconds and selects up to 20 withdrawal
+sources and 20 deleted videos per scan. Each lane uses an independent PostgreSQL
+AssignmentCancellationScan cursor: binary ID order, last selected ID, and a fixed
+upper ID for the current lap. At the end of a lap it wraps over all still-eligible
+sources. New arrivals behind the cursor wait for the next lap; arrivals above its
+fixed upper bound cannot indefinitely delay retry of earlier work. Missing live
+mappings participate in the same fair rotation instead of being silently completed.
+
+Selection and cursor advancement commit in a short transaction protected by the
+lane row's FOR UPDATE lock. All worker processes share this state. The lock is
+released before taking any owner User/Video/Assignment locks; domain lock order
+and C033/C034 behavior are unchanged. The cursor is scheduling metadata, never a
+receipt, lease, authorization grant or assertion that selected work ran. A crash
+after selection can defer a batch until the next lap, but cannot lose its durable
+source. Failed cursor transactions leave the cursor unchanged. Successful receipts
+or terminal assignment states remain the only existing completion predicates.
+
+Per-item failures do not stop later selected items and are retried on later laps;
+failed/partial transactions receive no fabricated receipt or COMPLETE status.
+Concurrent laps may revisit in-flight work: existing owner locks, revision CAS,
+atomic evidence and receipts prevent duplicate transitions. Local scans coalesce.
+Tests drive runOnce explicitly; only the scheduler is disabled in test mode.
+There is no fixed retry SLA: backlog size, database availability and the existing
+per-item transaction timeout determine reconciliation latency. The two lane rows
+contain internal locators only and are not retained cancellation/audit evidence.
 
 Scan failures/recovery, retry and missing mapping use fixed allowlisted log codes.
 Raw driver/SDK errors, account/task IDs, media keys, URLs and contents are not logged.
@@ -104,6 +123,14 @@ New context and receipt tables use restrictive retained-evidence FKs and reject
 UPDATE/DELETE/TRUNCATE. Historical schemas keep their original projections.
 Tests deploy only fresh UUID schemas and verify a post-DDL failure rolls back.
 No migration/reset is performed on the developer public database.
+
+20261118120000_assignment_cancellation_scan adds only the mutable, two-lane
+scheduling table with constrained lane names and paired cursor bounds. It does
+not edit the original C051 migration, backfill evidence, change any shared
+assignment/consent columns or remove pending sources. Apply additive migrations
+through the normal reviewed deployment before starting the updated worker.
+Upgrade tests preserve existing C051 cancellations/history/context, check a failed
+deploy and repeated deploy, and verify cursor constraints.
 
 Opaque references remain potentially personal data. This technical preservation
 is not an approved retention duration. Policy,
@@ -121,7 +148,8 @@ synthetic handler or missing API is presented as completed workflow acceptance.
 ## Executed verification
 
 - PASS: Prisma validate/generate; API/Next production builds and both TypeScript lint commands.
-- PASS: 247 unit tests; 309 API/PostgreSQL/native-storage integration cases across 23 suites, including 26 C051 domain cases and the additive migration rollback/upgrade case.
+- PASS: 247 unit tests; 313 API/PostgreSQL/native-storage integration cases across 23 suites, including 29 C051 domain cases and two migration rollback/upgrade cases.
 - PASS: two real Video Playwright cases desktop/mobile, including recording, upload, playback, deletion and withdrawal with native MinIO/API.
 - The complete local integration run uses UTC connection options to avoid the pre-existing C034 timezone-fixture defect tracked in Phuc PR #17; no local .env/database timezone is changed. C051 additionally proves its own timestamps under a transaction-local UTC+7 timezone.
+- PASS: starvation regressions first failed on the original worker (zero of three valid items reconciled after six scans behind 25 poisoned items in each lane), then passed with durable rotation. Concurrent fresh worker instances, post-selection abandonment, bounded arrivals, failed cursor writes and recovery without duplicate events are covered using disposable PostgreSQL schemas.
 - NOT RUN: full review edit/submit C054 races, real MFA/policy publication and production storage/backup enforcement. No developer public-schema migration is run.

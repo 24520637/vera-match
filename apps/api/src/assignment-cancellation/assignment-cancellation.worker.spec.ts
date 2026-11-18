@@ -9,7 +9,7 @@ describe("C051 worker observation boundary", () => {
     const error = new Error("PRIVATE SQL credentials and signed URL");
     const query = jest.fn().mockRejectedValueOnce(error).mockResolvedValue([]);
     const prisma = {
-      $queryRaw: query,
+      $transaction: query,
       video: { findMany: jest.fn().mockResolvedValue([]) },
     };
     const failure = jest
@@ -39,7 +39,10 @@ describe("C051 worker observation boundary", () => {
       release = () => r([{ id: "first" }, { id: "second" }]);
     });
     const prisma = {
-      $queryRaw: jest.fn().mockReturnValue(pending),
+      $transaction: jest
+        .fn()
+        .mockReturnValueOnce(pending)
+        .mockResolvedValue([]),
       video: { findMany: jest.fn().mockResolvedValue([]) },
     };
     const processWithdrawal = jest

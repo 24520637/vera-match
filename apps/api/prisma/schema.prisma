@@ -627,3 +627,10 @@ model AssignmentWithdrawalReceipt {
   withdrawalTask ConsentWithdrawalTask @relation(fields: [withdrawalTaskId], references: [id], onDelete: Restrict, onUpdate: NoAction)
   createdAt DateTime @default(now())
 }
+
+// Mutable scheduling metadata only; never a completion receipt or authorization grant.
+model AssignmentCancellationScan {
+  lane String @id
+  afterId String?
+  throughId String?
+}

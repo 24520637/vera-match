@@ -288,6 +288,217 @@ describe("C051 assignment cancellation / disposable PostgreSQL", () => {
       },
       body: "{}",
     });
+  test.each(["withdrawal", "deleted-video"] as const)(
+    "%s scan passes 25 persistent failures, survives worker restart and retries safely",
+    async (lane) => {
+      const items: { id: string; assignmentId: string }[] = [];
+      for (let i = 0; i < 28; i++) {
+        const seed = await fixture(),
+          created = await create(seed);
+        if (lane === "withdrawal") {
+          const task = await withdrawal(seed, "EXPERT_VIDEO_REVIEW");
+          items.push({ id: task.id, assignmentId: created.assignment.id });
+        } else {
+          await db.client.video.update({
+            where: { id: seed.video.id },
+            data: { status: "DELETED", deletedAt: new Date() },
+          });
+          items.push({
+            id: seed.video.id,
+            assignmentId: created.assignment.id,
+          });
+        }
+      }
+      // Include both old createdAt ordering and the durable ID ordering: only
+      // the last three under either order can succeed during fault injection.
+      const ordered = [...items].sort((a, b) => a.id.localeCompare(b.id));
+      const failed = ordered.slice(0, 25);
+      if (lane === "withdrawal")
+        for (const item of failed)
+          await db.client.consentWithdrawalTask.update({
+            where: { id: item.id },
+            data: { createdAt: new Date("2020-01-01") },
+          });
+      await db.client.$executeRawUnsafe(
+        "CREATE TABLE c051_poison (id text PRIMARY KEY)",
+      );
+      for (const item of failed)
+        await db.client
+          .$executeRaw`INSERT INTO c051_poison VALUES (${item.assignmentId})`;
+      await db.client
+        .$executeRawUnsafe(`CREATE FUNCTION c051_poison_audit() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN
+        IF NEW.action='ASSIGNMENT_PRIVACY_CANCELLED' AND EXISTS (
+          SELECT 1 FROM "AssignmentEvent" e JOIN c051_poison p ON p.id=e."assignmentId"
+          WHERE e.id::text=NEW."subjectId") THEN RAISE EXCEPTION 'synthetic persistent audit failure'; END IF;
+        RETURN NEW; END $$`);
+      await db.client.$executeRawUnsafe(
+        'CREATE TRIGGER c051_poison_audit BEFORE INSERT ON "AuditLog" FOR EACH ROW EXECUTE FUNCTION c051_poison_audit()',
+      );
+      const freshWorker = () =>
+        new AssignmentCancellationWorker(
+          db.client as unknown as PrismaService,
+          cancellation(),
+          app.get(EnvironmentService),
+        );
+      try {
+        // A fresh instance for each scan rules out process-local fairness state.
+        // Concurrent scans use the same durable database scheduling state.
+        for (let i = 0; i < 3; i++)
+          await Promise.all([freshWorker().runOnce(), freshWorker().runOnce()]);
+        expect(
+          await db.client.expertAssignment.count({
+            where: {
+              id: { in: ordered.slice(25).map((i) => i.assignmentId) },
+              status: "CANCELLED",
+            },
+          }),
+        ).toBe(3);
+        expect(
+          await db.client.expertAssignment.count({
+            where: {
+              id: { in: failed.map((i) => i.assignmentId) },
+              status: "ASSIGNED",
+              revision: 0n,
+            },
+          }),
+        ).toBe(25);
+        expect(
+          await db.client.assignmentCancellationContext.count({
+            where: {
+              event: {
+                assignmentId: { in: failed.map((i) => i.assignmentId) },
+              },
+            },
+          }),
+        ).toBe(0);
+        if (lane === "withdrawal")
+          expect(
+            await db.client.assignmentWithdrawalReceipt.count({
+              where: { withdrawalTaskId: { in: failed.map((i) => i.id) } },
+            }),
+          ).toBe(0);
+      } finally {
+        await db.client.$executeRawUnsafe(
+          'DROP TRIGGER c051_poison_audit ON "AuditLog"',
+        );
+        await db.client.$executeRawUnsafe("DROP FUNCTION c051_poison_audit()");
+        await db.client.$executeRawUnsafe("DROP TABLE c051_poison");
+      }
+      for (let i = 0; i < 4; i++)
+        await Promise.all([freshWorker().runOnce(), freshWorker().runOnce()]);
+      for (const item of items) {
+        expect(
+          await db.client.expertAssignment.findUnique({
+            where: { id: item.assignmentId },
+          }),
+        ).toMatchObject({ status: "CANCELLED", revision: 1n });
+        expect(
+          await db.client.assignmentEvent.count({
+            where: { assignmentId: item.assignmentId, toStatus: "CANCELLED" },
+          }),
+        ).toBe(1);
+        expect(
+          await db.client.assignmentCancellationContext.count({
+            where: { event: { assignmentId: item.assignmentId } },
+          }),
+        ).toBe(1);
+        if (lane === "withdrawal")
+          expect(
+            await db.client.assignmentWithdrawalReceipt.findUnique({
+              where: { withdrawalTaskId: item.id },
+            }),
+          ).not.toBeNull();
+      }
+    },
+    90000,
+  );
+  test("persisted lap bounds survive skipped batches, new arrivals and failed cursor commits", async () => {
+    const seed = await fixture();
+    const ids: string[] = [];
+    const credential = await db.client.expertCredential.findUniqueOrThrow({
+      where: { userId: seed.expert.id },
+    });
+    async function add(index: number) {
+      const id =
+        "zz-c051-" + String(index).padStart(3, "0") + "-" + randomUUID();
+      await db.client.video.create({
+        data: {
+          id,
+          ownerId: seed.owner.id,
+          bucket: "synthetic-private",
+          objectKey: randomUUID(),
+          mimeType: "video/mp4",
+          status: "DELETED",
+          deletedAt: new Date(),
+        },
+      });
+      await db.client.$transaction(async (tx) => {
+        const row = await tx.expertAssignment.create({
+          data: {
+            videoId: id,
+            expertId: seed.expert.id,
+            assignedByEvidence: { subject: "synthetic-moderator" },
+            credentialApprovalId: credential.approvalId,
+          },
+        });
+        await assignmentEvent(tx, row.id, null);
+      });
+      ids.push(id);
+      return id;
+    }
+    for (let i = 0; i < 22; i++) await add(i);
+    const reserve = () =>
+      new AssignmentCancellationWorker(
+        db.client as unknown as PrismaService,
+        cancellation(),
+        app.get(EnvironmentService),
+      ) as unknown as {
+        nextBatch(lane: "deleted-video"): Promise<{ id: string }[]>;
+      };
+    // Persist selection, then abandon processing as if this worker had crashed.
+    expect(
+      (await reserve().nextBatch("deleted-video")).map((r) => r.id),
+    ).toEqual(ids.slice(0, 20));
+    const cursor = await db.client.assignmentCancellationScan.findUniqueOrThrow(
+      { where: { lane: "deleted-video" } },
+    );
+    expect(cursor.throughId).toBe(ids[21]);
+    await add(22);
+    await db.client.$executeRawUnsafe(
+      `CREATE FUNCTION c051_scan_commit_fail() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'synthetic cursor write failure'; END $$`,
+    );
+    await db.client.$executeRawUnsafe(
+      'CREATE TRIGGER c051_scan_commit_fail BEFORE UPDATE ON "AssignmentCancellationScan" FOR EACH ROW EXECUTE FUNCTION c051_scan_commit_fail()',
+    );
+    try {
+      await expect(reserve().nextBatch("deleted-video")).rejects.toThrow();
+      expect(
+        await db.client.assignmentCancellationScan.findUnique({
+          where: { lane: "deleted-video" },
+        }),
+      ).toEqual(cursor);
+    } finally {
+      await db.client.$executeRawUnsafe(
+        'DROP TRIGGER c051_scan_commit_fail ON "AssignmentCancellationScan"',
+      );
+      await db.client.$executeRawUnsafe(
+        "DROP FUNCTION c051_scan_commit_fail()",
+      );
+    }
+    expect(
+      (await reserve().nextBatch("deleted-video")).map((r) => r.id),
+    ).toEqual(ids.slice(20, 22));
+    // New arrivals did not extend the old lap; abandoned first-page work returns.
+    expect(
+      (await reserve().nextBatch("deleted-video")).map((r) => r.id),
+    ).toEqual(ids.slice(0, 20));
+    for (let i = 0; i < 3; i++) await worker().runOnce();
+    expect(
+      await db.client.expertAssignment.count({
+        where: { videoId: { in: ids }, status: "CANCELLED", revision: 1n },
+      }),
+    ).toBe(23);
+  });
   test.each(["ASSIGNED", "IN_PROGRESS", "SUBMITTED"] as const)(
     "owner DELETE cancels %s exactly once with retained owner evidence",
     async (status) => {
