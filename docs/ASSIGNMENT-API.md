@@ -4,7 +4,7 @@ Plan-Step: C033. Ticket: T06.
 Planned commit: `feat(assignment-api): assign READY video with consent`.
 This implementation is restricted to isolated synthetic testing. Production
 staff-MFA and qualification/policy publication remain release gates, not approvals
-granted by this API. C051 cancellation remains Huong-owned and is not implemented.
+granted by this API. C051 cancellation remains Huong-owned; see [Assignment cancellation](ASSIGNMENT-CANCELLATION.md).
 
 ## Request and result
 
@@ -144,10 +144,11 @@ enabling production. Capacity/availability and broader conflict-of-interest rule
 are not implemented or represented as approved. C034/C050 must recheck owner
 consent, generation, video state, expert eligibility and real MFA on every access.
 
-C051 must cancel active assignments using revision CAS and exact immutable events,
-coordinating this lock protocol. C033 does not cancel rows: after withdrawal an
-old row may still occupy the active index until C051 handles it, but replay or
-re-consent cannot authorize it. No private-video/storage/cleanup behavior is changed.
+C051 implements source-bound cancellation using revision CAS and exact immutable
+transitions, coordinating this lock protocol; see its separate contract. C033
+still only creates assignments. After withdrawal an old row can occupy the active
+index until the C051 consumer processes it, while C034 denies access immediately.
+Replay and re-consent never turn that row into a grant.
 
 ## Validation
 

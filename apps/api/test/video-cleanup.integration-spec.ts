@@ -1,3 +1,4 @@
+import { AssignmentCancellationService } from "../src/assignment-cancellation/assignment-cancellation.service";
 import { VideoService } from "../src/video/video.service";
 import { Logger } from "@nestjs/common";
 import { Prisma, PrismaClient } from "@prisma/client";
@@ -388,6 +389,7 @@ describe("Video cleanup outage recovery / disposable PostgreSQL / native MinIO",
         database.client as PrismaService,
         null!,
         storage,
+        new AssignmentCancellationService(database.client as PrismaService),
       );
       const delegate = database.client.videoCleanupTask;
       const update = delegate.updateMany.bind(delegate);

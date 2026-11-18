@@ -60,8 +60,9 @@ MFA, approved evidence/policies and replacement of these synthetic-only gates.
 
 C034 denies new issuance on withdrawal/deletion even before C051 updates assignment
 status. It does not cancel, reassign, edit or submit work. C050 beyond this issuance
-boundary and C051 durable cancellation remain separate. Real C051 race acceptance
-is BLOCKED until Huong's implementation is integrated; synthetic tests do not count.
+boundary and C051 durable cancellation remain separate. C051 cancellation is documented in [Assignment cancellation](ASSIGNMENT-CANCELLATION.md).
+Its real cancellation/issuance boundary checks do not complete C054 edit/submit
+race acceptance; those require the actual review APIs. Synthetic handlers do not count.
 
 Issued URLs may work until expiry; buffered/in-flight bytes cannot be recalled.
 Provider expiry enforcement, clock synchronization, caching, storage/backup and
