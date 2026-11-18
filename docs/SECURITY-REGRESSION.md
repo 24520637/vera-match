@@ -107,9 +107,9 @@ T15-F01 (P2, ordinary production access still gated): C034 rethrew HttpException
 from MFA/evidence/qualification-registry sources as if it were an application-owned
 public error. Three actual HTTP/PostgreSQL/native-MinIO fault probes returned the
 provider's synthetic private code/message/objectKey unchanged. This is a confirmed
-boundary defect, not a claim that real production media leaked. No critical/high
-finding was identified in the implemented paths examined; unavailable workflows
-are not thereby certified.
+boundary defect, not a claim that real production media leaked. No critical/high application-logic
+finding was reproduced in the implemented paths examined; unavailable workflows
+and the dependency audit findings below are not thereby certified.
 
 The focused correction sanitizes only upstream source failures to existing 503
 EXPERT_ACCESS_UNAVAILABLE. Application-owned 401/403, role/assignment/consent checks,
@@ -141,3 +141,28 @@ complete review/QA/matching acceptance remain release blockers.
 - PASS/FAIL counts for full unit/integration/browser/build validation and the exact CI head are recorded in the PR. Failed pre-fix privacy probes are evidence of reproduction, not passing security acceptance.
 - BLOCKED: actual role-elevation/provisioning rotation, private review/edit/submit/independent QA/report/claims/matching/account-deletion APIs; Phuc PRs #18/#20 are not merged into this branch.
 - NOT RUN: deployed HTTPS/proxy and actual trusted MFA/qualification/consent-policy publication, alert routing/outage delivery drill, production retention/backup/restore and full user journey. Production real-data staff access remains BLOCKED.
+
+## Dependency audit — FAIL / production gate remains open
+
+Read-only npm audit at this T15 pass reports 68 affected dependency-tree entries:
+54 high, 11 moderate, 3 low, 0 critical. npm audit --omit=dev reports 16 entries:
+11 high, 5 moderate, 0 critical. Both commands exit 1. These are npm rollups, not
+counts of independent code defects or evidence of exploitation. Omission of dev
+dependencies does not prove each remaining package/advisory is reachable at runtime.
+
+The lockfile/manifests are byte-identical to the develop baseline; this feature
+introduces no dependency or version change. The inherited advisories include
+body-parser, multer, js-yaml/lodash, PostCSS and toolchain/transitive families.
+Representative upstream records: [body-parser](https://github.com/advisories/GHSA-27r3-jxmh-p828),
+[multer](https://github.com/advisories/GHSA-5528-5vmv-3xc2),
+[PostCSS](https://github.com/advisories/GHSA-6g55-p6wh-862q).
+A complete application/deployment reachability assessment and patched supported
+versions remain unresolved. No blanket non-exploitability waiver is claimed.
+
+Many npm suggested fixes cross Nest/Next/Jest major versions, so this regression
+PR does not run audit fix --force or perform an unreviewed shared-framework
+migration. Huong/Phuc must review a separate dependency-remediation change, rerun
+all gates and record remaining accepted risks before release. Audit is FAIL even
+when scoped regression tests/CI pass; Feature 06 and production security are not
+complete. The C087 provider-body correction is completed independently of this
+unresolved dependency gate.
