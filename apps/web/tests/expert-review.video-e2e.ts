@@ -1,42 +1,128 @@
-import { expect, test } from "@playwright/test";
+import { expect, test as base, type BrowserContext } from "@playwright/test";
 import { PrismaClient, type UserRole } from "@prisma/client";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { readFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { Readable } from "node:stream";
-import { probeVideoDuration, VIDEO_PROBE_TIMEOUT_MS } from "../../api/src/video/video-duration";
+import { inspectVideoProbe, VIDEO_PROBE_TIMEOUT_MS } from "../../api/src/video/video-duration";
 
 const origin = "http://localhost:3100";
 const policyVersion = "synthetic-video-e2e-v1";
+const mutation = { Origin: origin };
+const idempotent = () => ({ ...mutation, "Idempotency-Key": randomUUID() });
 
-test("reviewer plays private media, saves a draft, reloads, and loses access after withdrawal", async ({ browser, page, context }) => {
+const test = base.extend<{ db: PrismaClient }>({
+  db: async ({}, use) => {
+    const runtime = JSON.parse(await readFile(resolve(__dirname, "../.video-e2e-runtime.json"), "utf8"));
+    const database = new URL(process.env.DATABASE_URL ?? "");
+    if (runtime.kind !== "vera-video-e2e-v1" || runtime.runId !== process.env.VERA_VIDEO_E2E_RUN_ID ||
+      !/^vera_auth_test_[a-f0-9]{32}$/.test(runtime.schema) || !/^vera-video-e2e-[a-f0-9-]{36}$/.test(runtime.bucket) ||
+      !["localhost", "127.0.0.1", "[::1]"].includes(database.hostname) || database.port !== "5433")
+      throw new Error("Isolated video test runtime required.");
+    database.searchParams.set("schema", runtime.schema);
+    const db = new PrismaClient({ datasources: { db: { url: database.toString() } } });
+    try { await use(db); } finally { await db.$disconnect(); }
+  },
+});
+
+async function identity(db: PrismaClient, role: UserRole, target: BrowserContext) {
+  const token = randomBytes(32).toString("base64url");
+  const user = await db.user.create({ data: {
+    email: `${randomUUID()}@t08.example.invalid`, passwordHash: "synthetic-only-not-for-login",
+    role, status: "ACTIVE", emailVerifiedAt: new Date(), sessions: {
+      create: { tokenHash: createHash("sha256").update(token).digest("hex"), expiresAt: new Date(Date.now() + 600000) },
+    },
+  } });
+  await target.addCookies([{ name: "vera_e2e_session", value: token, url: origin, httpOnly: true, sameSite: "Lax" }]);
+  return user;
+}
+
+function nativeProbePath() {
+  const ffprobe = process.env.VIDEO_DURATION_FFPROBE;
+  if (!ffprobe) throw new Error("Native ffprobe is required for the video tests.");
+  return ffprobe;
+}
+
+type RecorderCapture = {
+  startedAt: number;
+  timedChunk: boolean;
+  finalBytes: number;
+  events: string[];
+  finalTrackStates: MediaStreamTrackState[];
+  stoppedTrackStates: MediaStreamTrackState[];
+};
+
+test("browser MediaRecorder finalizes before releasing capture tracks and produces a decoded timeline", async ({ db, page, context }, info) => {
+  await identity(db, "MEMBER", context);
+  const consent = await page.request.patch("/api/consents/me", { headers: idempotent(), data: {
+    expectedVersion: 0, consents: [{ purpose: "VIDEO_STORAGE", granted: true, policyVersion }],
+  } });
+  expect(consent.status()).toBe(200);
+  await context.grantPermissions(["camera", "microphone"], { origin });
+  await page.addInitScript(() => {
+    const capture: RecorderCapture = {
+      startedAt: 0, timedChunk: false, finalBytes: 0, events: [], finalTrackStates: [], stoppedTrackStates: [],
+    };
+    (window as Window & { recorderCapture?: RecorderCapture }).recorderCapture = capture;
+    const start = MediaRecorder.prototype.start;
+    MediaRecorder.prototype.start = function (timeslice?: number) {
+      capture.startedAt = performance.now();
+      this.addEventListener("dataavailable", event => {
+        if (this.state === "inactive") {
+          capture.events.push("final dataavailable");
+          capture.finalBytes = event.data.size;
+          capture.finalTrackStates = this.stream.getTracks().map(track => track.readyState);
+        } else if (event.data.size > 0) capture.timedChunk = true;
+      });
+      this.addEventListener("stop", () => {
+        capture.events.push("stop");
+        capture.stoppedTrackStates = this.stream.getTracks().map(track => track.readyState);
+      }, { once: true });
+      return start.call(this, timeslice);
+    };
+  });
+  await page.goto("/account/videos");
+  await page.getByRole("button", { name: "Record a video", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Stop recording" })).toBeVisible();
+  await page.waitForFunction(() => {
+    const capture = (window as Window & { recorderCapture?: RecorderCapture }).recorderCapture;
+    return capture?.timedChunk && performance.now() - capture.startedAt >= 1500;
+  });
+  await page.getByRole("button", { name: "Stop recording" }).click();
+  await expect.poll(() => page.evaluate(() =>
+    (window as Window & { recorderCapture?: RecorderCapture }).recorderCapture?.events,
+  )).toEqual(["final dataavailable", "stop"]);
+  const capture = await page.evaluate(() => (window as Window & { recorderCapture?: RecorderCapture }).recorderCapture);
+  expect(capture?.finalBytes).toBeGreaterThan(0);
+  expect(capture?.finalTrackStates).toEqual(["live", "live"]);
+  expect(capture?.stoppedTrackStates).toEqual(["ended", "ended"]);
+  // The application publishes the selected preview from its stop handler.
+  const preview = await page.getByLabel("Selected video preview").evaluate(async (element: HTMLVideoElement) => {
+    const blob = await (await fetch(element.src)).blob();
+    if (blob.size === 0 || blob.size > 2 * 1024 * 1024) throw new Error("Unexpected synthetic capture size.");
+    return { mime: blob.type, bytes: Array.from(new Uint8Array(await blob.arrayBuffer())) };
+  });
+  const start = performance.now();
+  const result = await inspectVideoProbe(
+    nativeProbePath(), Readable.from([Buffer.from(preview.bytes)]), preview.bytes.length,
+    preview.mime, AbortSignal.timeout(VIDEO_PROBE_TIMEOUT_MS),
+  );
+  const diagnostic = JSON.stringify({ ...result, elapsedMs: Math.round(performance.now() - start) });
+  info.annotations.push({ type: "synthetic recorder FFprobe", description: diagnostic });
+  expect(result.status, diagnostic).toBe("measured");
+  if (result.status === "measured") {
+    expect(result.frameCount).toBeGreaterThanOrEqual(2);
+    expect(result.durationMs).toBeGreaterThanOrEqual(500);
+  }
+});
+
+for (const container of ["mp4", "webm"] as const) test(`reviewer plays synthetic ${container}, saves a draft, reloads, and loses access after withdrawal`, async ({ db, browser, page, context }) => {
   test.setTimeout(90000);
-  const runtime = JSON.parse(await readFile(resolve(__dirname, "../.video-e2e-runtime.json"), "utf8"));
-  const database = new URL(process.env.DATABASE_URL ?? "");
-  if (runtime.kind !== "vera-video-e2e-v1" || runtime.runId !== process.env.VERA_VIDEO_E2E_RUN_ID ||
-    !/^vera_auth_test_[a-f0-9]{32}$/.test(runtime.schema) || !/^vera-video-e2e-[a-f0-9-]{36}$/.test(runtime.bucket) ||
-    !["localhost", "127.0.0.1", "[::1]"].includes(database.hostname) || database.port !== "5433")
-    throw new Error("Isolated video test runtime required.");
-  database.searchParams.set("schema", runtime.schema);
-  const db = new PrismaClient({ datasources: { db: { url: database.toString() } } });
   const others = await browser.newContext({ baseURL: origin });
   const staff = await browser.newContext({ baseURL: origin });
-  async function identity(role: UserRole, target: typeof context) {
-    const token = randomBytes(32).toString("base64url");
-    const user = await db.user.create({ data: {
-      email: `${randomUUID()}@t08.example.invalid`, passwordHash: "synthetic-only-not-for-login",
-      role, status: "ACTIVE", emailVerifiedAt: new Date(), sessions: {
-        create: { tokenHash: createHash("sha256").update(token).digest("hex"), expiresAt: new Date(Date.now() + 600000) },
-      },
-    } });
-    await target.addCookies([{ name: "vera_e2e_session", value: token, url: origin, httpOnly: true, sameSite: "Lax" }]);
-    return user;
-  }
-  const mutation = { Origin: origin };
-  const idempotent = () => ({ ...mutation, "Idempotency-Key": randomUUID() });
   try {
-    const owner = await identity("MEMBER", context);
+    const owner = await identity(db, "MEMBER", context);
     const consent = await page.request.patch("/api/consents/me", { headers: idempotent(), data: {
       expectedVersion: 0, consents: ["VIDEO_STORAGE", "EXPERT_VIDEO_REVIEW"].map(purpose => ({ purpose, granted: true, policyVersion })),
     } });
@@ -46,78 +132,33 @@ test("reviewer plays private media, saves a draft, reloads, and loses access aft
     } });
     expect(forgedDuration.status()).toBe(400);
     expect(await db.video.count({ where: { ownerId: owner.id } })).toBe(0);
-    await context.grantPermissions(["camera", "microphone"], { origin });
-    await page.addInitScript(() => {
-      const captureWindow = window as Window & {
-        finalCapture?: { bytes: number; trackStates: MediaStreamTrackState[] };
-      };
-      const start = MediaRecorder.prototype.start;
-      MediaRecorder.prototype.start = function (timeslice?: number) {
-        this.addEventListener("dataavailable", event => {
-          if (this.state === "inactive") {
-            captureWindow.finalCapture = {
-              bytes: event.data.size,
-              trackStates: this.stream.getTracks().map(track => track.readyState),
-            };
-          }
-        });
-        return start.call(this, timeslice);
-      };
-    });
-    await page.goto("/account/videos");
-    await page.getByRole("button", { name: "Record a video", exact: true }).click();
-    await expect(page.getByRole("button", { name: "Stop recording" })).toBeVisible();
-    await page.waitForTimeout(1500); // Collect a real synthetic camera recording.
-    await page.getByRole("button", { name: "Stop recording" }).click();
-    // Decode the exact synthetic preview independently before exercising
-    // storage. A failure here identifies a decoder/recording issue, while a
-    // mismatch after confirmation identifies a problem in the upload path.
-    const preview = await page.getByLabel("Selected video preview").evaluate(async (element: HTMLVideoElement) => {
-      const blob = await (await fetch(element.src)).blob();
-      return { mime: blob.type, bytes: Array.from(new Uint8Array(await blob.arrayBuffer())) };
-    });
-    const finalCapture = await page.evaluate(() => (window as Window & {
-      finalCapture?: { bytes: number; trackStates: MediaStreamTrackState[] };
-    }).finalCapture);
-    expect(finalCapture?.bytes).toBeGreaterThan(0);
-    expect(finalCapture?.trackStates).toEqual(["live", "live"]);
-    const ffprobe = process.env.VIDEO_DURATION_FFPROBE;
-    if (!ffprobe) throw new Error("Native ffprobe is required for the reviewer upload test.");
-    const expectedDuration = await probeVideoDuration(
-      ffprobe, Readable.from([Buffer.from(preview.bytes)]), preview.bytes.length,
-      preview.mime, AbortSignal.timeout(VIDEO_PROBE_TIMEOUT_MS),
-    );
-    expect(expectedDuration, "Native decoder must measure the Chromium recording before upload").toBeGreaterThanOrEqual(500);
-    await page.getByRole("button", { name: "Upload private video", exact: true }).click();
-    await expect(page.getByText("Your private video has been confirmed.", { exact: true })).toBeVisible({ timeout: 15000 });
-    const video = await db.video.findFirstOrThrow({ where: { ownerId: owner.id, status: "READY" } });
-    expect(video.durationMs, "Confirmation must persist the duration measured from the uploaded recording").toBe(expectedDuration);
-    expect(video.durationMs).toBeLessThan(15000);
-
-    // Exercise the other supported container using a generated video, not a
-    // database duration fixture or metadata supplied by the client.
-    const mp4 = execFileSync("ffmpeg", [
+    // Ten frames at 10 fps span 900 ms between first and last frame starts.
+    const mimeType = `video/${container}`;
+    const ffmpeg = join(dirname(nativeProbePath()), process.platform === "win32" ? "ffmpeg.exe" : "ffmpeg");
+    const bytes = execFileSync(ffmpeg, [
       "-v", "error", "-f", "lavfi", "-i", "color=black:s=64x64:r=10",
-      "-t", "1", "-an", "-c:v", "libx264", "-movflags", "frag_keyframe+empty_moov",
-      "-f", "mp4", "pipe:1",
-    ], { timeout: 10000, maxBuffer: 1048576, windowsHide: true });
+      "-frames:v", "10", "-an", "-pix_fmt", "yuv420p", "-threads", "1",
+      ...(container === "mp4" ? ["-c:v", "libx264", "-movflags", "frag_keyframe+empty_moov"] : ["-c:v", "libvpx"]),
+      "-f", container, "pipe:1",
+    ], { timeout: 10000, maxBuffer: 1048576, windowsHide: true, stdio: ["ignore", "pipe", "ignore"] });
     const intent = await page.request.post("/api/videos/upload-intent", { headers: mutation, data: {
-      mimeType: "video/mp4", sizeBytes: mp4.length,
+      mimeType, sizeBytes: bytes.length,
     } });
     expect(intent.status()).toBe(201);
-    const mp4Upload = await intent.json() as { id: string; uploadUrl: string };
-    const put = await fetch(mp4Upload.uploadUrl, {
-      method: "PUT", headers: { "Content-Type": "video/mp4" }, body: new Uint8Array(mp4),
-    }).catch(() => { throw new Error("Synthetic MP4 upload failed."); });
+    const upload = await intent.json() as { id: string; uploadUrl: string };
+    const put = await fetch(upload.uploadUrl, {
+      method: "PUT", headers: { "Content-Type": mimeType }, body: new Uint8Array(bytes),
+      signal: AbortSignal.timeout(10000),
+    }).catch(() => { throw new Error("Synthetic video PUT failed."); });
     expect(put.ok).toBe(true);
-    const confirmed = await page.request.post(`/api/videos/${mp4Upload.id}/confirm`, { headers: mutation, data: {} });
+    const confirmed = await page.request.post(`/api/videos/${upload.id}/confirm`, { headers: mutation, data: {} });
     expect(confirmed.status()).toBe(201);
-    const measured = await db.video.findUniqueOrThrow({ where: { id: mp4Upload.id }, select: { durationMs: true } });
-    expect(measured.durationMs).toBeGreaterThanOrEqual(900);
-    expect(measured.durationMs).toBeLessThanOrEqual(1000);
+    const video = await db.video.findUniqueOrThrow({ where: { id: upload.id } });
+    expect(video.status).toBe("READY");
+    expect(video.durationMs, "Confirmation must store the decoded frame span").toBe(900);
 
-    await identity("MODERATOR", staff);
-    const expert = await identity("EXPERT", context);
+    await identity(db, "MODERATOR", staff);
+    const expert = await identity(db, "EXPERT", context);
     const approved = await staff.request.post(`/api/expert-admin/experts/${expert.id}/approvals`, { headers: mutation, data: {
       expectedRevision: 0, trainingVersion: "t08-fixture-training", policyVersion: "t08-fixture-confidentiality",
       trainingEvidenceId: `t08-training-${expert.id}`, confidentialityEvidenceId: `t08-confidentiality-${expert.id}`, expiresAt: null,
@@ -168,6 +209,8 @@ test("reviewer plays private media, saves a draft, reloads, and loses access aft
     });
     expect((await fetch(unsignedObject, { cache: "no-store" })).status).toBe(403);
     await page.getByRole("button", { name: "Add observation" }).click();
+    await page.getByLabel("Start (ms)").fill("100");
+    await page.getByLabel("End (ms)").fill(String(video.durationMs));
     await page.getByLabel("Observable evidence").fill("Synthetic movement.");
     await page.getByLabel("Context").fill("Opening frame.");
     await expect(page.getByText("Saved version 3")).toBeVisible();
@@ -176,8 +219,9 @@ test("reviewer plays private media, saves a draft, reloads, and loses access aft
     const saved = await db.expertReview.findUniqueOrThrow({ where: { assignmentId: assignment.id },
       include: { observations: true } });
     expect(saved.version).toBe(3);
+    expect(saved.observations).toMatchObject([{ startMs: 100, endMs: video.durationMs, observation: "Synthetic movement." }]);
 
-    await identity("EXPERT", others);
+    await identity(db, "EXPERT", others);
     expect((await others.request.get(api + "/draft")).status()).toBe(404);
     expect((await others.request.post(api + "/playback", { headers: mutation, data: {} })).status()).toBe(404);
     const draftApi = `/api/expert/reviews/${saved.id}/draft`;
@@ -206,6 +250,5 @@ test("reviewer plays private media, saves a draft, reloads, and loses access aft
   } finally {
     await staff.close();
     await others.close();
-    await db.$disconnect();
   }
 });
