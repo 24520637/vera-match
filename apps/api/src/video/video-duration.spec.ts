@@ -3,17 +3,17 @@ import { mkdtempSync, readFileSync, rmSync, rmdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { Readable } from "node:stream";
-import { decodedVideoDuration, probeVideoDuration } from "./video-duration";
+import { inspectDecodedVideo, inspectVideoProbe, probeVideoDuration } from "./video-duration";
 
 describe("decoded video duration", () => {
   it("does not trust declared container duration or a forged frame duration", () => {
-    expect(decodedVideoDuration(JSON.stringify({
+    expect(inspectDecodedVideo(JSON.stringify({
       format: { duration: "999" },
       frames: [
         { best_effort_timestamp_time: "1.000000", pkt_duration_time: "0.250000" },
         { best_effort_timestamp_time: "1.500000", duration_time: "999" },
       ],
-    }))).toBe(500);
+    }))).toEqual({ status: "measured", durationMs: 500, frameCount: 2 });
   });
 
   it.each([
@@ -24,14 +24,23 @@ describe("decoded video duration", () => {
     [{ best_effort_timestamp_time: "0" }, { best_effort_timestamp_time: "0" }],
     [{ best_effort_timestamp_time: "1" }],
   ].map(frames => [frames] as const))("rejects missing or invalid timelines: %j", frames => {
-    expect(decodedVideoDuration(JSON.stringify({ frames }))).toBeNull();
+    expect(inspectDecodedVideo(JSON.stringify({ frames }))).toEqual({
+      status: frames.length < 2 ? "insufficient-frames" : "invalid-timestamps",
+      frameCount: frames.length,
+    });
+  });
+
+  it("classifies malformed decoder JSON without returning any output", () => {
+    expect(inspectDecodedVideo("{")).toEqual({ status: "malformed-json" });
+    expect(inspectDecodedVideo('{"frames":"unexpected output"}')).toEqual({ status: "malformed-json" });
   });
 
   it("rejects excess bytes and aborts a stalled input without starting the decoder", async () => {
     const executable = process.execPath;
     expect(await probeVideoDuration(executable, Readable.from([Buffer.from("long")]), 1, "video/mp4", AbortSignal.timeout(1000))).toBeNull();
     const stalled = new Readable({ read() { /* no bytes arrive */ } });
-    expect(await probeVideoDuration(executable, stalled, 1, "video/webm", AbortSignal.timeout(50))).toBeNull();
+    expect(await inspectVideoProbe(executable, stalled, 1, "video/webm", AbortSignal.timeout(50)))
+      .toEqual({ status: "timeout" });
     expect(stalled.destroyed).toBe(true);
   });
 });
@@ -67,6 +76,6 @@ nativeTest.each(["mp4", "webm"])("decodes real %s bytes with native FFmpeg tools
 
 nativeTest("a matching MP4 signature alone cannot produce a duration", async () => {
   const header = Buffer.from([0, 0, 0, 24, 102, 116, 121, 112, 105, 115, 111, 109]);
-  await expect(probeVideoDuration(executable!, Readable.from([header]), header.length, "video/mp4", AbortSignal.timeout(3000)))
-    .resolves.toBeNull();
+  await expect(inspectVideoProbe(executable!, Readable.from([header]), header.length, "video/mp4", AbortSignal.timeout(3000)))
+    .resolves.toEqual({ status: "decoder-failure" });
 });
