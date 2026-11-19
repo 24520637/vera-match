@@ -268,8 +268,8 @@ decoder fixtures do not exercise this Chromium finalization order.
 The upload UI now waits for final data and the stop event before releasing
 tracks and offering the preview. A five-second watchdog discards a recording
 if finalization does not finish. Errors, size overflow and unmount cannot
-publish a partial recording. The reviewer E2E still independently decodes
-the actual blob and compares its measured duration with the persisted value.
+publish a partial recording. On `78a8842`, the reviewer E2E independently
+decoded the actual blob and compared its measured duration with the persisted value.
 C045 remains PARTIAL until the native Linux check passes on the updated SHA.
 
 Local verification of this fix, without Docker:
@@ -282,3 +282,79 @@ Local verification of this fix, without Docker:
   and owner cases on desktop and mobile, using native MinIO and FFmpeg.
 - Prisma validation, API/test and web TypeScript, both production builds,
   and Git diff checks **PASS**.
+
+### Linux CI #80 and independent reviewer and recorder checks
+
+[CI #80](https://github.com/24520637/vera-match/actions/runs/44470249776/job/135377672722)
+tested `78a88421c5c8a398332fff013a6b4d3597bb5ff0` in PR merge checkout
+`f0eccf7`. With Ubuntu's FFmpeg 8.0.1, 359/359 PostgreSQL cases and
+11/11 native decoder cases passed. Both owner-video browser cases passed.
+Both reviewer cases failed at line 90 of `expert-review.video-e2e.ts` when
+the direct Chromium-preview probe returned `null`. They had already passed
+the nonempty final-chunk and live-track checks. The failure happened before
+upload, so MinIO, promotion and the database write were outside this
+failure path. The logged case times were 2.5 s and 2.4 s, including a 1.5 s
+recording wait. That timing provides no evidence of a full 2 s probe
+timeout. The result carried no diagnostic reason. Decoder rejection and a
+missing or unusable timeline remain hypotheses, and the earlier track
+release race does not explain the failure after the finalization fix.
+
+The primary workspace cases now use generated MP4 and WebM with ten frames
+at 10 fps. Desktop and mobile each create a real upload intent, PUT to MinIO,
+confirm through the API, and check that the promoted object reaches READY
+with a 900 ms server-measured frame span. The workspace accepts a timecode
+at 900 ms and rejects 901 ms. The cases also check signed playback,
+anonymous denial, observation persistence after reload, reviewer isolation,
+consent withdrawal, and audit counts.
+
+The separate Chromium MediaRecorder case observes `dataavailable` followed
+by `stop`, checks the capture tracks around finalization, and probes the
+final preview. Its test report contains a bounded outcome, elapsed time,
+and frame count or duration when available. Outcomes distinguish deadline
+expiry, decoder failure, invalid JSON, insufficient frames and invalid
+timestamps. The production caller still reads only the duration or null.
+The test report carries no media bytes, decoder output, credential values
+or signed URLs in its probe annotations.
+
+| Local Windows verification | Result |
+| --- | --- |
+| Prisma validate/generate, API and web TypeScript including API integration sources, API/web production builds, `git diff --check` | PASS |
+| API Jest with FFmpeg 9.0.2 | PASS 276/276 |
+| Focused native FFprobe suite | PASS 12/12 |
+| Full PostgreSQL 18 integration run with MinIO and Mailpit | FAIL on first run. 349 passed and 10 failed |
+| Targeted PostgreSQL reruns | PASS 11/11 auth foundation after migrating an isolated schema. PASS 7/7 expert migration in isolation with a 90 s local Jest limit |
+| Primary reviewer MP4/WebM with real API, PostgreSQL and MinIO | PASS 4/4, both formats on desktop and mobile |
+| Independent Chromium MediaRecorder regression | PASS 2/2. Desktop measured 1497 ms across 31 frames in 174 ms. Mobile measured 1504 ms across 31 frames in 134 ms |
+| Owner-video upload/playback/delete/withdrawal regression | PASS 2/2 |
+| Revised Linux native browser and MinIO checks | NOT RUN. C045 remains PARTIAL pending Linux validation of the updated checks |
+
+The first local browser attempt failed six cases. Four fixture cases could
+not start FFmpeg after the temporary binaries disappeared and two recorder
+cases waited on a live preview clock that stayed at zero. The rerun staged
+the verified tools under the worktree and used the recorder's timed chunk
+and elapsed time to decide when to request stop. The full rerun passed 8/8.
+
+The first PostgreSQL run used the disposable database's unmigrated default
+schema. Nine auth foundation cases failed because that schema lacked
+`User`. One C031 expert migration case exceeded its 30 s Jest timeout.
+Assignment access, video API, security media, private storage, cleanup,
+consent, and assignment cancellation suites passed in that run.
+The auth foundation rerun passed after all 13 migrations were applied to a
+fresh test schema. A different C031 case hit the default 30 s limit on
+that rerun. The isolated C031 rerun used `--testTimeout=90000` and passed.
+Together the initial run and targeted reruns verified all 359 cases.
+
+#### READY with null duration
+
+Keep READY playable and timecoded writes fail-closed. Reconfirming a READY
+video currently returns READY without probing. Confirmation verifies the
+promoted ETag during the original measurement, and the Video row stores
+the immutable key and size. A later retry would need an approved way to
+bind the probe to the original object identity because the row has no ETag.
+First measure transient storage, concurrency and deadline outcomes under
+the current 2 s limit to establish which failures merit another attempt.
+A candidate retry would need a bounded attempt budget and an idempotent
+update conditional on READY, a null duration, current consent and
+generation, and the original immutable object identity. Its race tests
+would cover delete, withdrawal, regrant and simultaneous attempts. This
+is a design proposal only.

@@ -23,18 +23,19 @@ Each feature needs valid inputs, invalid inputs, unauthorized access, state/race
   the persisted duration or null result, idempotent confirmation, and the
   exact accepted timecode boundary. This does not verify the MinIO adapter.
 - Run `node scripts/run-video-e2e.cjs expert-review.video-e2e.ts` with the
-  same ffprobe configuration, ffmpeg on PATH, and the existing loopback
-  PostgreSQL and native MinIO services. CI runs desktop and mobile. Verify
-  measured duration from browser recording and generated MP4 without a
-  database duration fixture. Compare a direct decode of the same synthetic
-  recording before upload against the stored value to isolate decoder
-  failures from upload-path failures. Verify that a timecode one millisecond beyond
-  the measured bound is rejected. Verify signed playback progressing, denied
-  anonymous and foreign access, draft reload, consent withdrawal and unchanged
-  draft/success audit after denied edits. See [T08 delivery](T08-DELIVERY.md).
-- In the native reviewer cases, observe the real Chromium recorder's final
-  nonempty `dataavailable` event. Both capture tracks must still be live at that
-  point. The decoder and upload assertions run on the same finalized blob.
+  same ffprobe configuration, ffmpeg alongside ffprobe, and the existing
+  loopback PostgreSQL and native MinIO services. CI runs desktop and mobile.
+  Filter with `--grep "reviewer plays synthetic"` for the reviewer workspace
+  cases. Upload generated MP4 and WebM via the real API and MinIO, check the
+  server-measured 900 ms frame span, and accept a timecode at that bound while
+  rejecting one millisecond beyond it. Verify signed playback progressing,
+  denied anonymous and foreign access, draft reload, consent withdrawal and
+  the saved draft and audit counts after denied edits.
+- Filter with `--grep "browser MediaRecorder"` for the recorder regression.
+  Observe a nonempty final `dataavailable` event with live tracks, followed
+  by `stop`, and decode the exact finalized preview. The Playwright report
+  includes the bounded probe outcome and elapsed time for the synthetic
+  capture. See [T08 delivery](T08-DELIVERY.md).
 
 ## C036 - cancellation and reassignment race acceptance
 
