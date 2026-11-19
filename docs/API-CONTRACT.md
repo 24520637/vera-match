@@ -107,7 +107,10 @@ not changes to current auth.
 
 Upload confirmation records a conservative decoded video duration when it can
 probe the exact promoted private MP4/WebM object. The upload payload does not
-accept a duration. Unsupported, incomplete, busy, disabled or timed-out probes
+accept a duration. The bound comes from decoded frame start timestamps.
+Container duration and per-frame duration declarations are ignored. Nonempty
+observation edits require a positive integer duration. Unsupported, incomplete,
+busy, disabled or timed-out probes
 leave `durationMs` null. Confirmation and playback retain their existing
 consent and ownership checks. Existing uploads are not backfilled by this path.
 

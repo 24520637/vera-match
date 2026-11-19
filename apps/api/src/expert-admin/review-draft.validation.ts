@@ -74,7 +74,7 @@ export function requireDurationBounds<T extends { startMs: number; endMs: number
   rows: readonly T[], durationMs: number | null, prefix: "observations" | "observation",
 ) {
   if (!rows.length) return;
-  if (durationMs === null || durationMs <= 0)
+  if (durationMs === null || !Number.isSafeInteger(durationMs) || durationMs <= 0 || durationMs > MAX_INT)
     throw new ServiceUnavailableException({ code: "REVIEW_DURATION_UNAVAILABLE",
       message: "Verified video duration is unavailable. Timecoded observations cannot be saved." });
   for (const [index, row] of rows.entries()) {

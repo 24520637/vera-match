@@ -98,6 +98,16 @@ test("reviewer plays private media, saves a draft, reloads, and loses access aft
     await page.getByLabel("Summary").fill("Synthetic recording reviewed.");
     await expect(page.getByText("Saved version 2")).toBeVisible();
 
+    const draftRow = await db.expertReview.findUniqueOrThrow({ where: { assignmentId: assignment.id } });
+    const outside = await page.request.patch(`/api/expert/reviews/${draftRow.id}/draft`, {
+      headers: mutation, data: { expectedVersion: 2, observations: [{
+        category: "EYE", startMs: 0, endMs: video.durationMs! + 1,
+        observation: "Synthetic movement.", context: "Opening frame.",
+      }] },
+    });
+    expect(outside.status()).toBe(422);
+    expect(await db.expertObservation.count({ where: { reviewId: draftRow.id } })).toBe(0);
+
     await page.reload();
     await expect(page.getByLabel("Summary")).toHaveValue("Synthetic recording reviewed.");
     await page.getByRole("button", { name: "Load playback" }).click();

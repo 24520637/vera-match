@@ -159,7 +159,10 @@ T08 duration projection and runtime expert gate.
 Set `VIDEO_DURATION_FFPROBE` to the absolute path of a patched native
 ffprobe executable. Confirmation reads only the promoted server-owned object,
 using the copy's ETag and checked byte size. It measures decoded video frame
-timestamps instead of user input or the container's declared duration. The
+start timestamps instead of user input or the container's declared duration.
+The ending bound is the last decoded frame start. Container and per-frame
+duration declarations cannot extend it. Missing, unordered, identical-only
+or malformed timestamps leave duration unavailable. The
 same transaction holds the existing consent/owner lock through promotion,
 measurement and the READY/audit write. The probe has a 100 MiB input cap,
 two-second download/decoder deadline, restricted formats/codecs, one decoder
@@ -184,3 +187,23 @@ CI runs the native decoder tests and both browser projects with ffprobe
 enabled. That run must verify real uploads and the newer T15 integration before
 closing the remaining C045 integration checks. The previous CI #75 pass does
 not include these changes.
+
+### C045 duration trust boundary verification
+
+| Check | Result |
+| --- | --- |
+| API unit with portable FFmpeg 9.0.2 | 275/275 PASS. Includes ordinary MP4, streaming WebM, malformed media, inflated frame/container duration and invalid review bounds |
+| Six assignment, consent, cancellation and migration PostgreSQL suites listed above | 148/148 PASS. Two new HTTP cases exercise persistence and exact timecode boundaries with controlled storage responses |
+| Playwright workspace with HTTP mocks | 8/8 PASS |
+| Prisma validation and generation, API/web TypeScript, API/web builds and Git diff checks | PASS |
+| Updated browser/MinIO suite | NOT RUN locally. Four cases discovered across desktop and mobile, including two reviewer cases. Local MinIO was unavailable |
+
+The earlier nine local integration failures were eight MinIO fixture setup
+failures at bucket creation (loopback port 9000) and one Mailpit password-reset
+test failing to fetch mail (loopback port 8025). PostgreSQL responded on 5433.
+The full PostgreSQL step in
+[CI #77](https://github.com/24520637/vera-match/actions/runs/44460305954)
+passed on `de49921` with native MinIO and Mailpit. No code change was made
+to bypass those checks. The latest full upload-to-playback check, including
+the timecode one millisecond beyond the measured bound, is still required
+on the follow-up SHA.

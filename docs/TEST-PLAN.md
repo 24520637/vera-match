@@ -16,12 +16,18 @@ Each feature needs valid inputs, invalid inputs, unauthorized access, state/race
   saved draft reload, conflict recovery, and hidden content after denial.
 - Set `VIDEO_DURATION_FFPROBE` to the absolute path of native ffprobe and
   run `npm test --workspace apps/api -- --runInBand video-duration` to exercise
-  real generated MP4/WebM and decoder bounds.
+  ordinary seekable MP4, streaming WebM without declared duration, malformed
+  video, declared duration spoofing, and decoder bounds.
+- In `assignment-access.integration-spec.ts`, use real HTTP and PostgreSQL
+  with controlled storage responses to verify which object is measured,
+  the persisted duration or null result, idempotent confirmation, and the
+  exact accepted timecode boundary. This does not verify the MinIO adapter.
 - Run `node scripts/run-video-e2e.cjs expert-review.video-e2e.ts` with the
   same ffprobe configuration, ffmpeg on PATH, and the existing loopback
   PostgreSQL and native MinIO services. CI runs desktop and mobile. Verify
   measured duration from browser recording and generated MP4 without a
-  database duration fixture. Verify signed playback progressing, denied
+  database duration fixture. Verify that a timecode one millisecond beyond
+  the measured bound is rejected. Verify signed playback progressing, denied
   anonymous and foreign access, draft reload, consent withdrawal and unchanged
   draft/success audit after denied edits. See [T08 delivery](T08-DELIVERY.md).
 

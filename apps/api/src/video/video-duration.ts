@@ -10,27 +10,25 @@ export const VIDEO_PROBE_TIMEOUT_MS = 2000;
 const MAX_PROBE_BYTES = 100 * 1024 * 1024;
 const MAX_SQL_INT = 2147483647;
 
-/** Use decoded video frames, independently of container-declared duration and audio.
- * Missing last-frame duration is treated conservatively as the last frame's start.
- */
+// Use the span of observed decoded frame starts. A container can declare a
+// longer playback duration or attach an oversized duration to the last frame.
 export function decodedVideoDuration(output: string): number | null {
   const result = JSON.parse(output) as { frames?: Array<{
-    best_effort_timestamp_time?: string; duration_time?: string; pkt_duration_time?: string;
+    best_effort_timestamp_time?: string;
   }> };
-  if (!Array.isArray(result.frames) || !result.frames.length) return null;
-  let start = Infinity;
-  let end = -Infinity;
+  if (!Array.isArray(result.frames) || result.frames.length < 2) return null;
+  let start: number | undefined;
+  let end: number | undefined;
   for (const frame of result.frames) {
-    const timestamp = frame.best_effort_timestamp_time;
-    if (typeof timestamp !== "string" || !/^-?\d+(?:\.\d+)?$/.test(timestamp)) return null;
-    const seconds = Number(timestamp);
-    if (!Number.isFinite(seconds) || Math.abs(seconds) > MAX_SQL_INT / 1000) return null;
-    const duration = Number(frame.duration_time ?? frame.pkt_duration_time ?? 0);
-    if (!Number.isFinite(duration) || duration < 0) return null;
-    start = Math.min(start, seconds);
-    end = Math.max(end, seconds + duration);
+    const timestamp = frame?.best_effort_timestamp_time;
+    if (typeof timestamp !== "string" || !/^-?\d+(?:\.\d{1,6})?$/.test(timestamp)) return null;
+    const micros = Math.round(Number(timestamp) * 1_000_000);
+    if (!Number.isSafeInteger(micros) || Math.abs(micros) > MAX_SQL_INT * 1000 ||
+        (end !== undefined && micros < end)) return null;
+    start ??= micros;
+    end = micros;
   }
-  const ms = Math.floor((end - Math.max(0, start)) * 1000);
+  const ms = Math.floor((end! - Math.max(0, start!)) / 1000);
   return ms > 0 && ms <= MAX_SQL_INT ? ms : null;
 }
 
@@ -63,7 +61,7 @@ export async function probeVideoDuration(executable: string, body: Readable, siz
       "-f", mime === "video/mp4" ? "mov" : "matroska",
       ...(mime === "video/mp4" ? ["-enable_drefs", "0", "-use_absolute_path", "0"] : []),
       "-select_streams", "V:0", "-show_frames",
-      "-show_entries", "frame=best_effort_timestamp_time,duration_time,pkt_duration_time",
+      "-show_entries", "frame=best_effort_timestamp_time",
       "-of", "json", "-i", input,
     ];
     return await new Promise<number | null>((resolve) => {

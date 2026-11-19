@@ -14,6 +14,13 @@ describe("T08 observation validation", () => {
     expect(() => requireDurationBounds([row], null, "observations")).toThrow(expect.objectContaining({ status: 503 }));
   });
 
+  test.each([null, 0, -1, 1000.5, NaN, Infinity, 2147483648])("rejects an invalid stored duration %j", duration => {
+    expect(() => requireDurationBounds([row], duration, "observations")).toThrow(expect.objectContaining({
+      status: 503, response: expect.objectContaining({ code: "REVIEW_DURATION_UNAVAILABLE" }),
+    }));
+    expect(() => requireDurationBounds([], duration, "observations")).not.toThrow();
+  });
+
   test("rejects reversed ranges, absent context and injected identity", () => {
     expect(() => patch({ ...row, startMs: 1001 })).toThrow(expect.objectContaining({ status: 422 }));
     expect(() => patch({ ...row, context: " " })).toThrow(expect.objectContaining({ status: 400 }));

@@ -130,6 +130,51 @@ describe("C034 assignment-bound playback / disposable PostgreSQL", () => {
     return { ...seed, path, assignment };
   }
 
+  test.each([900, null])("T08 confirms the promoted object and persists decoder result %s", async measuredDuration => {
+    const seed = await fixture();
+    const { owner, expert, video } = seed;
+    const storage = app.get(PrivateStorageService);
+    const incoming = "incoming/" + randomUUID();
+    const bytes = Buffer.from([0, 0, 0, 24, 102, 116, 121, 112, 105, 115, 111, 109]);
+    await db.client.video.update({ where: { id: video.id }, data: {
+      status: "UPLOADING", uploadKey: incoming, uploadExpiresAt: new Date(Date.now() + 60000), sizeBytes: bytes.length,
+    } });
+    const inspect = jest.spyOn(storage, "inspect").mockResolvedValue({
+      size: bytes.length, mime: "video/mp4", etag: '"incoming"', prefix: bytes,
+    });
+    const promote = jest.spyOn(storage, "promote").mockResolvedValue('"promoted"');
+    const measure = jest.spyOn(storage, "measureDuration").mockResolvedValue(measuredDuration);
+    try {
+      const confirm = (body: object) => fetch(`${base}/api/videos/${video.id}/confirm`, {
+        method: "POST", headers: { Cookie: owner.cookie, Origin: origin, "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      expect((await confirm({ durationMs: 90000 })).status).toBe(400);
+      expect(inspect).not.toHaveBeenCalled();
+      expect((await confirm({})).status).toBe(201);
+      expect(promote).toHaveBeenCalledWith(incoming, video.objectKey, '"incoming"', "video/mp4");
+      expect(measure).toHaveBeenCalledWith(video.objectKey, '"promoted"', bytes.length, "video/mp4");
+      expect(await db.client.video.findUniqueOrThrow({ where: { id: video.id } }))
+        .toMatchObject({ status: "READY", durationMs: measuredDuration });
+      expect((await confirm({})).status).toBe(201);
+      expect(measure).toHaveBeenCalledTimes(1);
+      expect(await db.client.auditLog.count({ where: { action: "VIDEO_UPLOAD_CONFIRMED", subjectId: video.id } })).toBe(1);
+
+      const { assignment } = await create(seed);
+      const { draft } = await draftJson(await draftRequest(expert.cookie, draftPath(assignment.id), "POST", {}));
+      const edit = (endMs: number) => draftRequest(expert.cookie, savePath(draft.id), "PATCH", {
+        expectedVersion: 1, observations: [{ ...observation, endMs }],
+      });
+      const denied = await edit(901);
+      expect(denied.status).toBe(measuredDuration === null ? 503 : 422);
+      expect(await db.client.expertObservation.count({ where: { reviewId: draft.id } })).toBe(0);
+      const boundary = await edit(900);
+      expect(boundary.status).toBe(measuredDuration === null ? 503 : 200);
+    } finally {
+      inspect.mockRestore(); promote.mockRestore(); measure.mockRestore();
+    }
+  });
+
   test("T08 initializes once and persists all five categories across independent HTTP reads", async () => {
     const { expert, path, assignment } = await reviewFixture();
     const empty = await draftRequest(expert.cookie, path);
