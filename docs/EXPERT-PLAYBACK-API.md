@@ -68,3 +68,11 @@ Issued URLs may work until expiry; buffered/in-flight bytes cannot be recalled.
 Provider expiry enforcement, clock synchronization, caching, storage/backup and
 retention still need production verification. Synthetic local signing does not
 prove provider enforcement.
+
+## T15 provider failure boundary
+
+MFA and qualification evidence/registry exceptions, including upstream HttpException
+bodies, are sanitized to 503 EXPERT_ACCESS_UNAVAILABLE. Private provider payloads
+are not part of the public HTTP contract. Application-owned session/permission
+401/403 and all existing authorization, transaction and signing bounds remain
+unchanged. This does not enable any production source or approve real MFA.
