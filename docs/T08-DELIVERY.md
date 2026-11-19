@@ -12,11 +12,11 @@ implementation SHA without changing its code or tests.
 | Step | Scope and actual delivery | Status |
 | --- | --- | --- |
 | C043 | Reuse the initial migration's ExpertReview and ExpertObservation entities. Add database checks for positive versions and nonnegative, ordered evidence timestamps. | DONE for database foundation |
-| C044 | Private assignment route, playback through C034, expiring video source, timestamps and keyboard-accessible jumps. Added a browser scenario that requires native MinIO and actual signed playback. | PARTIAL pending new native E2E result and release authorization |
+| C044 | Private assignment route, playback through C034, expiring video source, timestamps and keyboard-accessible jumps. CI #75 verified signed access and denied anonymous access using native MinIO on desktop and mobile. | DONE for assignment playback acceptance in isolated CI. Production authorization remains blocked. |
 | C045 | Persist EYE, FACIAL, BODY, SPEECH and CROSS_MODAL observations with explicit evidence and context. Text-only autosave now omits observations, preserving existing notes even when duration is absent. | PARTIAL because uploaded video currently has no verified duration producer |
 | C046 | Validate integer milliseconds, order and stored duration. Out-of-range timecodes return 422. Unknown or nonpositive duration blocks new timecoded notes with 503. | DONE for validation contract; verified-duration ingest remains a dependency |
 | C047 | Versioned PATCH autosave; a stale version returns 409. A transaction includes the matching write and audit. | DONE for private draft behavior in the verified test environment |
-| C048 | Verify real HTTP/PostgreSQL persistence and reviewer isolation. Added native browser scenarios for upload, assignment, playback, autosave, reload, cross-reviewer denial and withdrawal. | PARTIAL pending execution of the new full-stack scenarios |
+| C048 | CI #75 verified real browser/API/PostgreSQL/MinIO reload, reviewer isolation and withdrawal on desktop and mobile. The isolated scenarios seed duration for observation edits. | DONE for isolated draft persistence and reviewer isolation. The upload duration gap is tracked under C045. |
 
 ## Contract
 
@@ -122,3 +122,36 @@ No production code trusts client duration or changes the upload boundary.
 [CI #74](https://github.com/24520637/vera-match/actions/runs/44368423038) passed
 on the previous PR head `f2dc78e`. Check GitHub Actions on the follow-up head
 for execution of the new reviewer scenarios.
+
+### Native CI evidence and duration boundary
+
+[CI #75](https://github.com/24520637/vera-match/actions/runs/44371280981) passed
+on `1a3e5a893ddfbbe31c5d98dbffb95e110bbc1bef`: API unit **257/257**,
+PostgreSQL integration **332/332**, UI **126/126**, and native MinIO browser
+**4/4**, including both T08 reviewer cases. The native runner exercised the
+actual upload, C032/C033 qualification/assignment APIs, signed media request,
+anonymous denial, draft reload, foreign reviewer denial, and consent withdrawal.
+Its MFA, evidence and duration fixtures are restricted to the disposable test
+runtime. The evidence does not validate duration extraction or production release.
+
+C045 still needs a trusted probe for MP4 and WebM, including browser recordings
+without a declared container duration. Inspect the exact immutable promoted object
+with resource limits and isolated parsing. Bind the result to object identity and
+current consent before writing it, and reject stale results after deletion,
+withdrawal, or generation change. Do not derive the bound from client input,
+content length, or the existing file signature check. No bounded media probing
+runtime is available in the current upload implementation.
+
+The new regression assertions cover forged duration, text edits that preserve
+existing observation rows, actual playback progression, and no draft or success
+audit changes after an unauthorized edit. Their native execution is **NOT RUN**
+locally because loopback port 9000 is unavailable. CI #75 predates these extra
+assertions.
+
+| Latest local check | Result |
+| --- | --- |
+| Prisma validate/generate, API and web TypeScript checks including API test sources, production builds, and Git diff checks | PASS |
+| API unit tests | 257/257 PASS |
+| Six PostgreSQL suites listed in the preceding follow-up table | 146/146 PASS, including the new duration-boundary regression |
+| Playwright workspace tests with HTTP mocks | 8/8 PASS |
+| Updated native MinIO browser assertions | NOT RUN locally. Both reviewer projects discovered by Playwright |

@@ -193,6 +193,30 @@ describe("C034 assignment-bound playback / disposable PostgreSQL", () => {
     expect(await db.client.auditLog.count({ where: { subjectId: draft.id, action: "EXPERT_DRAFT_SAVED" } })).toBe(1);
   });
 
+  test("T08 text-only edits preserve observations when duration becomes unavailable", async () => {
+    const { expert, path, video } = await reviewFixture();
+    const { draft } = await draftJson(await draftRequest(expert.cookie, path, "POST", {}));
+    const endpoint = savePath(draft.id);
+    const first = await draftRequest(expert.cookie, endpoint, "PATCH", { expectedVersion: 1, observations: [observation] });
+    expect(first.status).toBe(200);
+    const original = await db.client.expertObservation.findFirstOrThrow({ where: { reviewId: draft.id } });
+    await db.client.video.update({ where: { id: video.id }, data: { durationMs: null } });
+
+    const attempted = { expectedVersion: 2, summary: "Should not be stored", observations: [observation] };
+    const forged = await draftRequest(expert.cookie, endpoint, "PATCH", { ...attempted, durationMs: 10000 });
+    expect(forged.status).toBe(400);
+    const unknown = await draftRequest(expert.cookie, endpoint, "PATCH", attempted);
+    expect(unknown.status).toBe(503);
+    expect(await unknown.json()).toMatchObject({ code: "REVIEW_DURATION_UNAVAILABLE" });
+    expect(await db.client.expertReview.findUniqueOrThrow({ where: { id: draft.id } })).toMatchObject({ version: 2, summary: null });
+
+    const textOnly = await draftRequest(expert.cookie, endpoint, "PATCH", { expectedVersion: 2, summary: "Preserve observations" });
+    expect(textOnly.status).toBe(200);
+    expect(await db.client.expertObservation.findMany({ where: { reviewId: draft.id } })).toEqual([original]);
+    expect(await db.client.expertReview.findUniqueOrThrow({ where: { id: draft.id } })).toMatchObject({ version: 3, summary: "Preserve observations" });
+    expect(await db.client.auditLog.count({ where: { action: "EXPERT_DRAFT_SAVED", subjectId: draft.id } })).toBe(2);
+  });
+
   test("T08 denies foreign, member, moderator and unauthenticated draft access; withdrawal prevents editing after regrant", async () => {
     const { expert, owner, moderator, path } = await reviewFixture();
     const { draft } = await draftJson(await draftRequest(expert.cookie, path, "POST", {}));

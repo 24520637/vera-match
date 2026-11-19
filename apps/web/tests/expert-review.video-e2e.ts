@@ -38,6 +38,11 @@ test("reviewer plays private media, saves a draft, reloads, and loses access aft
       expectedVersion: 0, consents: ["VIDEO_STORAGE", "EXPERT_VIDEO_REVIEW"].map(purpose => ({ purpose, granted: true, policyVersion })),
     } });
     expect(consent.status()).toBe(200);
+    const forgedDuration = await page.request.post("/api/videos/upload-intent", { headers: mutation, data: {
+      mimeType: "video/webm", sizeBytes: 1024, durationMs: 500,
+    } });
+    expect(forgedDuration.status()).toBe(400);
+    expect(await db.video.count({ where: { ownerId: owner.id } })).toBe(0);
     await context.grantPermissions(["camera", "microphone"], { origin });
     await page.goto("/account/videos");
     await page.getByRole("button", { name: "Record a video", exact: true }).click();
@@ -47,6 +52,7 @@ test("reviewer plays private media, saves a draft, reloads, and loses access aft
     await page.getByRole("button", { name: "Upload private video", exact: true }).click();
     await expect(page.getByText("Your private video has been confirmed.", { exact: true })).toBeVisible({ timeout: 15000 });
     const video = await db.video.findFirstOrThrow({ where: { ownerId: owner.id, status: "READY" } });
+    expect(video.durationMs).toBeNull(); // Upload confirmation has no trusted duration producer.
 
     await identity("MODERATOR", staff);
     const expert = await identity("EXPERT", context);
@@ -75,6 +81,16 @@ test("reviewer plays private media, saves a draft, reloads, and loses access aft
     await page.getByRole("button", { name: "Load playback" }).click();
     const player = page.getByLabel("Assigned video");
     await expect.poll(() => player.evaluate((element: HTMLVideoElement) => element.readyState)).toBeGreaterThanOrEqual(1);
+    await player.evaluate(async (element: HTMLVideoElement) => {
+      element.muted = true;
+      try { await element.play(); }
+      catch { throw new Error("Private playback could not start."); }
+    });
+    await expect.poll(() => player.evaluate((element: HTMLVideoElement) => element.currentTime)).toBeGreaterThan(0);
+    await player.evaluate((element: HTMLVideoElement) => { element.pause(); element.currentTime = 0; });
+    await expect.poll(() => db.auditLog.count({
+      where: { actorId: expert.id, action: "EXPERT_PLAYBACK_ISSUED", subjectId: assignment.id },
+    })).toBe(1);
     const unsignedObject = await player.evaluate((element: HTMLVideoElement) => {
       const unsigned = new URL(element.currentSrc);
       unsigned.search = "";
@@ -87,10 +103,16 @@ test("reviewer plays private media, saves a draft, reloads, and loses access aft
     await expect(page.getByText("Saved version 3")).toBeVisible();
     await page.reload();
     await expect(page.getByLabel("Observable evidence")).toHaveValue("Synthetic movement.");
+    const saved = await db.expertReview.findUniqueOrThrow({ where: { assignmentId: assignment.id },
+      include: { observations: true } });
+    expect(saved.version).toBe(3);
 
     await identity("EXPERT", others);
     expect((await others.request.get(api + "/draft")).status()).toBe(404);
     expect((await others.request.post(api + "/playback", { headers: mutation, data: {} })).status()).toBe(404);
+    const draftApi = `/api/expert/reviews/${saved.id}/draft`;
+    const change = { headers: mutation, data: { expectedVersion: saved.version, summary: "Unauthorized edit" } };
+    expect((await others.request.patch(draftApi, change)).status()).toBe(404);
     // Restore the original owner cookie without creating a new owner.
     const ownerContext = await browser.newContext({ baseURL: origin });
     try {
@@ -103,6 +125,10 @@ test("reviewer plays private media, saves a draft, reloads, and loses access aft
       expect(revoke.status()).toBe(200);
     } finally { await ownerContext.close(); }
     expect((await page.request.post(api + "/playback", { headers: mutation, data: {} })).status()).toBe(403);
+    expect((await page.request.patch(draftApi, change)).status()).toBe(403);
+    expect(await db.expertReview.findUnique({ where: { id: saved.id }, include: { observations: true } })).toEqual(saved);
+    expect(await db.auditLog.count({ where: { action: "EXPERT_DRAFT_SAVED", subjectId: saved.id } })).toBe(2);
+    expect(await db.auditLog.count({ where: { action: "EXPERT_PLAYBACK_ISSUED", subjectId: assignment.id } })).toBe(1);
     await page.reload();
     await expect(page.getByText("Review access could not be confirmed.", { exact: false })).toBeVisible();
     await expect(page.getByLabel("Observable evidence")).toHaveCount(0);

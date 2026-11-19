@@ -8,6 +8,8 @@ Each feature needs valid inputs, invalid inputs, unauthorized access, state/race
   Verify the existing C034 playback cases, draft initialization, all five
   categories, duration and context validation, optimistic conflicts, rollback on
   audit failure, and isolation after consent withdrawal and regrant.
+  Check that spoofed duration and missing verified duration cannot change the
+  draft. Confirm a subsequent text-only save keeps existing observation rows.
 - Run `review-draft.validation.spec.ts` for DTO and numeric boundary checks.
 - Run `expert-review.spec.ts` on desktop and mobile. It uses the real UI and
   client with isolated HTTP mocks to check playback routing, timeline controls,
@@ -16,7 +18,8 @@ Each feature needs valid inputs, invalid inputs, unauthorized access, state/race
   existing loopback PostgreSQL and native MinIO services. CI also discovers the
   test through the existing video runner on desktop and mobile. Verify signed
   playback, denied anonymous media access, draft reload, foreign expert denial
-  and withdrawal. The test seeds a duration for draft edits after verifying that
+  and withdrawal. Confirm rejected edits do not change the draft or success
+  audit, and authorized playback advances the media clock. The test seeds a duration for draft edits after verifying that
   ordinary uploads lack it. This does not verify duration extraction or
   production authorization. See [T08 delivery](T08-DELIVERY.md).
 

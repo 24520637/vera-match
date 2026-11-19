@@ -84,10 +84,10 @@ not changes to current auth.
 | POST      | `/expert-admin/assignments`        | Moderator               | C033: strict DTO, both consents, generation, qualification revision and Idempotency-Key; synthetic only    |
 | POST      | `/expert/assignments/:assignmentId/playback` | Expert | C034 assignment-bound playback; synthetic-only until trusted MFA and approved evidence integrations exist; see [contract](EXPERT-PLAYBACK-API.md) |
 | GET       | `/expert/assignments/me`           | Expert (planned)        | Queue metadata remains unimplemented; not part of C034 playback                                          |
-| GET       | `/expert/assignments/:id/draft`    | Assigned expert         | T08: private draft or null, plus server-owned duration; does not initialize a draft |
+| GET       | `/expert/assignments/:id/draft`    | Assigned expert         | T08: private draft or null, plus server-owned `durationMs` (nullable); does not initialize a draft |
 | POST      | `/expert/assignments/:id/draft`    | Assigned expert         | T08: explicit initialization, one DRAFT at version 1 per assignment |
 | POST      | `/expert/reviews/:id/observations` | Assigned expert         | Time range, category, evidence/context, optimistic version                                                |
-| PATCH     | `/expert/reviews/:id/draft`        | Assigned expert         | Draft-only edit with version check and audit. Omit observations to preserve them. Nonempty observation edits require a verified server duration. |
+| PATCH     | `/expert/reviews/:id/draft`        | Assigned expert         | Draft-only edit with version check and audit. Omit observations to preserve them. Nonempty observation edits without verified duration return `503 REVIEW_DURATION_UNAVAILABLE` and make no draft or audit change. |
 | POST      | `/expert/reviews/:id/submit`       | Assigned expert         | Required summary/limitations; freeze submitted snapshot                                                   |
 | POST      | `/qa/reviews/:id/return`           | Moderator               | Not original author; actionable reason required                                                           |
 | POST      | `/qa/reviews/:id/approve`          | Moderator               | Not original author; enforce independent QA and valid transition                                          |
