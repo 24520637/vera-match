@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, rmSync, rmdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { Readable } from "node:stream";
-import { inspectDecodedVideo, inspectVideoProbe, probeVideoDuration } from "./video-duration";
+import { inspectDecodedVideo, inspectVideoProbe, probeVideoDuration, VIDEO_PROBE_TIMEOUT_MS } from "./video-duration";
 
 describe("decoded video duration", () => {
   it("does not trust declared container duration or a forged frame duration", () => {
@@ -72,6 +72,28 @@ nativeTest.each(["mp4", "webm"])("decodes real %s bytes with native FFmpeg tools
   }
   return expect(probeVideoDuration(executable!, Readable.from([video]), video.length, `video/${container}`, AbortSignal.timeout(3000)))
     .resolves.toBe(900);
+}, 12000);
+
+nativeTest("measures WebM with an invalid Opus packet and rejects invalid VP8", async () => {
+  const ffmpeg = join(dirname(executable!), process.platform === "win32" ? "ffmpeg.exe" : "ffmpeg");
+  const video = execFileSync(ffmpeg, [
+    "-v", "error", "-f", "lavfi", "-i", "color=black:s=64x64:r=10",
+    "-f", "lavfi", "-i", "anullsrc=r=48000:cl=mono",
+    "-t", "1", "-c:v", "libvpx", "-c:a", "libopus", "-f", "webm", "pipe:1",
+  ], { timeout: 5000, maxBuffer: 1048576, windowsHide: true });
+  const probe = (bytes: Buffer) => inspectVideoProbe(
+    executable!, Readable.from([bytes]), bytes.length, "video/webm", AbortSignal.timeout(VIDEO_PROBE_TIMEOUT_MS),
+  );
+  const opus = video.indexOf(Buffer.from([0xf8, 0xff, 0xfe]));
+  expect(opus).toBeGreaterThanOrEqual(0);
+  // Replace the first Opus silence packet with a packet declaring zero frames.
+  Buffer.from([0xfb, 0, 0]).copy(video, opus);
+  await expect(probe(video)).resolves.toEqual({ status: "measured", durationMs: 900, frameCount: 10 });
+
+  const keyframe = video.indexOf(Buffer.from([0x9d, 0x01, 0x2a]));
+  expect(keyframe).toBeGreaterThanOrEqual(0);
+  video.fill(0, keyframe, keyframe + 3);
+  await expect(probe(video)).resolves.toEqual({ status: "decoder-failure" });
 }, 12000);
 
 nativeTest("a matching MP4 signature alone cannot produce a duration", async () => {

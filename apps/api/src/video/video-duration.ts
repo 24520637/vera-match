@@ -76,7 +76,9 @@ export async function inspectVideoProbe(executable: string, body: Readable, size
       "-threads", "1", "-max_pixels", "8294400", "-err_detect", "explode",
       "-codec_whitelist", "h264,hevc,av1,vp8,vp9,aac,opus,vorbis",
       "-f", mime === "video/mp4" ? "mov" : "matroska",
-      ...(mime === "video/mp4" ? ["-enable_drefs", "0", "-use_absolute_path", "0"] : []),
+      // WebM track headers suffice for decoding the selected video stream.
+      // Stream discovery can decode unselected Opus packets and log errors.
+      ...(mime === "video/mp4" ? ["-enable_drefs", "0", "-use_absolute_path", "0"] : ["-nofind_stream_info"]),
       "-select_streams", "V:0", "-show_frames",
       "-show_entries", "frame=best_effort_timestamp_time",
       "-of", "json", "-i", input,

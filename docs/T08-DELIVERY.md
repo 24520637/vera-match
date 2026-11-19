@@ -326,7 +326,7 @@ or signed URLs in its probe annotations.
 | Primary reviewer MP4/WebM with real API, PostgreSQL and MinIO | PASS 4/4, both formats on desktop and mobile |
 | Independent Chromium MediaRecorder regression | PASS 2/2. Desktop measured 1497 ms across 31 frames in 174 ms. Mobile measured 1504 ms across 31 frames in 134 ms |
 | Owner-video upload/playback/delete/withdrawal regression | PASS 2/2 |
-| Revised Linux native browser and MinIO checks | NOT RUN. C045 remains PARTIAL pending Linux validation of the updated checks |
+| Revised Linux native browser and MinIO checks at local review | NOT RUN at this checkpoint. See CI #83 below |
 
 The first local browser attempt failed six cases. Four fixture cases could
 not start FFmpeg after the temporary binaries disappeared and two recorder
@@ -358,3 +358,68 @@ update conditional on READY, a null duration, current consent and
 generation, and the original immutable object identity. Its race tests
 would cover delete, withdrawal, regrant and simultaneous attempts. This
 is a design proposal only.
+
+### CI #83 MediaRecorder failure and WebM probe fix
+
+[CI #83](https://github.com/24520637/vera-match/actions/runs/44517883065/job/135538533278)
+tested `2a24575bddf81bbf8c3980b6163cfb08c977bd03` in merge checkout
+`a293e1a` with Chromium 158.0.8127.18 and Ubuntu FFprobe 8.0.1-3ubuntu2.
+PostgreSQL passed 359/359 and native duration tests passed 12/12. The
+video suite passed 6/8, including all four deterministic reviewer cases
+and both owner-video cases.
+
+| Recorder project | CI #83 job log and Playwright report | Matching local Linux reproduction |
+| --- | --- | --- |
+| Desktop | FAIL at line 113 with `decoder-failure` in 53 ms | Exit 0 with an Opus packet-header error on stderr. 30 VP8 frames at 0.014–1.458 s. Patched probe measured 1444 ms in 119 ms |
+| Mobile | FAIL at line 113 with `decoder-failure` in 56 ms | Exit 0 with the same Opus packet-header error on stderr. 30 VP8 frames at 0.000–1.450 s. Patched probe measured 1450 ms in 116 ms |
+
+The [Playwright artifact](https://github.com/24520637/vera-match/actions/runs/44517883065/artifacts/14527816561)
+corroborates the status for each project. Both CI cases had already passed
+the final `dataavailable`, `stop` and track state checks. The probe
+classified these failures before JSON or timestamp validation, well
+within the two-second deadline. CI captured neither the precise
+subprocess diagnostics nor the preview bytes, so the exact stderr and
+frame data above come from fresh synthetic recordings in an isolated
+Ubuntu 26.04 container using the same FFprobe package and Chromium build.
+
+The Linux reproducer created VP8/Opus WebM in both projects with the app's
+one-second chunk interval and the test's 1.5-second stop threshold. Before
+the patch, FFprobe returned valid video timestamps and logged
+`Error parsing Opus packet header.` during stream discovery. The
+existing nonempty-stderr check discarded the measurement. With
+`-nofind_stream_info`, the same files returned identical video frames
+and timestamps with empty stderr. Windows FFprobe 9.0.2 did not emit the
+Opus error on those same files.
+
+FFprobe now skips preliminary stream discovery for WebM. It still
+demuxes the WebM and strictly decodes the selected video stream. The
+codec allowlist, error detection, stderr check, timestamp validation and
+two-second deadline are unchanged. The native regression uses a generated
+WebM with an invalid Opus packet and verifies that the probe measures
+the video, then rejects the file once the VP8 keyframe is corrupted.
+The recorder lifecycle, separate MediaRecorder regression, and primary
+reviewer workspace cases are unchanged.
+
+| Verification with the WebM fix | Result |
+| --- | --- |
+| Linux container, FFprobe 8.0.1-3ubuntu2, focused native duration suite | PASS 13/13 |
+| Linux container, real Chromium fake-camera recorder reproduction and patched probe | PASS 2/2, desktop and mobile on the same bytes that reproduced the error |
+| Windows, FFprobe 9.0.2, duration, storage and review validation Jest suites | PASS 39/39, including 13 duration cases |
+| Windows MediaRecorder regression against the real app | PASS 2/2. Desktop and mobile each decoded 31 frames, measuring 1508 and 1500 ms |
+| Windows full browser suite | FAIL 2 passed and 6 failed. The two recorder cases passed. All upload cases failed at MinIO PUT before confirmation |
+| Windows PostgreSQL and real MinIO security/media integration | FAIL 5 passed and 18 failed. Upload-dependent cases hit MinIO HTTP 507 |
+| Windows PostgreSQL assignment-access integration with controlled storage | PASS 68/68 after supplying the required synthetic MinIO configuration. The first invocation failed application configuration before exercising the cases |
+| API test and web TypeScript, API build, and `git diff --check` | PASS |
+| GitHub Actions Linux full-stack suite with the patch | NOT RUN |
+
+An isolated Windows storage check reproduced MinIO's
+`507 XMinioStorageFull` using a signed synthetic PUT. The C: volume
+backing the existing test service had 2.33 GB free against the service's
+2.67 GB reserve. The existing service can be reused when the volume
+has sufficient capacity. No replacement image is needed for the
+standalone FFprobe checks.
+
+C045 remains PARTIAL pending a CI rerun on Linux with the patch. T07 READY
+still permits a null duration, and timecoded observation writes require a
+positive server-measured duration. READY-with-null recovery remains an
+unresolved design decision for agreement with Hương.
