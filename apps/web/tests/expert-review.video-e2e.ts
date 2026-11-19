@@ -47,6 +47,23 @@ test("reviewer plays private media, saves a draft, reloads, and loses access aft
     expect(forgedDuration.status()).toBe(400);
     expect(await db.video.count({ where: { ownerId: owner.id } })).toBe(0);
     await context.grantPermissions(["camera", "microphone"], { origin });
+    await page.addInitScript(() => {
+      const captureWindow = window as Window & {
+        finalCapture?: { bytes: number; trackStates: MediaStreamTrackState[] };
+      };
+      const start = MediaRecorder.prototype.start;
+      MediaRecorder.prototype.start = function (timeslice?: number) {
+        this.addEventListener("dataavailable", event => {
+          if (this.state === "inactive") {
+            captureWindow.finalCapture = {
+              bytes: event.data.size,
+              trackStates: this.stream.getTracks().map(track => track.readyState),
+            };
+          }
+        });
+        return start.call(this, timeslice);
+      };
+    });
     await page.goto("/account/videos");
     await page.getByRole("button", { name: "Record a video", exact: true }).click();
     await expect(page.getByRole("button", { name: "Stop recording" })).toBeVisible();
@@ -59,6 +76,11 @@ test("reviewer plays private media, saves a draft, reloads, and loses access aft
       const blob = await (await fetch(element.src)).blob();
       return { mime: blob.type, bytes: Array.from(new Uint8Array(await blob.arrayBuffer())) };
     });
+    const finalCapture = await page.evaluate(() => (window as Window & {
+      finalCapture?: { bytes: number; trackStates: MediaStreamTrackState[] };
+    }).finalCapture);
+    expect(finalCapture?.bytes).toBeGreaterThan(0);
+    expect(finalCapture?.trackStates).toEqual(["live", "live"]);
     const ffprobe = process.env.VIDEO_DURATION_FFPROBE;
     if (!ffprobe) throw new Error("Native ffprobe is required for the reviewer upload test.");
     const expectedDuration = await probeVideoDuration(

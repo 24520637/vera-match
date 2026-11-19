@@ -32,6 +32,9 @@ Each feature needs valid inputs, invalid inputs, unauthorized access, state/race
   the measured bound is rejected. Verify signed playback progressing, denied
   anonymous and foreign access, draft reload, consent withdrawal and unchanged
   draft/success audit after denied edits. See [T08 delivery](T08-DELIVERY.md).
+- In the native reviewer cases, observe the real Chromium recorder's final
+  nonempty `dataavailable` event. Both capture tracks must still be live at that
+  point. The decoder and upload assertions run on the same finalized blob.
 
 ## C036 - cancellation and reassignment race acceptance
 

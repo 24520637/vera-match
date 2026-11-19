@@ -244,3 +244,41 @@ Mailpit v1.33.1 on loopback, the Windows test environment returned:
 
 The Windows success does not resolve the Linux CI discrepancy. Keep the
 browser/MinIO check open for the updated PR head.
+
+### Chromium recording finalization
+
+[CI #79](https://github.com/24520637/vera-match/actions/runs/44466552848)
+failed on `2f4a16607fafe971cf5a5cddc6fc8025b0c99155`, based on
+`b58f770a93c95b89e7af2de25ed678c214bdf7ef`. PostgreSQL passed 359/359, the
+native decoder suite passed 11/11, and the two owner-video cases passed.
+Both reviewer cases failed before upload because direct decoding of the
+Chromium preview returned null. The failure occurs before MinIO or database
+persistence.
+
+A local reproduction used the application's timed-chunk capture
+(`MediaRecorder.start(1000)`) with Chromium's fake camera and microphone.
+The old stop handler called `MediaRecorder.stop()` and immediately ended
+both input tracks before the final `dataavailable` event. The WebM still
+contained nonempty chunks, but one real VP8/Opus recording returned null.
+Leaving the tracks live until the recorder's stop event returned 1446 ms
+for the comparable desktop capture. Other early-stop captures decoded,
+so byte count and MIME alone did not detect the race. Standalone MP4/WebM
+decoder fixtures do not exercise this Chromium finalization order.
+
+The upload UI now waits for final data and the stop event before releasing
+tracks and offering the preview. A five-second watchdog discards a recording
+if finalization does not finish. Errors, size overflow and unmount cannot
+publish a partial recording. The reviewer E2E still independently decodes
+the actual blob and compares its measured duration with the persisted value.
+C045 remains PARTIAL until the native Linux check passes on the updated SHA.
+
+Local verification of this fix, without Docker:
+
+- **275/275 PASS** in API Jest with native ffprobe, including all 11 decoder cases.
+- **91/91 PASS** across `assignment-access.integration-spec.ts`,
+  `video-api.integration-spec.ts` and `security-media.integration-spec.ts`
+  with native MinIO and disposable PostgreSQL.
+- **4/4 PASS** with `node scripts/run-video-e2e.cjs --reporter=line`: reviewer
+  and owner cases on desktop and mobile, using native MinIO and FFmpeg.
+- Prisma validation, API/test and web TypeScript, both production builds,
+  and Git diff checks **PASS**.
