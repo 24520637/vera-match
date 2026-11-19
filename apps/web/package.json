@@ -9,7 +9,8 @@
     "lint": "tsc --noEmit",
     "test:ui": "playwright test",
     "test:auth": "node ../../scripts/run-auth-e2e.cjs",
-    "test:safety": "node ../../scripts/run-safety-e2e.cjs"
+    "test:safety": "node ../../scripts/run-safety-e2e.cjs",
+    "test:https": "node ../../scripts/run-https-e2e.cjs"
   },
   "dependencies": {
     "next": "^15.2.0",
