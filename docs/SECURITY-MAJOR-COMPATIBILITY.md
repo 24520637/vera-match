@@ -1,0 +1,52 @@
+# Remaining security major-version compatibility
+
+Snapshot: 2026-11-20 (Asia/Saigon). Baseline: develop 3a21828, including PR #23. Research and any candidate mitigation require Phuc review before merge; no production acceptance is implied.
+
+## Audit and scope
+
+Fresh baseline audits: full tree 3 high / 9 moderate / 0 low / 0 critical (12 entries); production-only 3 high / 5 moderate (8 entries). The scoped candidate audits are 0 high / 9 moderate (9 total) and production 0 high / 5 moderate (5 total). Both audits still FAIL; moderate findings remain visible. Parent metavulnerabilities amplify counts. Six leaf advisories remain, across five packages. No suppression, forced fix, framework major or migration rewrite is used.
+
+The candidate in this PR changes only deepmerge-ts 7.1.5 to 8.0.2, scoped to the exact @prisma/config 6.19.3 parent. Prisma CLI/client remain 6.19.3. This is a project-tested mitigation, not a vendor backport or a generic claim that every custom Prisma configuration is compatible. Upstream Prisma 6 still pins 7.1.5. Do not promote the candidate unless its clean install, CLI, migration and application regressions pass at the reviewed head.
+
+## Leaf compatibility matrix
+
+| Finding and path | Baseline / first confirmed patch | Current exposure | Candidate and breaking-change risk | Tests required before adoption |
+| --- | --- | --- | --- | --- |
+| [GHSA-ggr8-5vv4-36mx](https://github.com/advisories/GHSA-ggr8-5vv4-36mx): API workspace -> Prisma -> @prisma/config -> deepmerge-ts | 7.1.5; fixed 8.0.0 | CLI/config merge; also included by the optional Prisma peer in production audit. No application import or attacker-controlled recursive object/config path found. Plain JSON cannot create cyclic references. | Scoped 8.0.2 mitigation under config 6.19.3, or paired Prisma/client 7.10.1 after full migration. v8 deep-merges Map values and changes some type names/into semantics. Node >=16.9 for selected 8.0.2; project Node 24 satisfies it. | Clean npm ci/ls; actual Prisma validate/generate/migrate deploy/upgrade in disposable schemas; all units/builds; native PostgreSQL clock/locks/CAS/rollback; Auth/Media/Safety/Assignment browser and provider-error regressions. Review any future custom Map/config merging. |
+| [GHSA-36xv-jgw5-4q75](https://github.com/advisories/GHSA-36xv-jgw5-4q75): API -> @nestjs/core | 10.4.22; first fixed 11.1.18 | Runtime SSE serializer; no @Sse/EventSource mapping of attacker-controlled event type/id found in application sources. Still an unresolved installed dependency. | Coordinated Nest 11.2.11 family is a candidate; do not override core alone. Nest 10 has no patched release in this snapshot. Nest 11's Express 5/path-to-regexp changes require routing/parser/error review and compatible config/Swagger/testing peers. Nest 12.5.1 is a larger alternative, not an automatic choice. | API/client 401/403/404/409/422/429 envelopes; exact CORS/Origin/cookie/proxy behavior; route/middleware matching; body/query parsing; DI/test-provider isolation; full permission/media/E2E suites; peers and TS build on Node 24. |
+| [GHSA-5v7r-6r5c-r473](https://github.com/advisories/GHSA-5v7r-6r5c-r473), [GHSA-j47w-4g3g-c36v](https://github.com/advisories/GHSA-j47w-4g3g-c36v): API -> @nestjs/common -> file-type | 20.4.1; ASF fixed 21.3.1, ZIP fixed 21.3.2 | Runtime package; no application FileTypeValidator/interceptor call found. Current T07 direct-to-storage confirmation uses its own bounded container check, not this library. | 21.3.2 is the minimum fixing both; verified Nest 11.2.11 metadata pins 21.3.4. v21 raises Node to 20, drops Illustrator detection and changes Matroska/FLAC/Parquet/Arrow MIME values. Current MP4/WebM contract must not silently expand/change. | Actual Nest FileTypeValidator import/call semantics; valid MP4/WebM and spoofed MIME; malformed ASF/ZIP bounded failure; size limits and existing storage confirmation/replacement/deletion races. Do not assume generic MIME compatibility from a successful build. |
+| [GHSA-3g3m-2fjr-6pw4](https://github.com/advisories/GHSA-3g3m-2fjr-6pw4): dev -> Nest CLI -> glob | 10.5.0; fixed 14.0.2 | Build/scaffolding filesystem traversal cancellation; no public application glob endpoint. CLI command injection was already fixed by PR #23's 10.5.0. | CLI 11.0.24 still pins vulnerable glob 13.0.6, so that upgrade alone is insufficient. CLI 12.0.13 removes its direct glob dependency and carries patched minimatch, but brings Angular devkit 22 and TS ~6.0.2; requires separate toolchain acceptance. | Nest build/watch/generate dry-run on Windows/Linux; cancellation and path escaping; output/metadata compatibility; TS/Jest version resolution; full CI. A glob 14 override into CLI 10 is not assumed compatible. |
+| [GHSA-g3hv-75wg-m249](https://github.com/advisories/GHSA-g3hv-75wg-m249): dev -> CLI -> glob 10 -> minimatch | 9.0.9; fixed 11.0.1 | Development matching, not an implemented HTTP matching service. | CLI 12.0.13 pins minimatch 11.0.5. A direct 9 -> 11 override inside glob 10 bypasses upstream API constraints; do not adopt without traversal/escaping/abort compatibility tests. | Same toolchain matrix as glob, including Windows separators/case, glob limits and project generation, not just npm audit. |
+
+The baseline parent entries are @nestjs/cli, @nestjs/common, @nestjs/core, @nestjs/platform-express, @nestjs/swagger, @nestjs/testing, @prisma/config and prisma, plus the leaf packages above. Their disposition follows the specific leaf, not an independent hidden fix.
+
+## Confirmed upstream versions and migration implications
+
+Registry metadata confirms @prisma/config 7.10.0 still uses deepmerge-ts 7.1.5, while 7.10.1 uses 8.0.2. Paired prisma/@prisma/client 7.10.1 is the first confirmed patched stable Prisma line in this investigation. There is no confirmed Prisma 6 backport. The prisma latest tag points at 8.0.0-rc.34; a dist-tag is not a reason to adopt a release candidate.
+
+[Prisma's v7 guide](https://www.prisma.io/docs/guides/upgrade-prisma-orm/v7) requires explicit config/environment handling and PostgreSQL driver-adapter/client-constructor migration. Its driver pool/timeout and TLS behavior differ from v6. Preserve certificate validation; do not copy rejectUnauthorized:false workarounds. Recheck every PrismaService and disposable fixture constructor, isolation/row locks, UTC and UTC+7 clocks, database-failure sanitization and shutdown. Keep successful migration history; a runtime/client upgrade does not authorize rebuilding the database.
+
+[Nest's migration guide](https://docs.nestjs.com/migration-guide) and registry peer constraints require a coordinated framework family. Current config 3 / Swagger 7 target Nest 10, so a lone core bump is not a plan. Verified 11.2.11 platform metadata uses Express 5.2.1/path-to-regexp 8.4.2; common uses file-type 21.3.4. Review client/error middleware and actual route contracts before selecting compatible config/Swagger/testing versions. A separate CLI 12/TS6 transition is not bundled into the framework decision.
+
+[file-type v21 release changes](https://github.com/sindresorhus/file-type/releases/tag/v21.0.0) and [deepmerge-ts v8 release changes](https://github.com/RebeccaStevens/deepmerge-ts/releases/tag/v8.0.0) are reviewed API-change inputs, not merely audit recommendations. The scoped mitigation continues to use the guarded deepmerge API; no FastUnsafe entrypoint is selected.
+
+## Disposable experiments
+
+Source copy only, outside active branches, using synthetic data/CLI parsing. No developer public-schema migration or reset.
+
+- PASS: scoped candidate install, clean npm ci, Prisma 6.19.3 validate and generate with deepmerge-ts 8.0.2 in the isolated copy.
+- PASS: child-process cycle probe reproduced stack exhaustion on 7.1.5 and completed with a preserved circular reference on 8.0.2. Current plain record/array config merges produced identical results across both versions; no unsafe entrypoint was used.
+- Confirmed semantic change: merging Maps containing `{a:1}` and `{b:2}` yields `{b:2}` on 7.1.5 and `{a:1,b:2}` on 8.0.2. This is an explicit compatibility constraint, not an application regression claim. VERA currently has no custom Prisma config/Map merger; the mitigation is deliberately parent-scoped and needs re-review if one is introduced.
+- Expected FAIL / compatibility negative control: paired Prisma/client 7.10.1 on the unchanged VERA schema exits P1012 because datasource.url in schema.prisma is no longer supported. This confirms a package-only Prisma 7 bump is not adoptable. No database operation was performed by this parser check.
+- PASS main candidate: clean npm ci; Prisma validate/generate; 252 unit tests including two committed config merge regressions; all 350 integration cases across 28 PostgreSQL/migration/native MinIO suites; API/web builds and TypeScript/lint. The only changed installed package is deepmerge-ts.
+- Fresh Node 24 CI/browser evidence and Phuc review remain required before adoption. Local runs use Node 26.8.2/npm 11.19.1. The unchanged-schema Prisma 7 negative control is expected FAIL, not an accepted application upgrade.
+
+## Recommended sequence and review decisions
+
+1. Retain merged PR #23 patches and visible audit findings. Evaluate only the parent-scoped config mitigation with the complete existing Prisma 6/application matrix and Phuc review; it does not change domain schemas or providers.
+2. Plan the paired stable Prisma migration separately: explicit config, adapters/pool limits, fixture constructors and raw-query behavior. Reject the unchanged-schema bump demonstrated above; do not downgrade Prisma to hide an audit.
+3. Review a coordinated Nest 11 family (or separately justified 12) with Phuc, including file-type/MIME and Express route/parser contracts. Do not relax Auth/Consent/Assignment/Video guards for compatibility.
+4. Evaluate CLI 12/TS6 independently with generator/build/cancellation tests. CLI 11 alone does not fix the remaining glob cancellation finding.
+5. Re-audit all and production-only trees, then run the final joined matrix after approved Phuc work merges. Production MFA, policy approval, retention, real topology and full reviewer/QA/matching acceptance remain independent blockers.
+
+No unapproved Phuc PR is merged here. Remaining full-feature tests cannot be fabricated from absent consumers. A green candidate CI is evidence for its scoped dependency behavior, not production sign-off.
