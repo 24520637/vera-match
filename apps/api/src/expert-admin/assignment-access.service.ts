@@ -23,6 +23,11 @@ export class AssignmentAccessService {
     private readonly environment: EnvironmentService, private readonly registry: ExpertApprovalRegistry,
     private readonly evidence: ExpertEvidenceSource, private readonly mfa: ExpertMfaSource) {}
 
+  /** Upstream HttpException payloads are not application-owned public errors. */
+  private async trustedSource<T>(load: () => Promise<T>): Promise<T> {
+    try { return await load(); } catch { unavailable(); }
+  }
+
   async withAuthorizedAssignment<T>(auth: AuthContext, assignmentId: string,
     action: (tx: Prisma.TransactionClient, access: Readonly<{ assignmentId: string; videoId: string;
       video: { bucket: string; objectKey: string; mimeType: string }; validateTime: () => Promise<{ now: Date; expiresAt: Date }> }>) => Promise<T>): Promise<T> {
@@ -43,7 +48,7 @@ export class AssignmentAccessService {
         const expert = await tx.user.findUnique({ where: { id: auth.user.id } });
         if (!session || session.userId !== auth.user.id || session.revokedAt) throw new UnauthorizedException({ code: "UNAUTHENTICATED", message: "A valid session is required." });
         if (!expert || expert.role !== "EXPERT" || expert.status !== "ACTIVE" || !expert.emailVerifiedAt) denied();
-        const assurance = await this.mfa.resolve(auth, tx);
+        const assurance = await this.trustedSource(() => this.mfa.resolve(auth, tx));
         if (!assurance || assurance.userId !== expert.id || assurance.sessionId !== session.id ||
           assurance.testOnly !== true || !(assurance.expiresAt instanceof Date) || !Number.isFinite(assurance.expiresAt.getTime())) denied();
         await tx.$queryRaw`SELECT id FROM "Video" WHERE id=${locator.videoId} FOR UPDATE`;
@@ -64,7 +69,7 @@ export class AssignmentAccessService {
         await this.consent.requireGenerationInTransaction(tx, ownerId, assignment.reviewConsentSubjectId, assignment.reviewConsentVersion, "EXPERT_VIDEO_REVIEW");
         const boundApproval = credential.approval;
         if (!boundApproval || boundApproval.subjectId !== credential.subjectId) denied();
-        const boundLimits = await assignmentEvidence(boundApproval, expert.id, this.registry, this.evidence);
+        const boundLimits = await this.trustedSource(() => assignmentEvidence(boundApproval, expert.id, this.registry, this.evidence));
         if (await tx.block.count({ where: { OR: [{ blockerId: ownerId, blockedId: expert.id }, { blockerId: expert.id, blockedId: ownerId }] } })) denied();
         const validateTime = async () => {
           const [clock] = await tx.$queryRaw<{ now: Date }[]>`SELECT (clock_timestamp() AT TIME ZONE 'UTC')::timestamp(3) AS now`;

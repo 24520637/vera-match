@@ -479,3 +479,14 @@ Recovery regressions additionally cover independent real loopback clients, share
 - Context/history survive live resource removal; migration preserves C031-C034 rows and rolls back post-DDL failure.
 - UTC timestamps under a non-UTC transaction and unchanged real C034 post-cancellation denial.
 - C054 full edit/submit races remain incomplete until actual review APIs exist.
+
+## T15 implemented-subset regression
+
+See [Security regression](SECURITY-REGRESSION.md) for step evidence, the reproduced
+C034 provider-boundary finding and release blockers. New security-*.integration-spec.ts
+suites use synthetic accounts, actual login and disposable PostgreSQL; media
+suites use native MinIO with owned UUID buckets. security-regression.auth-e2e.ts
+uses real Mailpit and actual Chromium offline networking on desktop/mobile. They
+are discovered by existing integration/auth CI commands, without a bypass handler.
+Existing tests are preserved. Independent QA/Matching/real MFA/deployed TLS and
+account deletion are not claimed by these tests.
