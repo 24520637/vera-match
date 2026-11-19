@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { PrismaClient, type UserRole } from "@prisma/client";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { execFileSync } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
@@ -52,7 +53,30 @@ test("reviewer plays private media, saves a draft, reloads, and loses access aft
     await page.getByRole("button", { name: "Upload private video", exact: true }).click();
     await expect(page.getByText("Your private video has been confirmed.", { exact: true })).toBeVisible({ timeout: 15000 });
     const video = await db.video.findFirstOrThrow({ where: { ownerId: owner.id, status: "READY" } });
-    expect(video.durationMs).toBeNull(); // Upload confirmation has no trusted duration producer.
+    expect(video.durationMs).toBeGreaterThanOrEqual(500);
+    expect(video.durationMs).toBeLessThan(15000);
+
+    // Exercise the other supported container using a generated video, not a
+    // database duration fixture or metadata supplied by the client.
+    const mp4 = execFileSync("ffmpeg", [
+      "-v", "error", "-f", "lavfi", "-i", "color=black:s=64x64:r=10",
+      "-t", "1", "-an", "-c:v", "libx264", "-movflags", "frag_keyframe+empty_moov",
+      "-f", "mp4", "pipe:1",
+    ], { timeout: 10000, maxBuffer: 1048576, windowsHide: true });
+    const intent = await page.request.post("/api/videos/upload-intent", { headers: mutation, data: {
+      mimeType: "video/mp4", sizeBytes: mp4.length,
+    } });
+    expect(intent.status()).toBe(201);
+    const mp4Upload = await intent.json() as { id: string; uploadUrl: string };
+    const put = await fetch(mp4Upload.uploadUrl, {
+      method: "PUT", headers: { "Content-Type": "video/mp4" }, body: new Uint8Array(mp4),
+    }).catch(() => { throw new Error("Synthetic MP4 upload failed."); });
+    expect(put.ok).toBe(true);
+    const confirmed = await page.request.post(`/api/videos/${mp4Upload.id}/confirm`, { headers: mutation, data: {} });
+    expect(confirmed.status()).toBe(201);
+    const measured = await db.video.findUniqueOrThrow({ where: { id: mp4Upload.id }, select: { durationMs: true } });
+    expect(measured.durationMs).toBeGreaterThanOrEqual(900);
+    expect(measured.durationMs).toBeLessThanOrEqual(1000);
 
     await identity("MODERATOR", staff);
     const expert = await identity("EXPERT", context);
@@ -70,12 +94,10 @@ test("reviewer plays private media, saves a draft, reloads, and loses access aft
     const workspace = `/expert/assignments/${assignment.id}/review`;
     await page.goto(workspace);
     await page.getByRole("button", { name: "Start draft" }).click();
-    await expect(page.getByRole("button", { name: "Add observation" })).toBeDisabled();
+    await expect(page.getByRole("button", { name: "Add observation" })).toBeEnabled();
     await page.getByLabel("Summary").fill("Synthetic recording reviewed.");
     await expect(page.getByText("Saved version 2")).toBeVisible();
 
-    // Explicit test fixture. This is not evidence of a production duration extractor.
-    await db.video.update({ where: { id: video.id }, data: { durationMs: 500 } });
     await page.reload();
     await expect(page.getByLabel("Summary")).toHaveValue("Synthetic recording reviewed.");
     await page.getByRole("button", { name: "Load playback" }).click();

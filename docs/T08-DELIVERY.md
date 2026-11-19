@@ -13,7 +13,7 @@ implementation SHA without changing its code or tests.
 | --- | --- | --- |
 | C043 | Reuse the initial migration's ExpertReview and ExpertObservation entities. Add database checks for positive versions and nonnegative, ordered evidence timestamps. | DONE for database foundation |
 | C044 | Private assignment route, playback through C034, expiring video source, timestamps and keyboard-accessible jumps. CI #75 verified signed access and denied anonymous access using native MinIO on desktop and mobile. | DONE for assignment playback acceptance in isolated CI. Production authorization remains blocked. |
-| C045 | Persist EYE, FACIAL, BODY, SPEECH and CROSS_MODAL observations with explicit evidence and context. Text-only autosave now omits observations, preserving existing notes even when duration is absent. | PARTIAL because uploaded video currently has no verified duration producer |
+| C045 | Persist all five observation categories. Recording confirmation can now store server-measured duration from decoded frames of the exact promoted MP4/WebM object. Text-only edits preserve existing observations when measurement is unavailable. | PARTIAL pending full upload integration on the new head and release validation |
 | C046 | Validate integer milliseconds, order and stored duration. Out-of-range timecodes return 422. Unknown or nonpositive duration blocks new timecoded notes with 503. | DONE for validation contract; verified-duration ingest remains a dependency |
 | C047 | Versioned PATCH autosave; a stale version returns 409. A transaction includes the matching write and audit. | DONE for private draft behavior in the verified test environment |
 | C048 | CI #75 verified real browser/API/PostgreSQL/MinIO reload, reviewer isolation and withdrawal on desktop and mobile. The isolated scenarios seed duration for observation edits. | DONE for isolated draft persistence and reviewer isolation. The upload duration gap is tracked under C045. |
@@ -87,9 +87,8 @@ GitHub Actions results are tracked separately on the Draft PR.
 ## Release gates
 
 Production remains blocked on trusted session-bound MFA and approved qualification,
-consent and evidence sources already required by C034. The Video upload path
-must produce a trusted duration before ordinary uploaded videos can accept
-timecoded notes. Never substitute browser media metadata. Production storage
+consent and evidence sources already required by C034. Uploads without a
+measured server duration cannot accept timecoded notes. Production storage
 enforcement and retention also remain unverified. C051 is integrated upstream.
 This change covers real draft endpoints and withdrawal denial but does not
 complete all C050/C053/C054 races or publish a production review policy.
@@ -134,13 +133,8 @@ anonymous denial, draft reload, foreign reviewer denial, and consent withdrawal.
 Its MFA, evidence and duration fixtures are restricted to the disposable test
 runtime. The evidence does not validate duration extraction or production release.
 
-C045 still needs a trusted probe for MP4 and WebM, including browser recordings
-without a declared container duration. Inspect the exact immutable promoted object
-with resource limits and isolated parsing. Bind the result to object identity and
-current consent before writing it, and reject stale results after deletion,
-withdrawal, or generation change. Do not derive the bound from client input,
-content length, or the existing file signature check. No bounded media probing
-runtime is available in the current upload implementation.
+The original C045 gap at that revision was a missing trusted MP4/WebM probe.
+The follow-up below records the implementation and its separate verification.
 
 The new regression assertions cover forged duration, text edits that preserve
 existing observation rows, actual playback progression, and no draft or success
@@ -155,3 +149,38 @@ assertions.
 | Six PostgreSQL suites listed in the preceding follow-up table | 146/146 PASS, including the new duration-boundary regression |
 | Playwright workspace tests with HTTP mocks | 8/8 PASS |
 | Updated native MinIO browser assertions | NOT RUN locally. Both reviewer projects discovered by Playwright |
+
+### C045 duration measurement after the T15 merge
+
+The T08 branch integrates `develop` at `b58f770`. The shared assignment
+access service uses T15's upstream provider error sanitization and retains the
+T08 duration projection and runtime expert gate.
+
+Set `VIDEO_DURATION_FFPROBE` to the absolute path of a patched native
+ffprobe executable. Confirmation reads only the promoted server-owned object,
+using the copy's ETag and checked byte size. It measures decoded video frame
+timestamps instead of user input or the container's declared duration. The
+same transaction holds the existing consent/owner lock through promotion,
+measurement and the READY/audit write. The probe has a 100 MiB input cap,
+two-second download/decoder deadline, restricted formats/codecs, one decoder
+thread and bounded output. It does not inherit application environment
+variables. Disabled, busy, unsupported or failed probes leave the duration
+null. No preexisting uploads are backfilled, and there is no retry worker.
+
+Before enabling this in a deployment with private uploads, verify the patched
+binary, OS isolation and resource limits, private temp-file storage/cleanup,
+and acceptable probe completion under expected load. Staff MFA and approved
+evidence remain separate release gates.
+
+| Current local verification | Result |
+| --- | --- |
+| Prisma validate/generate, API/web TypeScript including API tests, API/web production builds | PASS |
+| API Jest with portable FFmpeg 9.0.2 | 265/265 PASS, including real generated MP4 and WebM decoding |
+| Nine PostgreSQL integration suites covering assignment, consent, cancellation, migration and T15 regressions | 156 PASS, 9 FAIL. Eight MinIO-backed security cases failed at bucket setup because port 9000 was unavailable. One Mailpit-backed session case failed with `fetch failed`. All six T08/assignment/C051/Consent suites passed |
+| Playwright reviewer UI with mocked HTTP | 8/8 PASS |
+| Updated MP4/WebM upload and private playback browser E2E, plus native security-media suite | NOT RUN locally. MinIO port 9000 was unavailable and the pinned Windows download returned HTTP 410. CI provides native MinIO and Mailpit |
+
+CI runs the native decoder tests and both browser projects with ffprobe
+enabled. That run must verify real uploads and the newer T15 integration before
+closing the remaining C045 integration checks. The previous CI #75 pass does
+not include these changes.

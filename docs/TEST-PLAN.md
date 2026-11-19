@@ -14,14 +14,16 @@ Each feature needs valid inputs, invalid inputs, unauthorized access, state/race
 - Run `expert-review.spec.ts` on desktop and mobile. It uses the real UI and
   client with isolated HTTP mocks to check playback routing, timeline controls,
   saved draft reload, conflict recovery, and hidden content after denial.
+- Set `VIDEO_DURATION_FFPROBE` to the absolute path of native ffprobe and
+  run `npm test --workspace apps/api -- --runInBand video-duration` to exercise
+  real generated MP4/WebM and decoder bounds.
 - Run `node scripts/run-video-e2e.cjs expert-review.video-e2e.ts` with the
-  existing loopback PostgreSQL and native MinIO services. CI also discovers the
-  test through the existing video runner on desktop and mobile. Verify signed
-  playback, denied anonymous media access, draft reload, foreign expert denial
-  and withdrawal. Confirm rejected edits do not change the draft or success
-  audit, and authorized playback advances the media clock. The test seeds a duration for draft edits after verifying that
-  ordinary uploads lack it. This does not verify duration extraction or
-  production authorization. See [T08 delivery](T08-DELIVERY.md).
+  same ffprobe configuration, ffmpeg on PATH, and the existing loopback
+  PostgreSQL and native MinIO services. CI runs desktop and mobile. Verify
+  measured duration from browser recording and generated MP4 without a
+  database duration fixture. Verify signed playback progressing, denied
+  anonymous and foreign access, draft reload, consent withdrawal and unchanged
+  draft/success audit after denied edits. See [T08 delivery](T08-DELIVERY.md).
 
 ## C036 - cancellation and reassignment race acceptance
 
