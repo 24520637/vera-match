@@ -3,6 +3,7 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
+  ServiceUnavailableException,
 } from "@nestjs/common";
 import { Prisma, ReportStatus } from "@prisma/client";
 import { AuthContext } from "../auth/auth-context";
@@ -46,7 +47,9 @@ export class ModerationService {
     auth: AuthContext,
     now: Date,
   ) {
-    const p = await this.assurance.resolve(tx, auth);
+    let p: Awaited<ReturnType<StaffAssuranceSource["resolve"]>>;
+    try { p = await this.assurance.resolve(tx, auth); }
+    catch { throw new ServiceUnavailableException({ code: "STAFF_ASSURANCE_UNAVAILABLE", message: "Staff assurance could not be safely confirmed." }); }
     if (
       !p ||
       p.userId !== auth.user.id ||
