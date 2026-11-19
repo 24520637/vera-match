@@ -203,7 +203,44 @@ failures at bucket creation (loopback port 9000) and one Mailpit password-reset
 test failing to fetch mail (loopback port 8025). PostgreSQL responded on 5433.
 The full PostgreSQL step in
 [CI #77](https://github.com/24520637/vera-match/actions/runs/44460305954)
-passed on `de49921` with native MinIO and Mailpit. No code change was made
-to bypass those checks. The latest full upload-to-playback check, including
-the timecode one millisecond beyond the measured bound, is still required
-on the follow-up SHA.
+passed 357/357 PostgreSQL cases on `de49921` with native MinIO and Mailpit.
+No code change was made to bypass those checks. Its native decoder tests also
+passed 8/8. The workflow nevertheless failed: the two reviewer browser cases
+observed `durationMs: null` after confirming a Chromium recording. Both
+owner-video cases passed. This is separate from the nine local service failures.
+
+The follow-up implementation is `9da7b76de11feda3e8b0b88e031477ae974b3d98`.
+An additional local probe of a real VP8/Opus WebM made by Chromium's fake camera
+and microphone produced 1441 ms using portable FFmpeg 9.0.2. This exercise did
+not involve MinIO or database persistence. The exact cause of the CI null result
+is not yet confirmed. The full upload-to-playback check, including a timecode
+one millisecond beyond the stored bound, is still required on the follow-up SHA.
+[CI #78](https://github.com/24520637/vera-match/actions/runs/44461856792) tracks
+that verification. It passed 359/359 PostgreSQL cases and 11/11 native decoder
+cases, then failed the same two reviewer browser cases at `durationMs: null`
+after confirmation. Both owner-video cases passed. Keep C045 PARTIAL. The next
+E2E revision compares a direct decode of the exact synthetic Chromium preview
+with the persisted result to distinguish decoder failure from upload-path
+failure.
+
+After building native MinIO from the same pinned source as CI and starting
+Mailpit v1.33.1 on loopback, the Windows test environment returned:
+
+- **PASS 2/2** for reviewer native E2E (desktop/mobile), with PostgreSQL,
+  real API, Chromium, FFmpeg 9.0.2 and native MinIO. The direct Chromium
+  recording probe matched the stored result. Both projects measured the
+  generated MP4, rejected a timecode one millisecond past the measured limit,
+  and verified signed playback and post-withdrawal denial.
+- **PASS 19/19** on the three T15 suites that previously reported nine
+  failures. The same bucket-creation and Mailpit cases now pass with the
+  native services available.
+- **PASS 2/2** for owner-video native E2E (desktop/mobile), including upload,
+  playback, deletion, and consent withdrawal with the decoder enabled.
+- **PASS 23/23** in `security-media.integration-spec.ts` and
+  `video-api.integration-spec.ts` using native MinIO and disposable PostgreSQL.
+- **PASS 11/11** for the focused native decoder tests. An earlier rerun
+  timed out during MP4 fixture setup under load. The test now separates
+  fixture time from the production probe's unchanged deadline.
+
+The Windows success does not resolve the Linux CI discrepancy. Keep the
+browser/MinIO check open for the updated PR head.

@@ -4,6 +4,8 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
+import { Readable } from "node:stream";
+import { probeVideoDuration, VIDEO_PROBE_TIMEOUT_MS } from "../../api/src/video/video-duration";
 
 const origin = "http://localhost:3100";
 const policyVersion = "synthetic-video-e2e-v1";
@@ -50,10 +52,24 @@ test("reviewer plays private media, saves a draft, reloads, and loses access aft
     await expect(page.getByRole("button", { name: "Stop recording" })).toBeVisible();
     await page.waitForTimeout(1500); // Collect a real synthetic camera recording.
     await page.getByRole("button", { name: "Stop recording" }).click();
+    // Decode the exact synthetic preview independently before exercising
+    // storage. A failure here identifies a decoder/recording issue, while a
+    // mismatch after confirmation identifies a problem in the upload path.
+    const preview = await page.getByLabel("Selected video preview").evaluate(async (element: HTMLVideoElement) => {
+      const blob = await (await fetch(element.src)).blob();
+      return { mime: blob.type, bytes: Array.from(new Uint8Array(await blob.arrayBuffer())) };
+    });
+    const ffprobe = process.env.VIDEO_DURATION_FFPROBE;
+    if (!ffprobe) throw new Error("Native ffprobe is required for the reviewer upload test.");
+    const expectedDuration = await probeVideoDuration(
+      ffprobe, Readable.from([Buffer.from(preview.bytes)]), preview.bytes.length,
+      preview.mime, AbortSignal.timeout(VIDEO_PROBE_TIMEOUT_MS),
+    );
+    expect(expectedDuration, "Native decoder must measure the Chromium recording before upload").toBeGreaterThanOrEqual(500);
     await page.getByRole("button", { name: "Upload private video", exact: true }).click();
     await expect(page.getByText("Your private video has been confirmed.", { exact: true })).toBeVisible({ timeout: 15000 });
     const video = await db.video.findFirstOrThrow({ where: { ownerId: owner.id, status: "READY" } });
-    expect(video.durationMs).toBeGreaterThanOrEqual(500);
+    expect(video.durationMs, "Confirmation must persist the duration measured from the uploaded recording").toBe(expectedDuration);
     expect(video.durationMs).toBeLessThan(15000);
 
     // Exercise the other supported container using a generated video, not a

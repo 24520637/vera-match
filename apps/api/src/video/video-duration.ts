@@ -68,7 +68,7 @@ export async function probeVideoDuration(executable: string, body: Readable, siz
       // Avoid passing storage credentials or application environment to the parser.
       let duration: number | null = null;
       const child = execFile(executable, args, {
-        cwd: directory, env: {}, windowsHide: true, maxBuffer: 2 * 1024 * 1024,
+        cwd: directory, env: { NODE_ENV: "production" }, windowsHide: true, maxBuffer: 2 * 1024 * 1024,
         signal, killSignal: "SIGKILL",
       }, (error, stdout, stderr) => {
         if (error || stderr.trim()) return;

@@ -26,7 +26,9 @@ Each feature needs valid inputs, invalid inputs, unauthorized access, state/race
   same ffprobe configuration, ffmpeg on PATH, and the existing loopback
   PostgreSQL and native MinIO services. CI runs desktop and mobile. Verify
   measured duration from browser recording and generated MP4 without a
-  database duration fixture. Verify that a timecode one millisecond beyond
+  database duration fixture. Compare a direct decode of the same synthetic
+  recording before upload against the stored value to isolate decoder
+  failures from upload-path failures. Verify that a timecode one millisecond beyond
   the measured bound is rejected. Verify signed playback progressing, denied
   anonymous and foreign access, draft reload, consent withdrawal and unchanged
   draft/success audit after denied edits. See [T08 delivery](T08-DELIVERY.md).

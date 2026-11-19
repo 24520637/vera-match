@@ -63,7 +63,7 @@ nativeTest.each(["mp4", "webm"])("decodes real %s bytes with native FFmpeg tools
   }
   return expect(probeVideoDuration(executable!, Readable.from([video]), video.length, `video/${container}`, AbortSignal.timeout(3000)))
     .resolves.toBe(900);
-});
+}, 12000);
 
 nativeTest("a matching MP4 signature alone cannot produce a duration", async () => {
   const header = Buffer.from([0, 0, 0, 24, 102, 116, 121, 112, 105, 115, 111, 109]);
