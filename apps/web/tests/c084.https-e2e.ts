@@ -37,7 +37,7 @@ async function signIn(page: Page, email?: string) {
   const login = await response;
   expect(login.status()).toBe(200);
   await expect(page.getByText(email, { exact: true })).toBeVisible();
-  return { email, setCookie: login.headers()["set-cookie"] || "" };
+  return { email, setCookie: (await login.allHeaders())["set-cookie"] || "" };
 }
 async function session(context: BrowserContext) {
   const cookie = (await context.cookies(origin)).find(c => c.name === "vera_e2e_session");
