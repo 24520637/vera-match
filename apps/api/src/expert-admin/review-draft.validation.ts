@@ -74,6 +74,20 @@ export function reviewSubmit(value: unknown) {
   return version(record(value, ["expectedVersion"]).expectedVersion);
 }
 
+export function reviewReturn(value: unknown) {
+  const row = record(value, ["expectedVersion", "reason"]);
+  const reason = text(row.reason, "reason", true).trim();
+  if (reason.length > 2000) invalid("reason", "Use 2,000 characters or fewer.");
+  return { expectedVersion: version(row.expectedVersion), reason };
+}
+
+export function reviewCursor(value: unknown) {
+  const { after } = record(value, ["after"], "query");
+  if (after === undefined) return;
+  if (typeof after !== "string") invalid("after", "Send a valid cursor.");
+  return reviewId(after);
+}
+
 export function requireSubmittableReview(review: {
   summary: string | null;
   limitations: string | null;

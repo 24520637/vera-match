@@ -89,7 +89,9 @@ not changes to current auth.
 | POST      | `/expert/reviews/:id/observations` | Assigned expert         | Time range, category, evidence/context, optimistic version                                                |
 | PATCH     | `/expert/reviews/:id/draft`        | Assigned expert         | Draft-only edit; version check and audit                                                                  |
 | POST      | `/expert/reviews/:id/submit`       | Assigned expert         | Required summary/limitations; freeze submitted snapshot                                                   |
-| POST      | `/qa/reviews/:id/return`           | Moderator               | Not original author; actionable reason required                                                           |
+| GET       | `/qa/reviews`                      | Scoped moderator       | Submitted queue with session-bound MFA, current assignment grants, and optional `after` cursor            |
+| GET       | `/qa/reviews/:id`                  | Scoped moderator       | Submitted version with private evidence for independent QA                                               |
+| POST      | `/qa/reviews/:id/return`           | Scoped moderator       | Independent QA, current assignment grant, and actionable reason                                          |
 | POST      | `/qa/reviews/:id/approve`          | Moderator               | Not original author; enforce independent QA and valid transition                                          |
 | GET       | `/reviews/me`                      | Owner                   | Only QA-approved reports for the caller                                                                   |
 | POST      | `/reviews/:id/disputes`            | Owner                   | Reason, dispute status and audit                                                                          |

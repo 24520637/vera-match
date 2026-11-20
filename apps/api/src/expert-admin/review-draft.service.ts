@@ -42,14 +42,14 @@ export class ReviewDraftService {
   read(auth: AuthContext, id: string, initialize = false) {
     return this.access.withAuthorizedAssignment(auth, reviewId(id), async (tx, access) => {
       const where = { assignmentId: access.assignmentId };
-      const existing = await tx.expertReview.findUnique({ where, select: { ...projection, status: true, submittedAt: true } });
+      const existing = await tx.expertReview.findUnique({ where, select: { ...projection, status: true, submittedAt: true, qaFeedback: true } });
       if (existing?.submittedAt && existing.status === "SUBMITTED" && access.assignment.status === "SUBMITTED") {
         if (initialize) reviewStateConflict();
         await access.validateTime();
         return { draft: null, submission: { id: existing.id, status: existing.status, version: existing.version,
           submittedAt: existing.submittedAt }, durationMs: null };
       }
-      if ((existing && existing.status !== "DRAFT") || !["ASSIGNED", "IN_PROGRESS"].includes(access.assignment.status)) missing();
+      if ((existing && !["DRAFT", "RETURNED"].includes(existing.status)) || !["ASSIGNED", "IN_PROGRESS"].includes(access.assignment.status)) missing();
       const draft = existing ?? (initialize ? await tx.expertReview.create({
         data: where, select: projection,
       }) : null);
@@ -58,6 +58,7 @@ export class ReviewDraftService {
       await access.validateTime();
       return { draft: draft && { id: draft.id, version: draft.version, summary: draft.summary,
         limitations: draft.limitations, observations: draft.observations,
+        ...(existing?.status === "RETURNED" ? { feedback: existing.qaFeedback } : {}),
       }, durationMs: access.video.durationMs };
     }, "review");
   }
@@ -72,10 +73,10 @@ export class ReviewDraftService {
     return this.access.withAuthorizedAssignment(auth, assignmentId, async (tx, access) => {
       if (!["ASSIGNED", "IN_PROGRESS"].includes(access.assignment.status)) reviewStateConflict();
       const where = { id, assignmentId: access.assignmentId };
-      const current = await tx.expertReview.findFirst({ where, select: { version: true, status: true } });
+      const current = await tx.expertReview.findFirst({ where, select: { version: true, status: true, qaFeedback: true } });
       if (!current) missing();
       if (current.version !== expectedVersion || current.version === 2147483647) conflict();
-      if (current.status !== "DRAFT") reviewStateConflict();
+      if (!["DRAFT", "RETURNED"].includes(current.status)) reviewStateConflict();
       const observations = entry ? [entry.observation] : patch?.observations;
       if (observations) requireDurationBounds(observations, access.video.durationMs, append ? "observation" : "observations");
       await access.validateTime();
@@ -90,7 +91,7 @@ export class ReviewDraftService {
         subjectId: id, action: "EXPERT_DRAFT_SAVED" } });
       const draft = await tx.expertReview.findUniqueOrThrow({ where: { id }, select: projection });
       await access.validateTime();
-      return { draft, durationMs: access.video.durationMs };
+      return { draft: { ...draft, ...(current.status === "RETURNED" ? { feedback: current.qaFeedback } : {}) }, durationMs: access.video.durationMs };
     }, "review");
   }
 
@@ -114,7 +115,7 @@ export class ReviewDraftService {
         return { id, status: "SUBMITTED" as const, version: review.version, submittedAt: review.submittedAt };
       }
       if (review.version !== expectedVersion || review.version === 2147483647) conflict();
-      if (review.status !== "DRAFT" || !["ASSIGNED", "IN_PROGRESS"].includes(access.assignment.status)) reviewStateConflict();
+      if (!["DRAFT", "RETURNED"].includes(review.status) || !["ASSIGNED", "IN_PROGRESS"].includes(access.assignment.status)) reviewStateConflict();
       requireSubmittableReview(review, access.video.durationMs);
       const { now } = await access.validateTime();
       const changed = await tx.expertReview.updateMany({ where: { ...where, version: expectedVersion, status: review.status },

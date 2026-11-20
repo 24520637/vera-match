@@ -14,6 +14,7 @@ type Note = {
 };
 type Draft = {
   id: string; version: number; summary: string | null; limitations: string | null;
+  feedback?: string | null;
   observations: Array<Omit<Note, "startMs" | "endMs" | "context"> & { startMs: number; endMs: number; context: string | null }>;
 };
 type Submission = { id: string; version: number; status: "SUBMITTED"; submittedAt: string };
@@ -187,6 +188,7 @@ function Workspace({ assignmentId }: { assignmentId: string }) {
       {!data.draft && <Button disabled={busy} onClick={() => void initialize()}>Start draft</Button>}
       {data.draft && form && <fieldset disabled={busy || playbackBusy}>
         <legend>Private review draft</legend>
+        {data.draft.feedback && <Notice title="Returned for revision"><span style={{ whiteSpace: "pre-wrap" }}>{data.draft.feedback}</span></Notice>}
         <p role="status">{busy ? "Saving…" : dirty ? "Unsaved changes" : `Saved version ${data.draft.version}`}</p>
         {!validNotes && <p role="status">Correct or remove observations with missing evidence, context or verified time ranges before submitting.</p>}
         {error && dirty && <Button onClick={() => setError("")} disabled={error.startsWith("This draft changed")}>Retry save</Button>}

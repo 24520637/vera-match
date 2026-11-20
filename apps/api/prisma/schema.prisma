@@ -528,10 +528,21 @@ model ExpertReview {
   qaAt DateTime?
   qaFeedback String? @db.Text
   observations ExpertObservation[]
+  decisions ReviewDecision[]
   claims ReviewClaim[]
   disputes ReviewDispute[]
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+model ReviewDecision {
+  reviewId String
+  review ExpertReview @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+  version Int
+  status ReviewStatus
+  moderatorId String
+  reason String? @db.Text
+  decidedAt DateTime
+  @@id([reviewId, version])
 }
 model ExpertObservation {
   id String @id @default(cuid())
