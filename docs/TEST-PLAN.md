@@ -2,6 +2,57 @@
 
 Each feature needs valid inputs, invalid inputs, unauthorized access, state/race tests, UI feedback states, and audit/revoke behavior when relevant.
 
+## T08 private draft workspace (C043–C048, partial)
+
+- Run `assignment-access.integration-spec.ts` against disposable PostgreSQL.
+  Verify the existing C034 playback cases, draft initialization, all five
+  categories, duration and context validation, optimistic conflicts, rollback on
+  audit failure, and isolation after consent withdrawal and regrant.
+  Check positive draft-version and ordered-timecode database constraints.
+  Check that spoofed duration and missing verified duration cannot change the
+  draft. Confirm a subsequent text-only save keeps existing observation rows.
+- Run `review-draft.validation.spec.ts` for DTO and numeric boundary checks.
+- Run `expert-review.spec.ts` on desktop and mobile. It uses the real UI and
+  client with isolated HTTP mocks to check playback routing, timeline controls,
+  saved draft reload, conflict recovery, and hidden content after denial.
+- Set `VIDEO_DURATION_FFPROBE` to the absolute path of native ffprobe and
+  run `npm test --workspace apps/api -- --runInBand video-duration` to exercise
+  ordinary seekable MP4, streaming WebM without declared duration, malformed
+  video, declared duration spoofing, and decoder bounds.
+- In `assignment-access.integration-spec.ts`, use real HTTP and PostgreSQL
+  with controlled storage responses to verify which object is measured,
+  the persisted duration or null result, idempotent confirmation, and the
+  exact accepted timecode boundary. Exercise concurrent owner reconfirmation
+  against the promoted ETag and size, a temporarily unavailable probe, retry
+  consumption with or without a measurement, and one recovery audit on success.
+  Expect `409 VIDEO_WITHDRAWN` before probing after storage consent withdrawal
+  and regrant. MinIO adapter verification uses the native suite below.
+- Run `node scripts/run-video-e2e.cjs expert-review.video-e2e.ts` with the
+  same ffprobe configuration, ffmpeg alongside ffprobe, and the existing
+  loopback PostgreSQL and native MinIO services. CI runs desktop and mobile.
+  Filter with `--grep "reviewer plays synthetic"` for the reviewer workspace
+  cases. Upload generated MP4 and WebM via the real API and MinIO, check the
+  server-measured 900 ms frame span, and accept a timecode at that bound while
+  rejecting one millisecond beyond it. Verify signed playback progress and
+  expiry, browser source removal and failed renewal after session expiry,
+  keyboard seeking, all five categories after reload, and anonymous, owner
+  and foreign reviewer isolation. Withdraw consent while the workspace is
+  open and check that a denied edit clears private UI state and preserves the
+  saved draft and audit counts.
+- Filter with `--grep "browser MediaRecorder"` for the recorder regression.
+  Observe a nonempty final `dataavailable` event with live tracks, followed
+  by `stop`, and decode the exact finalized preview. The Playwright report
+  includes the bounded probe outcome and elapsed time for the synthetic
+  capture. Compare the decoded preview with the stored measurement and verify
+  owner reconfirmation against the promoted MinIO object with one recovery audit.
+
+CI #90 passed native PostgreSQL and private-video jobs on
+`5c6c8f4935bbc693a7cb4ba4ac81a5126a4ba1cc`. The later T08 change has recorded
+local FFprobe unit (277/277) and shared UI (126/126) passes. Its expanded
+PostgreSQL and native MinIO/browser scenarios, including duration recovery and
+expiry, still need a passing run on the revision containing those changes.
+See [T08 delivery verification](T08-DELIVERY.md#draft-pr-22-worktree-audit).
+
 ## C035 assignment queues and PA2 integration (partial)
 
 PA2 Stage 1 persists assignment-specific moderator grants with mandatory expiry,
@@ -42,6 +93,7 @@ session-bound MFA and approved evidence providers are unavailable; the external
 grant/revoke HTTP contract and full-stack queue E2E remain open. C050 review
 editing/submission and Safety Report moderation are outside this feature. Do not
 claim production readiness or weaken the default-deny gates.
+
 ## C036 - cancellation and reassignment race acceptance
 
 Plan-Step: C036. Ticket: T06. Planned subject:
