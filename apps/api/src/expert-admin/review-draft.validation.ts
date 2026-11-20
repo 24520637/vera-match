@@ -70,6 +70,26 @@ export function observationPost(value: unknown) {
 
 export function requireEmpty(value: unknown) { record(value, []); }
 
+export function requireSubmittableReview(review: {
+  summary: string | null;
+  limitations: string | null;
+  observations: readonly (Omit<ReturnType<typeof observation>, "context"> & { context: string | null })[];
+}, durationMs: number | null) {
+  const missing = (["summary", "limitations"] as const).filter(field => !review[field]?.trim());
+  if (missing.length) {
+    throw new UnprocessableEntityException({
+      code: "REVIEW_INCOMPLETE", message: "Complete the summary and limitations before submitting.",
+      details: missing.map(field => ({ field, messages: ["Enter explicit text."] })),
+    });
+  }
+  text(review.summary, "summary", true);
+  text(review.limitations, "limitations", true);
+  for (const [index, row] of review.observations.entries()) {
+    observation(row, `observations.${index}`);
+  }
+  requireDurationBounds(review.observations, durationMs, "observations");
+}
+
 export function requireDurationBounds<T extends { startMs: number; endMs: number }>(
   rows: readonly T[], durationMs: number | null, prefix: "observations" | "observation",
 ) {

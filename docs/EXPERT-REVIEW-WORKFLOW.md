@@ -1,6 +1,6 @@
 # Expert-led video review — workflow and interface specification
 
-**Implementation status:** PLANNED. Human reviewers perform and document assessments through the VERA Match application. No pretrained personality model performs the analysis.
+**Implementation status:** The private draft workspace and submission validation foundation are implemented. See [T10 implementation](#6-t10-implementation).
 
 ## 1. Participants and safeguards
 
@@ -52,3 +52,20 @@ Human assessments are **interpretations of observable material**, with explicit 
 - A review author cannot act as its QA approver. Returned reviews can be revised and resubmitted without overwriting the audit trail.
 - Invalid categories or out-of-range timestamps fail validation; stale optimistic versions fail with `409`.
 - Claim withdrawal removes the claim from matching promptly; an open dispute cannot silently mutate the approved snapshot or reveal another person's notes.
+
+## 6. T10 implementation
+
+The reviewer workspace is `/expert/assignments/:assignmentId/review`. T10 uses the draft API, editor, draft invariants, and
+server-measured video duration from T08 at `5c6c8f4`. The draft API uses
+`GET/POST /api/expert/assignments/:assignmentId/draft` and
+`PATCH /api/expert/reviews/:id/draft`. Current storage and review consent,
+their bound generations, reviewer qualification, and the existing
+session-bound access rules apply to every expert request.
+
+| Step | API behavior |
+| --- | --- |
+| C055 | Submission validates the saved summary, limitations, and each saved observation against the current verified duration. Blank summary or limitations return `422 REVIEW_INCOMPLETE` with field details. A narrative review may be submitted without timecoded observations or a transcript. |
+
+Staff assurance and expert qualification retain their fail-closed defaults.
+Production access still requires approved evidence and trusted session-bound
+assurance providers.
