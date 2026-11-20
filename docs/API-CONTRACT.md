@@ -282,3 +282,7 @@ auth state or redirect; cancellation/network/5xx remain distinct.
 The browser API client is the C009 same-origin transport. `apiRequest` and `postAuth` delegate to `apiJson`; they do not select a second API base. ApiError uses kind/message/status/code/details and optional retryAfterSeconds. HTTP status stays authoritative; network/abort failures do not invent 401. `Retry-After` and matching JSON timing are retained for 429, with no automatic retry. Unknown details are validated by form consumers.
 
 AuthLoadingBoundary is C010 presentation; SessionBoundary supplies state from AuthProvider and owns redirects. The protected/member server layout validates its cookie before rendering protected pages. Server session lookup forwards the cookie only to validated server-only API_INTERNAL_ORIGIN. Same-origin proxy requests still require the exact browser Origin and JSON for auth mutations; the proxy does not remove CSRF checks.
+
+## C053 provider failure privacy
+
+C032 approval registry/evidence failure returns the existing sanitized `503 EXPERT_APPROVAL_UNAVAILABLE`; C033 evidence failure returns sanitized `503 ASSIGNMENT_UNAVAILABLE`. Safety staff-assurance provider failure returns `503 STAFF_ASSURANCE_UNAVAILABLE`, while absent/invalid assurance remains `403 STAFF_ASSURANCE_REQUIRED`. Upstream HttpException bodies are never a public diagnostic contract. These wrappers do not alter application-generated authentication, ownership, revision, consent or idempotency errors. See [C053 privacy regression](C053-PRIVACY-AUDIT.md).
