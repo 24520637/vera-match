@@ -2,12 +2,13 @@
 
 Each feature needs valid inputs, invalid inputs, unauthorized access, state/race tests, UI feedback states, and audit/revoke behavior when relevant.
 
-## T08 private draft workspace
+## T08 private draft workspace (C043–C048, partial)
 
 - Run `assignment-access.integration-spec.ts` against disposable PostgreSQL.
   Verify the existing C034 playback cases, draft initialization, all five
   categories, duration and context validation, optimistic conflicts, rollback on
   audit failure, and isolation after consent withdrawal and regrant.
+  Check positive draft-version and ordered-timecode database constraints.
   Check that spoofed duration and missing verified duration cannot change the
   draft. Confirm a subsequent text-only save keeps existing observation rows.
 - Run `review-draft.validation.spec.ts` for DTO and numeric boundary checks.
@@ -21,21 +22,77 @@ Each feature needs valid inputs, invalid inputs, unauthorized access, state/race
 - In `assignment-access.integration-spec.ts`, use real HTTP and PostgreSQL
   with controlled storage responses to verify which object is measured,
   the persisted duration or null result, idempotent confirmation, and the
-  exact accepted timecode boundary. This does not verify the MinIO adapter.
+  exact accepted timecode boundary. Exercise concurrent owner reconfirmation
+  against the promoted ETag and size, a temporarily unavailable probe, retry
+  consumption with or without a measurement, and one recovery audit on success.
+  Expect `409 VIDEO_WITHDRAWN` before probing after storage consent withdrawal
+  and regrant. MinIO adapter verification uses the native suite below.
 - Run `node scripts/run-video-e2e.cjs expert-review.video-e2e.ts` with the
   same ffprobe configuration, ffmpeg alongside ffprobe, and the existing
   loopback PostgreSQL and native MinIO services. CI runs desktop and mobile.
   Filter with `--grep "reviewer plays synthetic"` for the reviewer workspace
   cases. Upload generated MP4 and WebM via the real API and MinIO, check the
   server-measured 900 ms frame span, and accept a timecode at that bound while
-  rejecting one millisecond beyond it. Verify signed playback progressing,
-  denied anonymous and foreign access, draft reload, consent withdrawal and
-  the saved draft and audit counts after denied edits.
+  rejecting one millisecond beyond it. Verify signed playback progress and
+  expiry, browser source removal and failed renewal after session expiry,
+  keyboard seeking, all five categories after reload, and anonymous, owner
+  and foreign reviewer isolation. Withdraw consent while the workspace is
+  open and check that a denied edit clears private UI state and preserves the
+  saved draft and audit counts.
 - Filter with `--grep "browser MediaRecorder"` for the recorder regression.
   Observe a nonempty final `dataavailable` event with live tracks, followed
   by `stop`, and decode the exact finalized preview. The Playwright report
   includes the bounded probe outcome and elapsed time for the synthetic
-  capture. See [T08 delivery](T08-DELIVERY.md).
+  capture. Compare the decoded preview with the stored measurement and verify
+  owner reconfirmation against the promoted MinIO object with one recovery audit.
+
+CI #90 passed native PostgreSQL and private-video jobs on
+`5c6c8f4935bbc693a7cb4ba4ac81a5126a4ba1cc`. The later T08 change has recorded
+local FFprobe unit (277/277) and shared UI (126/126) passes. Its expanded
+PostgreSQL and native MinIO/browser scenarios, including duration recovery and
+expiry, still need a passing run on the revision containing those changes.
+See [T08 delivery verification](T08-DELIVERY.md#draft-pr-22-worktree-audit).
+
+## C035 assignment queues and PA2 integration (partial)
+
+PA2 Stage 1 persists assignment-specific moderator grants with mandatory expiry,
+monotonic revisions and append-only lifecycle evidence. The database/migration
+suites use disposable PostgreSQL and cover fresh deployment, upgrade preservation,
+rollback after DDL, deletion evidence, CAS and regrant lifecycle rules.
+
+PA2 Stage 2 provides internal grant/revoke service operations. Authorization
+requires an ACTIVE, verified ADMIN and transaction-bound provisioning/MFA sources;
+missing production providers fail closed. The external grant/revoke HTTP contract
+is not implemented. Stage 3 reads moderator queues only through current,
+unrevoked, unexpired assignment-specific grants, before status filtering and cursor
+pagination. Queue reads are audited and serialized with grant/revoke; responses
+contain only assignment metadata. Creator ownership, wildcard and global access are
+never fallbacks. Production moderator reads return 503
+`MODERATOR_QUEUE_PROVISIONING_UNAVAILABLE` while trusted provisioning is absent.
+The candidate endpoint remains unavailable outside the isolated test environment.
+
+`assignment-grants-database.integration-spec.ts`,
+`assignment-grants-migration.integration-spec.ts`,
+`assignment-grants-service.integration-spec.ts` and
+`moderator-assignment-queue.integration-spec.ts` use synthetic providers and
+UUID-scoped disposable schemas only. They cover role/account/session checks,
+provider outages, expiry, audit rollback, cross-scope pagination, forged scope
+claims and read/revoke lock orderings. Synthetic assurance, provisioning, policy
+and evidence fixtures never establish production access.
+
+The expert and moderator queue UI uses the existing session and API client
+patterns. Browser component tests use HTTP contract mocks, not full-stack browser /
+PostgreSQL E2E. C033 assignment confirmation retains the original payload and
+idempotency key for manual retry. C051 cancellation and its migrations are
+integrated from develop; C034 playback authorization and the merged timezone
+regression fix are integrated. C051 tests cover owner deletion, consent withdrawal,
+queue metadata, grant evidence retention and playback denial after cancellation.
+
+C035 remains **PARTIAL**. Production trusted ADMIN provisioning, real
+session-bound MFA and approved evidence providers are unavailable; the external
+grant/revoke HTTP contract and full-stack queue E2E remain open. C050 review
+editing/submission and Safety Report moderation are outside this feature. Do not
+claim production readiness or weaken the default-deny gates.
 
 ## C036 - cancellation and reassignment race acceptance
 
