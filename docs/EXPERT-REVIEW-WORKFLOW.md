@@ -1,6 +1,6 @@
 # Expert-led video review — workflow and interface specification
 
-**Implementation status:** The private draft workspace and submission validation foundation are implemented. See [T10 implementation](#6-t10-implementation).
+**Implementation status:** Private draft submission and version locking are implemented. See [T10 implementation](#6-t10-implementation).
 
 ## 1. Participants and safeguards
 
@@ -65,6 +65,7 @@ session-bound access rules apply to every expert request.
 | Step | API behavior |
 | --- | --- |
 | C055 | Submission validates the saved summary, limitations, and each saved observation against the current verified duration. Blank summary or limitations return `422 REVIEW_INCOMPLETE` with field details. A narrative review may be submitted without timecoded observations or a transcript. |
+| C056 | `POST /api/expert/reviews/:id/submit` accepts `{ expectedVersion }`. It advances the review and assignment in one transaction with audit evidence. The same expected version replays the same receipt while the review is submitted. The editor and expert playback are locked while QA is pending. |
 
 Staff assurance and expert qualification retain their fail-closed defaults.
 Production access still requires approved evidence and trusted session-bound

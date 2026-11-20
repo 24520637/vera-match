@@ -70,6 +70,10 @@ export function observationPost(value: unknown) {
 
 export function requireEmpty(value: unknown) { record(value, []); }
 
+export function reviewSubmit(value: unknown) {
+  return version(record(value, ["expectedVersion"]).expectedVersion);
+}
+
 export function requireSubmittableReview(review: {
   summary: string | null;
   limitations: string | null;

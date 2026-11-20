@@ -62,4 +62,10 @@ export class ReviewDraftController {
   append(@Req() request: AuthenticatedRequest, @Param("id") id: string, @Body() body: unknown) {
     return this.drafts.save(request.auth!, id, body, true);
   }
+
+  @Post(":id/submit")
+  @HttpCode(200)
+  submit(@Req() request: AuthenticatedRequest, @Param("id") id: string, @Body() body: unknown) {
+    return this.drafts.submit(request.auth!, id, body);
+  }
 }
