@@ -138,6 +138,52 @@ describe("C053 merged API privacy and atomic audit", () => {
       expect(audit.some(row => row.action === action)).toBe(true);
   });
 
+  test("real draft initialization rolls back on audit failure and retries with one minimal creation audit", async () => {
+    const f = await h.fixture();
+    const path = "expert/assignments/" + f.id + "/draft";
+    const remove = await auditFailure("EXPERT_DRAFT_CREATED");
+    try {
+      expect((await h.request(f.expert.cookie, path, {})).status).toBe(503);
+      expect(await h.db.client.expertReview.count({ where: { assignmentId: f.id } })).toBe(0);
+      expect(await h.db.client.auditLog.count({ where: { action: "EXPERT_DRAFT_CREATED", subjectId: f.id } })).toBe(0);
+    } finally { await remove(); }
+    for (let attempt = 0; attempt < 2; attempt++)
+      expect((await h.request(f.expert.cookie, path, {})).status).toBe(200);
+    expect(await h.db.client.expertReview.count({ where: { assignmentId: f.id } })).toBe(1);
+    expect(await h.db.client.auditLog.count({ where: { action: "EXPERT_DRAFT_CREATED", subjectId: f.id } })).toBe(1);
+  });
+
+  test("real draft saves keep text out of audit, roll back atomically, and remain denied after C051 and re-consent", async () => {
+    const f = await h.fixture();
+    const readPath = "expert/assignments/" + f.id + "/draft";
+    expect((await h.request(f.expert.cookie, readPath, {})).status).toBe(200);
+    const draft = await h.db.client.expertReview.findUniqueOrThrow({ where: { assignmentId: f.id } });
+    const path = "expert/reviews/" + draft.id + "/draft";
+    const summary = "Synthetic private review audit canary.";
+    const input = { expectedVersion: 1, summary };
+    const remove = await auditFailure("EXPERT_DRAFT_SAVED");
+    try {
+      expect((await h.request(f.expert.cookie, path, input, "PATCH")).status).toBe(503);
+      expect(await h.db.client.expertReview.findUniqueOrThrow({ where: { id: draft.id } })).toMatchObject({ version: 1, summary: null });
+      expect(await h.db.client.auditLog.count({ where: { action: "EXPERT_DRAFT_SAVED", subjectId: draft.id } })).toBe(0);
+    } finally { await remove(); }
+    const concurrent = await Promise.all([1, 2].map(() => h.request(f.expert.cookie, path, input, "PATCH")));
+    expect(concurrent.map(response => response.status).sort()).toEqual([200, 409]);
+    const success = await h.db.client.auditLog.findMany({ where: { action: "EXPERT_DRAFT_SAVED", subjectId: draft.id } });
+    expect(success).toHaveLength(1);
+    expect(JSON.stringify(success).includes(summary)).toBe(false);
+    const foreign = await h.account("EXPERT");
+    expect((await h.request(foreign.cookie, path, { expectedVersion: 2, summary: "Synthetic foreign edit" }, "PATCH")).status).toBe(404);
+    await h.consent(f.owner, 2, "EXPERT_VIDEO_REVIEW", false);
+    await h.app.get(AssignmentCancellationWorker).runOnce();
+    await h.consent(f.owner, 3, "EXPERT_VIDEO_REVIEW", true);
+    const before = await h.db.client.auditLog.count();
+    expect((await h.request(f.expert.cookie, readPath, undefined, "GET")).status).toBe(403);
+    expect((await h.request(f.expert.cookie, path, { expectedVersion: 2, summary: "Synthetic stale edit" }, "PATCH")).status).toBe(403);
+    expect(await h.db.client.expertReview.findUniqueOrThrow({ where: { id: draft.id } })).toMatchObject({ version: 2, summary });
+    expect(await h.db.client.auditLog.count()).toBe(before);
+  });
+
   test("withdrawal and re-consent preserve cancellation evidence without reviving the old assignment", async () => {
     const f = await h.fixture();
     await h.consent(f.owner, 2, "EXPERT_VIDEO_REVIEW", false);
