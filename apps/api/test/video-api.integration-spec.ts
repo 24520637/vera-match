@@ -147,6 +147,14 @@ describe("Private video / real PostgreSQL / native MinIO", () => {
     expect(result.status).toBe(200);
   }
   const valid = { mimeType: "video/mp4", sizeBytes: 12 };
+  function waitForStorageCall(started: Promise<void>, request: Promise<Response>) {
+    return Promise.race([
+      started,
+      request.then(({ status }) => {
+        throw new Error(`Request completed with HTTP ${status} before reaching the storage call`);
+      }),
+    ]);
+  }
   it("paginates beyond 50 rows with stable ties, owner isolation and usable older READY media", async () => {
     const user = await member();
     await grant(user.cookie);
@@ -353,8 +361,8 @@ describe("Private video / real PostgreSQL / native MinIO", () => {
     const user = await member();
     await grant(user.cookie);
     const upload = await intent(user.cookie);
-    await put(upload.uploadUrl);
-    await request(user.cookie, `videos/${upload.id}/confirm`);
+    expect((await put(upload.uploadUrl)).status).toBe(200);
+    expect((await request(user.cookie, `videos/${upload.id}/confirm`)).status).toBe(201);
     const storage = app.get(PrivateStorageService);
     const original = storage.playbackUrl.bind(storage);
     let entered!: () => void, release!: () => void;
@@ -373,7 +381,7 @@ describe("Private video / real PostgreSQL / native MinIO", () => {
       });
     try {
       const issuance = request(user.cookie, `videos/${upload.id}/playback`);
-      await started;
+      await waitForStorageCall(started, issuance);
       const withdrawal = request(
         user.cookie,
         "consents/me",
@@ -398,7 +406,7 @@ describe("Private video / real PostgreSQL / native MinIO", () => {
     const user = await member();
     await grant(user.cookie);
     const upload = await intent(user.cookie);
-    await put(upload.uploadUrl);
+    expect((await put(upload.uploadUrl)).status).toBe(200);
     const storage = app.get(PrivateStorageService);
     const originalPromote = storage.promote.bind(storage);
     let entered!: () => void, release!: () => void;
@@ -417,7 +425,7 @@ describe("Private video / real PostgreSQL / native MinIO", () => {
       });
     try {
       const confirmation = request(user.cookie, `videos/${upload.id}/confirm`);
-      await started;
+      await waitForStorageCall(started, confirmation);
       const deletion = request(
         user.cookie,
         `videos/${upload.id}`,
@@ -480,19 +488,21 @@ describe("Private video / real PostgreSQL / native MinIO", () => {
     const user = await member();
     await grant(user.cookie);
     const upload = await intent(user.cookie);
-    await put(upload.uploadUrl);
+    expect((await put(upload.uploadUrl)).status).toBe(200);
     const storage = app.get(PrivateStorageService),
       promote = storage.promote.bind(storage);
+    let replacementStatus: number | undefined;
     const spy = jest
       .spyOn(storage, "promote")
       .mockImplementationOnce(async (...args) => {
-        await put(upload.uploadUrl, Buffer.from("replaced".padEnd(12)));
+        replacementStatus = (await put(upload.uploadUrl, Buffer.from("replaced".padEnd(12)))).status;
         return promote(...args);
       });
     try {
       expect(
         (await request(user.cookie, `videos/${upload.id}/confirm`)).status,
       ).toBe(503);
+      expect(replacementStatus).toBe(200);
     } finally {
       spy.mockRestore();
     }

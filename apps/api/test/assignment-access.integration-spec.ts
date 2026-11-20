@@ -145,6 +145,48 @@ describe("C034 assignment-bound playback / disposable PostgreSQL", () => {
       Cookie: cookie, Origin: origin, ...(body === undefined ? {} : { "Content-Type": "application/json" }),
     }, body: body === undefined ? undefined : JSON.stringify(body) });
 
+  async function provisionQa(seed: Awaited<ReturnType<typeof reviewFixture>>) {
+    enableQaAssurance();
+    jest.spyOn(app.get(AssignmentGrantProvisioningSource), "resolve").mockImplementation(async (_tx, auth) => ({
+      userId: auth.user.id, role: "ADMIN", active: true, reference: "synthetic-admin-provisioning", testOnly: true,
+    }));
+    const admin = await user("ADMIN");
+    const adminAuth = await context(admin.id);
+    const grants = app.get(AssignmentGrantsService);
+    const grantQa = (moderatorId: string, expectedRevision = 0) => grants.grant(adminAuth, {
+      assignmentId: seed.assignment.id, moderatorId, expectedRevision,
+      expiresAt: new Date(Date.now() + 600_000).toISOString(),
+    });
+    return { grantQa, revoke: (grant: Awaited<ReturnType<typeof grantQa>>) => grants.revoke(adminAuth, {
+      scopeId: grant.scopeId, grantId: grant.grantId, expectedRevision: grant.revision,
+    }) };
+  }
+
+  async function savedReview(seed: Awaited<ReturnType<typeof reviewFixture>>) {
+    const { draft } = await draftJson(await draftRequest(seed.expert.cookie, seed.path, "POST", {}));
+    await draftJson(await draftRequest(seed.expert.cookie, savePath(draft.id), "PATCH", {
+      expectedVersion: 1, summary: "Saved summary.", limitations: "A single source.", observations: [observation],
+    }));
+    return draft.id;
+  }
+
+  const qaEvidence = (assignmentId: string) => db.client.reviewDecisionEvidence.findMany({
+    where: { assignmentId }, orderBy: { version: "asc" },
+  });
+
+  async function reviewState(assignmentId: string, reviewId: string) {
+    const [assignment, review, events, evidence, audits] = await Promise.all([
+      db.client.expertAssignment.findUniqueOrThrow({ where: { id: assignmentId } }),
+      db.client.expertReview.findUniqueOrThrow({ where: { id: reviewId }, include: {
+        observations: { orderBy: { id: "asc" } }, decisions: { orderBy: { version: "asc" } },
+      } }),
+      db.client.assignmentEvent.findMany({ where: { assignmentId }, orderBy: { revision: "asc" } }),
+      qaEvidence(assignmentId),
+      db.client.auditLog.findMany({ where: { subjectId: reviewId }, orderBy: { id: "asc" } }),
+    ]);
+    return { assignment, review, events, evidence, audits };
+  }
+
   test("C060 publishes only after an independent approval of the resubmitted version", async () => {
     const seed = await reviewFixture();
     const { draft } = await draftJson(await draftRequest(seed.expert.cookie, seed.path, "POST", {}));
@@ -169,16 +211,8 @@ describe("C034 assignment-bound playback / disposable PostgreSQL", () => {
     expect((await qa()).status).toBe(404);
     expect((await qa("/approve", { expectedVersion: 3 })).status).toBe(404);
     expect(await (await reviewRequest(seed.moderator.cookie, "qa/reviews")).json()).toEqual({ reviews: [], nextCursor: null });
-    jest.spyOn(app.get(AssignmentGrantProvisioningSource), "resolve").mockImplementation(async (_tx, auth) => ({
-      userId: auth.user.id, role: "ADMIN", active: true, reference: "synthetic-admin-provisioning", testOnly: true,
-    }));
-    const admin = await user("ADMIN");
-    const grants = app.get(AssignmentGrantsService);
-    const adminAuth = await context(admin.id);
-    const grant = await grants.grant(adminAuth, {
-      assignmentId: seed.assignment.id, moderatorId: seed.moderator.id,
-      expectedRevision: 0, expiresAt: new Date(Date.now() + 600_000).toISOString(),
-    });
+    const { grantQa, revoke } = await provisionQa(seed);
+    const grant = await grantQa(seed.moderator.id);
     const queued = await reviewRequest(seed.moderator.cookie, "qa/reviews");
     expect(queued.status).toBe(200);
     const queue = await queued.json() as { reviews: unknown[] };
@@ -187,6 +221,12 @@ describe("C034 assignment-bound playback / disposable PostgreSQL", () => {
     expect((await qa("/approve", { expectedVersion: 2 })).status).toBe(409);
     expect((await qa("/return", { expectedVersion: 3, reason: "   " })).status).toBe(400);
     expect((await qa("/return", { expectedVersion: 3, reason: "Explain the prompt." })).status).toBe(200);
+    const [returnEvidence] = await qaEvidence(seed.assignment.id);
+    const moderator = await db.client.expertActorIdentity.findUniqueOrThrow({ where: { userId: seed.moderator.id } });
+    expect(returnEvidence).toEqual({
+      assignmentId: seed.assignment.id, reviewId: draft.id, version: 4, status: "RETURNED",
+      moderatorSubjectId: moderator.subjectId, decidedAt: expect.any(Date),
+    });
     expect((await qa("/approve", { expectedVersion: 4 })).status).toBe(409);
     expect(await (await ownerReports()).json()).toEqual({ reports: [], nextCursor: null });
     const returned = await draftRequest(seed.expert.cookie, seed.path);
@@ -196,12 +236,18 @@ describe("C034 assignment-bound playback / disposable PostgreSQL", () => {
       expectedVersion: 4, summary: "The speaker paused while answering the opening prompt.",
     })).status).toBe(200);
     expect((await submit(5)).status).toBe(200);
-    await grants.revoke(adminAuth, { scopeId: grant.scopeId, grantId: grant.grantId, expectedRevision: grant.revision });
+    expect(await qaEvidence(seed.assignment.id)).toEqual([returnEvidence]);
+    expect(await (await ownerReports()).json()).toEqual({ reports: [], nextCursor: null });
+    await revoke(grant);
+    const revoked = await reviewState(seed.assignment.id, draft.id);
+    const revokedQueue = await reviewRequest(seed.moderator.cookie, "qa/reviews");
+    expect(revokedQueue.status).toBe(200);
+    expect(await revokedQueue.json()).toEqual({ reviews: [], nextCursor: null });
+    expect((await qa()).status).toBe(404);
+    expect((await qa("/return", { expectedVersion: 6, reason: "Revoked moderator." })).status).toBe(404);
     expect((await qa("/approve", { expectedVersion: 6 })).status).toBe(404);
-    await grants.grant(adminAuth, {
-      assignmentId: seed.assignment.id, moderatorId: seed.moderator.id,
-      expectedRevision: grant.revision + 1, expiresAt: new Date(Date.now() + 600_000).toISOString(),
-    });
+    expect(await reviewState(seed.assignment.id, draft.id)).toEqual(revoked);
+    await grantQa(seed.moderator.id, grant.revision + 1);
     expect((await qa("/approve", { expectedVersion: 6 })).status).toBe(200);
     expect((await qa("/return", { expectedVersion: 7, reason: "Invalid transition." })).status).toBe(409);
     const report = await ownerReports();
@@ -221,9 +267,36 @@ describe("C034 assignment-bound playback / disposable PostgreSQL", () => {
     expect(await db.client.assignmentEvent.findMany({
       where: { assignmentId: seed.assignment.id }, orderBy: { revision: "asc" }, select: { toStatus: true },
     })).toEqual(["ASSIGNED", "IN_PROGRESS", "SUBMITTED", "IN_PROGRESS", "SUBMITTED", "COMPLETED"].map(toStatus => ({ toStatus })));
+    const decisionHistory = await qaEvidence(seed.assignment.id);
+    expect(decisionHistory).toEqual([returnEvidence, {
+      ...returnEvidence, version: 7, status: "APPROVED", decidedAt: expect.any(Date),
+    }]);
+    const approvalAudit = await db.client.auditLog.findFirstOrThrow({
+      where: { subjectId: draft.id, action: "EXPERT_REVIEW_APPROVED" },
+    });
+    expect(approvalAudit.actorId).toBe(moderator.subjectId);
+    const immutable = { code: "P2010", meta: expect.objectContaining({ code: "23514" }) };
+    await expect(db.client.$executeRaw`UPDATE "ReviewDecision" SET reason = 'tampered' WHERE "reviewId" = ${draft.id} AND version = 4`).rejects.toMatchObject(immutable);
+    await expect(db.client.$executeRaw`DELETE FROM "ReviewDecision" WHERE "reviewId" = ${draft.id}`).rejects.toMatchObject(immutable);
+    await expect(db.client.$executeRaw`UPDATE "ReviewDecisionEvidence" SET status = 'APPROVED' WHERE "assignmentId" = ${seed.assignment.id} AND version = 4`).rejects.toMatchObject(immutable);
+    await expect(db.client.$executeRaw`DELETE FROM "ReviewDecisionEvidence" WHERE "assignmentId" = ${seed.assignment.id}`).rejects.toMatchObject(immutable);
+    await expect(db.client.$executeRaw`TRUNCATE "ReviewDecisionEvidence"`).rejects.toMatchObject(immutable);
+    await expect(db.client.$executeRaw`UPDATE "AuditLog" SET action = 'UNRELATED' WHERE id = ${approvalAudit.id}`).rejects.toMatchObject(immutable);
+    await expect(db.client.$executeRaw`DELETE FROM "AuditLog" WHERE id = ${approvalAudit.id}`).rejects.toMatchObject(immutable);
+
     await patchConsent(seed.owner.id, 1, "EXPERT_VIDEO_REVIEW", false);
+    expect(await (await ownerReports()).json()).toEqual({ reports: [], nextCursor: null });
     await patchConsent(seed.owner.id, 2, "EXPERT_VIDEO_REVIEW", true);
     expect(await (await ownerReports()).json()).toEqual({ reports: [], nextCursor: null });
+    const deleted = await fetch(`${base}/api/videos/${seed.video.id}`, {
+      method: "DELETE", headers: { Cookie: seed.owner.cookie, Origin: origin, "Content-Type": "application/json" }, body: "{}",
+    });
+    expect(deleted.status).toBe(202);
+    expect(await (await ownerReports()).json()).toEqual({ reports: [], nextCursor: null });
+    expect(await db.client.reviewDecision.count({ where: { reviewId: draft.id } })).toBe(0);
+    expect(await db.client.expertReview.findUniqueOrThrow({ where: { id: draft.id } }))
+      .toMatchObject({ qaById: null, qaFeedback: null });
+    expect(await qaEvidence(seed.assignment.id)).toEqual(decisionHistory);
   });
 
   test("C060 concurrent draft edit and submit cannot both change the same version", async () => {
@@ -242,7 +315,167 @@ describe("C034 assignment-bound playback / disposable PostgreSQL", () => {
     expect(current.summary).toBe(current.status === "SUBMITTED" ? "Saved summary." : "Other draft edit.");
   });
 
-  test.each([900, null])("T08 confirms the promoted object and persists decoder result %s", async measuredDuration => {
+  test("C060 concurrent return and approval commit exactly one decision", async () => {
+    const seed = await reviewFixture();
+    const id = await savedReview(seed);
+    expect((await reviewRequest(seed.expert.cookie, `expert/reviews/${id}/submit`, { expectedVersion: 2 })).status).toBe(200);
+    const secondModerator = await user("MODERATOR");
+    const { grantQa } = await provisionQa(seed);
+    await grantQa(seed.moderator.id);
+    await grantQa(secondModerator.id);
+    const before = await reviewState(seed.assignment.id, id);
+    const [returned, approved] = await Promise.all([
+      reviewRequest(seed.moderator.cookie, `qa/reviews/${id}/return`, { expectedVersion: 3, reason: "Clarify the prompt." }),
+      reviewRequest(secondModerator.cookie, `qa/reviews/${id}/approve`, { expectedVersion: 3 }),
+    ]);
+    expect([returned.status, approved.status].sort()).toEqual([200, 409]);
+    const returnWon = returned.status === 200;
+    const status = returnWon ? "RETURNED" : "APPROVED";
+    const assignmentStatus = returnWon ? "IN_PROGRESS" : "COMPLETED";
+    const winner = returnWon ? seed.moderator : secondModerator;
+    const actor = await db.client.expertActorIdentity.findUniqueOrThrow({ where: { userId: winner.id } });
+    expect(await (returnWon ? approved : returned).json()).toMatchObject({ code: "REVIEW_VERSION_CONFLICT" });
+    expect(await (returnWon ? returned : approved).json()).toMatchObject({ version: 4, status });
+    const after = await reviewState(seed.assignment.id, id);
+    expect(after.review).toMatchObject({ version: 4, status, qaById: winner.id });
+    expect(after.review.decisions).toEqual([expect.objectContaining({ version: 4, status, moderatorId: winner.id })]);
+    expect(after.evidence).toEqual([expect.objectContaining({ version: 4, status, moderatorSubjectId: actor.subjectId })]);
+    expect(after.assignment).toMatchObject({ status: assignmentStatus, revision: before.assignment.revision + 1n });
+    expect(after.events.slice(before.events.length)).toEqual([expect.objectContaining({
+      toStatus: assignmentStatus, revision: after.assignment.revision,
+    })]);
+    expect(after.audits.filter(audit => audit.action === "EXPERT_REVIEW_RETURNED" || audit.action === "EXPERT_REVIEW_APPROVED"))
+      .toEqual([expect.objectContaining({ action: `EXPERT_REVIEW_${status}`, actorId: actor.subjectId })]);
+  });
+
+  test.each([
+    ["submit", "EXPERT_REVIEW_SUBMITTED"],
+    ["return", "EXPERT_REVIEW_RETURNED"],
+    ["approve", "EXPERT_REVIEW_APPROVED"],
+  ])("C060 %s audit failure rolls back the complete transition", async (operation, action) => {
+    const seed = await reviewFixture();
+    const id = await savedReview(seed);
+    const submit = () => reviewRequest(seed.expert.cookie, `expert/reviews/${id}/submit`, { expectedVersion: 2 });
+    if (operation !== "submit") {
+      expect((await submit()).status).toBe(200);
+      const { grantQa } = await provisionQa(seed);
+      await grantQa(seed.moderator.id);
+    }
+    const attempt = () => operation === "submit" ? submit() : reviewRequest(seed.moderator.cookie, `qa/reviews/${id}/${operation}`, {
+      expectedVersion: 3, ...(operation === "return" ? { reason: "Clarify the prompt." } : {}),
+    });
+    const before = await reviewState(seed.assignment.id, id);
+    await db.client.$executeRaw`CREATE FUNCTION test_reject_review_audit() RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN
+        IF NEW.action = TG_ARGV[0] THEN RAISE EXCEPTION 'synthetic review audit failure'; END IF;
+        RETURN NEW;
+      END $$`;
+    try {
+      // Values come exclusively from the static parameterized cases above.
+      await db.client.$executeRawUnsafe(`CREATE TRIGGER test_reject_review_audit BEFORE INSERT ON "AuditLog"
+        FOR EACH ROW EXECUTE FUNCTION test_reject_review_audit('${action}')`);
+      const failure = await attempt();
+      expect(failure.status).toBe(503);
+      expect(await failure.text()).not.toContain("synthetic review audit failure");
+      expect(await reviewState(seed.assignment.id, id)).toEqual(before);
+    } finally {
+      await db.client.$executeRaw`DROP TRIGGER IF EXISTS test_reject_review_audit ON "AuditLog"`;
+      await db.client.$executeRaw`DROP FUNCTION test_reject_review_audit()`;
+    }
+    expect((await attempt()).status).toBe(200);
+  });
+
+  test.each([
+    { purpose: "EXPERT_VIDEO_REVIEW", approved: false },
+    { purpose: "EXPERT_VIDEO_REVIEW", approved: true },
+    { purpose: "VIDEO_STORAGE", approved: false },
+    { purpose: "VIDEO_STORAGE", approved: true },
+  ] as const)("C060 $purpose withdrawal and regrant close old access (approved=$approved)", async ({ purpose, approved }) => {
+    const seed = await reviewFixture();
+    const id = await savedReview(seed);
+    expect((await reviewRequest(seed.expert.cookie, `expert/reviews/${id}/submit`, { expectedVersion: 2 })).status).toBe(200);
+    const { grantQa } = await provisionQa(seed);
+    await grantQa(seed.moderator.id);
+    const qa = (suffix = "", body?: unknown) => reviewRequest(seed.moderator.cookie, `qa/reviews/${id}${suffix}`, body);
+    const queue = () => reviewRequest(seed.moderator.cookie, "qa/reviews");
+    const reports = () => reviewRequest(seed.owner.cookie, "reviews/me");
+    const initialQueue = await queue();
+    expect(initialQueue.status).toBe(200);
+    expect(await initialQueue.json()).toMatchObject({ reviews: [expect.objectContaining({ id })] });
+    expect((await qa()).status).toBe(200);
+    if (approved) {
+      expect((await qa("/approve", { expectedVersion: 3 })).status).toBe(200);
+      expect(await (await reports()).json()).toMatchObject({ reports: [expect.objectContaining({ id })] });
+    }
+    const evidence = await qaEvidence(seed.assignment.id);
+    for (const [version, granted] of [[1, false], [2, true]] as const) {
+      await patchConsent(seed.owner.id, version, purpose, granted);
+      const hiddenQueue = await queue();
+      expect(hiddenQueue.status).toBe(200);
+      expect(await hiddenQueue.json()).toEqual({ reviews: [], nextCursor: null });
+      for (const denied of [
+        await qa(), await qa("/return", { expectedVersion: 3, reason: "Unavailable review." }),
+        await qa("/approve", { expectedVersion: 3 }),
+      ]) {
+        expect(denied.status).toBe(404);
+        expect(await denied.json()).toMatchObject({ code: "REVIEW_NOT_FOUND" });
+      }
+      expect((await draftRequest(seed.expert.cookie, seed.path)).status).toBe(403);
+      const hiddenReports = await reports();
+      expect(hiddenReports.status).toBe(200);
+      expect(await hiddenReports.json()).toEqual({ reports: [], nextCursor: null });
+      expect(await qaEvidence(seed.assignment.id)).toEqual(evidence);
+    }
+    expect(await db.client.auditLog.count({ where: {
+      subjectId: id, action: { in: ["EXPERT_REVIEW_APPROVED", "EXPERT_REVIEW_RETURNED"] },
+    } })).toBe(approved ? 1 : 0);
+  });
+
+  test.each([
+    { deletion: "owner delete", approved: false },
+    { deletion: "owner delete", approved: true },
+    { deletion: "physical deletion", approved: false },
+  ])("C060 $deletion removes live QA details and preserves evidence (approved=$approved)", async ({ deletion, approved }) => {
+    const seed = await reviewFixture();
+    const id = await savedReview(seed);
+    expect((await reviewRequest(seed.expert.cookie, `expert/reviews/${id}/submit`, { expectedVersion: 2 })).status).toBe(200);
+    const { grantQa } = await provisionQa(seed);
+    await grantQa(seed.moderator.id);
+    const action = approved ? "approve" : "return";
+    const reports = () => reviewRequest(seed.owner.cookie, "reviews/me");
+    expect((await reviewRequest(seed.moderator.cookie, `qa/reviews/${id}/${action}`, {
+      expectedVersion: 3, ...(approved ? {} : { reason: "Private live feedback." }),
+    })).status).toBe(200);
+    if (approved) expect(await (await reports()).json()).toMatchObject({ reports: [expect.objectContaining({ id })] });
+    const history = await qaEvidence(seed.assignment.id);
+    expect(history).toEqual([expect.objectContaining({ reviewId: id, version: 4, status: approved ? "APPROVED" : "RETURNED" })]);
+    expect(await db.client.reviewDecision.count({ where: { reviewId: id } })).toBe(1);
+    if (deletion === "owner delete") {
+      expect(await db.client.expertReview.findUniqueOrThrow({ where: { id } })).toMatchObject({
+        qaById: seed.moderator.id, qaFeedback: approved ? null : "Private live feedback.",
+      });
+      const response = await fetch(`${base}/api/videos/${seed.video.id}`, {
+        method: "DELETE", headers: { Cookie: seed.owner.cookie, Origin: origin, "Content-Type": "application/json" }, body: "{}",
+      });
+      expect(response.status).toBe(202);
+      expect(await db.client.expertReview.findUniqueOrThrow({ where: { id } }))
+        .toMatchObject({ qaById: null, qaFeedback: null });
+    } else {
+      await db.client.video.delete({ where: { id: seed.video.id } });
+      expect(await db.client.expertReview.findUnique({ where: { id } })).toBeNull();
+    }
+    const hidden = await reports();
+    expect(hidden.status).toBe(200);
+    expect(await hidden.json()).toEqual({ reports: [], nextCursor: null });
+    expect(await db.client.reviewDecision.count({ where: { reviewId: id } })).toBe(0);
+    expect(await qaEvidence(seed.assignment.id)).toEqual(history);
+  });
+
+  test.each([
+    { measuredDuration: 900, retryDuration: null },
+    { measuredDuration: null, retryDuration: 900 },
+    { measuredDuration: null, retryDuration: null },
+  ])("T08 persists $measuredDuration and bounds recovery with result $retryDuration", async ({ measuredDuration, retryDuration }) => {
     const seed = await fixture();
     const { owner, expert, video } = seed;
     const storage = app.get(PrivateStorageService);
@@ -267,10 +500,8 @@ describe("C034 assignment-bound playback / disposable PostgreSQL", () => {
       expect(promote).toHaveBeenCalledWith(incoming, video.objectKey, '"incoming"', "video/mp4");
       expect(measure).toHaveBeenCalledWith(video.objectKey, '"promoted"', bytes.length, "video/mp4");
       expect(await db.client.video.findUniqueOrThrow({ where: { id: video.id } }))
-        .toMatchObject({ status: "READY", durationMs: measuredDuration });
-      expect((await confirm({})).status).toBe(201);
-      expect(measure).toHaveBeenCalledTimes(1);
-      expect(await db.client.auditLog.count({ where: { action: "VIDEO_UPLOAD_CONFIRMED", subjectId: video.id } })).toBe(1);
+        .toMatchObject({ status: "READY", durationMs: measuredDuration,
+          durationRetryEtag: measuredDuration === null ? '"promoted"' : null });
 
       const { assignment } = await create(seed);
       const { draft } = await draftJson(await draftRequest(expert.cookie, draftPath(assignment.id), "POST", {}));
@@ -282,9 +513,47 @@ describe("C034 assignment-bound playback / disposable PostgreSQL", () => {
       expect(await db.client.expertObservation.count({ where: { reviewId: draft.id } })).toBe(0);
       const boundary = await edit(900);
       expect(boundary.status).toBe(measuredDuration === null ? 503 : 200);
+      if (measuredDuration === null) {
+        measure.mockResolvedValueOnce(undefined);
+        expect((await confirm({})).status).toBe(201);
+        expect(await db.client.video.findUniqueOrThrow({ where: { id: video.id } }))
+          .toMatchObject({ durationMs: null, durationRetryEtag: '"promoted"' });
+        measure.mockResolvedValue(retryDuration);
+        const retries = await Promise.all([confirm({}), confirm({})]);
+        expect(retries.map(result => result.status)).toEqual([201, 201]);
+        expect(measure).toHaveBeenLastCalledWith(video.objectKey, '"promoted"', bytes.length, "video/mp4");
+        expect((await edit(901)).status).toBe(retryDuration === null ? 503 : 422);
+        expect((await edit(900)).status).toBe(retryDuration === null ? 503 : 200);
+      }
+      expect((await confirm({})).status).toBe(201);
+      expect(measure).toHaveBeenCalledTimes(measuredDuration === null ? 3 : 1);
+      expect(promote).toHaveBeenCalledTimes(1);
+      expect(await db.client.video.findUniqueOrThrow({ where: { id: video.id } }))
+        .toMatchObject({ durationMs: measuredDuration ?? retryDuration, durationRetryEtag: null });
+      expect(await db.client.auditLog.count({ where: { action: "VIDEO_UPLOAD_CONFIRMED", subjectId: video.id } })).toBe(1);
+      expect(await db.client.auditLog.count({ where: { action: "VIDEO_DURATION_VERIFIED", subjectId: video.id } }))
+        .toBe(retryDuration === null ? 0 : 1);
     } finally {
       inspect.mockRestore(); promote.mockRestore(); measure.mockRestore();
     }
+  });
+
+  test("T08 rejects duration recovery after storage withdrawal and regrant", async () => {
+    const { owner, video } = await fixture();
+    const storage = app.get(PrivateStorageService);
+    const measure = jest.spyOn(storage, "measureDuration");
+    await db.client.video.update({ where: { id: video.id }, data: {
+      durationRetryEtag: '"promoted"', sizeBytes: 1024,
+    } });
+    await patchConsent(owner.id, 1, "VIDEO_STORAGE", false);
+    await patchConsent(owner.id, 2, "VIDEO_STORAGE", true);
+    const response = await fetch(`${base}/api/videos/${video.id}/confirm`, {
+      method: "POST", headers: { Cookie: owner.cookie, Origin: origin, "Content-Type": "application/json" }, body: "{}",
+    });
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ code: "VIDEO_WITHDRAWN" });
+    expect(measure).not.toHaveBeenCalled();
+    expect(await db.client.video.findUniqueOrThrow({ where: { id: video.id } })).toMatchObject({ durationMs: null });
   });
 
   test("T08 initializes once and persists all five categories across independent HTTP reads", async () => {

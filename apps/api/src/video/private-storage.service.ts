@@ -164,7 +164,9 @@ export class PrivateStorageService {
     return copy.CopyObjectResult?.ETag;
   }
   async measureDuration(key: string, etag: string, size: number, mime: string) {
-    if (!this.durationProbe || !isAbsolute(this.durationProbe) || this.probing) return null;
+    // Undefined means no attempt started. A caller can retain its retry in
+    // that case without admitting any additional storage or decoder work.
+    if (!this.durationProbe || !isAbsolute(this.durationProbe) || this.probing) return undefined;
     this.probing = true;
     const signal = AbortSignal.timeout(VIDEO_PROBE_TIMEOUT_MS);
     try {
