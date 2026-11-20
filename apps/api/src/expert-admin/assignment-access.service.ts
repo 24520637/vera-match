@@ -68,7 +68,7 @@ export class AssignmentAccessService {
         if (!credential || credential.status !== "APPROVED" || !credential.approval || credential.approval.subjectId !== credential.subjectId) denied();
         await tx.$queryRaw`SELECT id FROM "ExpertAssignment" WHERE id=${assignmentId} ORDER BY id FOR UPDATE`;
         const assignment = await tx.expertAssignment.findUnique({ where: { id: assignmentId } });
-        const statuses = scope === "review" ? ["ASSIGNED", "IN_PROGRESS", "SUBMITTED"] : ["ASSIGNED", "IN_PROGRESS"];
+        const statuses = scope === "review" ? ["ASSIGNED", "IN_PROGRESS", "SUBMITTED", "COMPLETED"] : ["ASSIGNED", "IN_PROGRESS"];
         if (!assignment || assignment.expertId !== expert.id || assignment.videoId !== video.id ||
           assignment.credentialApprovalId !== credential.approval.id ||
           !statuses.includes(assignment.status) || assignment.cancelledAt) denied();

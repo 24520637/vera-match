@@ -92,7 +92,7 @@ not changes to current auth.
 | GET       | `/qa/reviews`                      | Scoped moderator       | Submitted queue with session-bound MFA, current assignment grants, and optional `after` cursor            |
 | GET       | `/qa/reviews/:id`                  | Scoped moderator       | Submitted version with private evidence for independent QA                                               |
 | POST      | `/qa/reviews/:id/return`           | Scoped moderator       | Independent QA, current assignment grant, and actionable reason                                          |
-| POST      | `/qa/reviews/:id/approve`          | Moderator               | Not original author; enforce independent QA and valid transition                                          |
+| POST      | `/qa/reviews/:id/approve`          | Scoped moderator       | Independent QA, current assignment grant, and valid transition                                           |
 | GET       | `/reviews/me`                      | Owner                   | Only QA-approved reports for the caller                                                                   |
 | POST      | `/reviews/:id/disputes`            | Owner                   | Reason, dispute status and audit                                                                          |
 | PATCH     | `/reviews/claims/:id`              | Owner                   | Granular confirmation, share permission, withdrawal                                                       |

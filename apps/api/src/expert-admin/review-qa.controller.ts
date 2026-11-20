@@ -27,4 +27,10 @@ export class ReviewQaController {
   returnReview(@Req() request: AuthenticatedRequest, @Param("id") id: string, @Body() body: unknown) {
     return this.qa.returnReview(request.auth!, id, body);
   }
+
+  @Post(":id/approve")
+  @HttpCode(200)
+  approve(@Req() request: AuthenticatedRequest, @Param("id") id: string, @Body() body: unknown) {
+    return this.qa.approve(request.auth!, id, body);
+  }
 }

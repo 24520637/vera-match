@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { ApiError, apiJson } from "@/lib/api";
 import { useAuth } from "../auth/auth-provider";
 import { Button } from "../ui/button";
+import { Modal } from "../ui/modal";
 import { Notice } from "../ui/status";
 
 type Entry = { id: string; version: number; submittedAt: string };
@@ -19,6 +20,8 @@ function message(error: unknown) {
     if (error.status === 409) return "The review changed. Reload the queue before making a decision.";
     if (error.status === 401 || error.status === 403) return "An authorized moderator session with verified staff assurance is required.";
     if (error.status === 404) return "The submitted review is no longer available.";
+    if (error.status === 422 || error.code === "REVIEW_DURATION_UNAVAILABLE")
+      return "This review cannot be approved. Return it with the changes needed.";
   }
   return "The request could not be confirmed. Reload and try again.";
 }
@@ -41,6 +44,7 @@ function QueueWorkspace() {
   const [result, setResult] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [confirming, setConfirming] = useState(false);
   const [revision, reload] = useState(0);
   const request = useRef<AbortController | null>(null);
 
@@ -70,17 +74,18 @@ function QueueWorkspace() {
     return () => controller.abort();
   }, [after, selected, revision]);
 
-  async function returnReview() {
-    if (!review || !reason.trim() || saving || loading) return;
+  async function decide(action: "return" | "approve") {
+    if (!review || (action === "return" && !reason.trim()) || saving || loading) return;
     const signal = request.current!.signal;
     setSaving(true);
+    setConfirming(false);
     setError("");
     try {
-      await apiJson(`/qa/reviews/${review.id}/return`, {
-        method: "POST", signal, json: { expectedVersion: review.version, reason },
+      await apiJson(`/qa/reviews/${review.id}/${action}`, {
+        method: "POST", signal, json: { expectedVersion: review.version, ...(action === "return" ? { reason } : {}) },
       });
       if (signal.aborted) return;
-      setResult("Review returned to the expert.");
+      setResult(action === "approve" ? "Review approved." : "Review returned to the expert.");
       setReview(undefined);
       setSelected(undefined);
       setAfter(undefined);
@@ -131,12 +136,18 @@ function QueueWorkspace() {
         <p style={{ whiteSpace: "pre-wrap" }}>{note.observation}</p>
         <p style={{ whiteSpace: "pre-wrap" }}>Context: {note.context}</p>
       </li>)}</ol>
-      <form onSubmit={event => { event.preventDefault(); void returnReview(); }}>
+      <Button disabled={saving} onClick={() => setConfirming(true)}>Approve review</Button>
+      <form onSubmit={event => { event.preventDefault(); void decide("return"); }}>
         <p><label>What should the expert change?<br />
           <textarea value={reason} onChange={event => setReason(event.target.value)} maxLength={2000} required disabled={saving} />
         </label></p>
         <Button type="submit" disabled={!reason.trim()} loading={saving}>Return for revision</Button>
       </form>
     </>}
+    <Modal open={confirming} onOpenChange={setConfirming} title="Approve this review?"
+      description="The member will be able to read the approved summary and limitations while access remains authorized.">
+      <Button variant="secondary" onClick={() => setConfirming(false)}>Keep reviewing</Button>
+      <Button onClick={() => void decide("approve")}>Confirm approval</Button>
+    </Modal>
   </main>;
 }

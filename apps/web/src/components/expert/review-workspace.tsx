@@ -17,7 +17,7 @@ type Draft = {
   feedback?: string | null;
   observations: Array<Omit<Note, "startMs" | "endMs" | "context"> & { startMs: number; endMs: number; context: string | null }>;
 };
-type Submission = { id: string; version: number; status: "SUBMITTED"; submittedAt: string };
+type Submission = { id: string; version: number; status: "SUBMITTED" | "APPROVED"; submittedAt: string };
 type DraftResponse = { draft: Draft | null; durationMs: number | null; submission?: Submission };
 type Playback = { url: string; expiresAt: string };
 const reference = /^[A-Za-z0-9_-]{1,200}$/;
@@ -178,7 +178,9 @@ function Workspace({ assignmentId }: { assignmentId: string }) {
     <Button disabled={busy || playbackBusy} onClick={() => { setData(undefined); setForm(undefined); reload(n => n + 1); }}>
       Reload saved draft
     </Button>
-    {data?.submission && <Notice title="Submitted for quality review">Version {data.submission.version} is locked until a moderator reviews it.</Notice>}
+    {data?.submission && (data.submission.status === "APPROVED"
+      ? <Notice title="Review approved">Version {data.submission.version} has passed independent quality review.</Notice>
+      : <Notice title="Submitted for quality review">Version {data.submission.version} is locked until a moderator reviews it.</Notice>)}
     {data && !data.submission && <>
       <h2>Assigned video</h2>
       <Button disabled={busy || playbackBusy} onClick={() => void playback()}>{media ? "Renew playback" : "Load playback"}</Button>

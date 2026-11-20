@@ -67,7 +67,8 @@ session-bound access rules apply to every expert request.
 | --- | --- |
 | C055 | Submission validates the saved summary, limitations, and each saved observation against the current verified duration. Blank summary or limitations return `422 REVIEW_INCOMPLETE` with field details. A narrative review may be submitted without timecoded observations or a transcript. |
 | C056 | `POST /api/expert/reviews/:id/submit` accepts `{ expectedVersion }`. It advances the review and assignment in one transaction with audit evidence. The same expected version replays the same receipt while the review is submitted. The editor and expert playback are locked while QA is pending. |
-| C057 | `POST /api/qa/reviews/:id/return` accepts `{ expectedVersion, reason }`. The actionable reason must contain 1 to 2,000 characters after trimming. The expert can revise the returned version and resubmit. Previous decisions remain in the private review history. The queue and detail routes require an independent moderator, session-bound MFA, and a current C035 assignment grant. |
+| C057 | `POST /api/qa/reviews/:id/return` accepts `{ expectedVersion, reason }`. The actionable reason must contain 1 to 2,000 characters after trimming. The expert can revise the returned version and resubmit. Previous decisions remain in the private review history. |
+| C058 | `GET /api/qa/reviews` and `GET /api/qa/reviews/:id` show submissions to independent moderators with session-bound MFA and a current C035 moderator grant for the assignment. The same grant is required to return or approve the review. `POST /api/qa/reviews/:id/approve` accepts `{ expectedVersion }`, validates the snapshot and completes the assignment. Authors cannot decide on their own submissions, including after a role change. |
 
 The QA list endpoint accepts an optional `after` cursor and returns
 `nextCursor`. Each transition requires the current version. Invalid states and

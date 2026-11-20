@@ -43,7 +43,8 @@ export class ReviewDraftService {
     return this.access.withAuthorizedAssignment(auth, reviewId(id), async (tx, access) => {
       const where = { assignmentId: access.assignmentId };
       const existing = await tx.expertReview.findUnique({ where, select: { ...projection, status: true, submittedAt: true, qaFeedback: true } });
-      if (existing?.submittedAt && existing.status === "SUBMITTED" && access.assignment.status === "SUBMITTED") {
+      if (existing?.submittedAt && ((existing.status === "SUBMITTED" && access.assignment.status === "SUBMITTED") ||
+        (existing.status === "APPROVED" && access.assignment.status === "COMPLETED"))) {
         if (initialize) reviewStateConflict();
         await access.validateTime();
         return { draft: null, submission: { id: existing.id, status: existing.status, version: existing.version,

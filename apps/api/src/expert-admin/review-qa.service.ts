@@ -8,7 +8,7 @@ import { SafetyAccessService } from "../safety/safety-access.service";
 import { StaffAssuranceSource } from "../safety/staff-assurance.source";
 import { transitionReviewAssignment } from "./review-assignment-transition";
 import { reviewStateConflict } from "./review-draft.service";
-import { reviewId, reviewReturn } from "./review-draft.validation";
+import { requireSubmittableReview, reviewId, reviewReturn, reviewSubmit } from "./review-draft.validation";
 import { requireReviewSource } from "./review-source-access";
 
 const queueSize = 10;
@@ -160,7 +160,11 @@ export class ReviewQaService {
     return this.decide(auth, value, expectedVersion, "RETURNED", reason);
   }
 
-  private decide(auth: AuthContext, value: string, expectedVersion: number, status: "RETURNED", reason: string) {
+  approve(auth: AuthContext, value: string, input: unknown) {
+    return this.decide(auth, value, reviewSubmit(input), "APPROVED", null);
+  }
+
+  private decide(auth: AuthContext, value: string, expectedVersion: number, status: "RETURNED" | "APPROVED", reason: string | null) {
     const id = reviewId(value);
     return this.withinReview(auth, id, async (tx, assignment, validateTime) => {
       const where = { id, assignmentId: assignment.id };
@@ -169,6 +173,10 @@ export class ReviewQaService {
       if (review.version !== expectedVersion || expectedVersion === 2147483647)
         throw new ConflictException({ code: "REVIEW_VERSION_CONFLICT", message: "The review changed. Reload the submitted version." });
       if (review.status !== "SUBMITTED" || assignment.status !== "SUBMITTED" || !review.submittedAt) reviewStateConflict();
+      if (status === "APPROVED") {
+        const submitted = await tx.expertReview.findUniqueOrThrow({ where: { id }, select: detail });
+        requireSubmittableReview(submitted, assignment.video.durationMs);
+      }
       const decidedAt = await validateTime();
       const version = expectedVersion + 1;
       const changed = await tx.expertReview.updateMany({
@@ -176,10 +184,10 @@ export class ReviewQaService {
         data: { status, version, qaById: auth.user.id, qaAt: decidedAt, qaFeedback: reason },
       });
       if (changed.count !== 1) reviewStateConflict();
-      await transitionReviewAssignment(tx, assignment, "IN_PROGRESS", auth.user.id);
+      await transitionReviewAssignment(tx, assignment, status === "APPROVED" ? "COMPLETED" : "IN_PROGRESS", auth.user.id);
       await tx.reviewDecision.create({ data: { reviewId: id, moderatorId: auth.user.id, version, status, reason, decidedAt } });
       await tx.auditLog.create({ data: { actorId: auth.user.id, subjectId: id, subjectType: "ExpertReview",
-        action: "EXPERT_REVIEW_RETURNED" } });
+        action: status === "APPROVED" ? "EXPERT_REVIEW_APPROVED" : "EXPERT_REVIEW_RETURNED" } });
       return { id, status, version, decidedAt };
     });
   }
