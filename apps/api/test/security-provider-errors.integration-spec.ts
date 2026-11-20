@@ -1,9 +1,5 @@
 import { ServiceUnavailableException } from "@nestjs/common";
 import { ExpertMfaSource } from "../src/expert-admin/expert-mfa.source";
-import {
-  ExpertApprovalRegistry,
-  ExpertEvidenceSource,
-} from "../src/expert-admin/expert-approval.sources";
 import { PrivateStorageService } from "../src/video/private-storage.service";
 import {
   securityMediaHarness,
@@ -33,13 +29,9 @@ describe("C087 upstream provider error privacy regression", () => {
           failure,
         );
       if (kind === "evidence")
-        (
-          h.app.get(ExpertEvidenceSource).find as jest.Mock
-        ).mockRejectedValueOnce(failure);
+        (h.evidenceSource.find as jest.Mock).mockRejectedValueOnce(failure);
       if (kind === "registry")
-        (
-          h.app.get(ExpertApprovalRegistry).training as jest.Mock
-        ).mockImplementationOnce(() => {
+        (h.approvalRegistry.training as jest.Mock).mockImplementationOnce(() => {
           throw failure;
         });
       const sign = jest.spyOn(

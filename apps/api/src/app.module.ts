@@ -10,6 +10,7 @@ import { PreferencesModule } from "./preferences/preferences.module";
 import { ConsentModule } from "./consent/consent.module";
 import { VideoModule } from "./video/video.module";
 import { ExpertApprovalModule } from "./expert-admin/expert-approval.module";
+import { AssignmentQueuesModule } from "./expert-admin/assignment-queues.module";
 
 @Module({
   imports: [
@@ -23,6 +24,7 @@ import { ExpertApprovalModule } from "./expert-admin/expert-approval.module";
     VideoModule,
     SafetyModule,
     ExpertApprovalModule,
+    AssignmentQueuesModule,
   ],
   controllers: [HealthController],
 })
