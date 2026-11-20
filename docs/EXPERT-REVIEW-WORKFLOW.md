@@ -71,6 +71,7 @@ session-bound access rules apply to every expert request.
 | C057 | `POST /api/qa/reviews/:id/return` accepts `{ expectedVersion, reason }`. The actionable reason must contain 1 to 2,000 characters after trimming. The expert can revise the returned version and resubmit. Previous decisions remain in the private review history. |
 | C058 | `GET /api/qa/reviews` and `GET /api/qa/reviews/:id` show submissions to independent moderators with session-bound MFA and a current C035 moderator grant for the assignment. The same grant is required to return or approve the review. `POST /api/qa/reviews/:id/approve` accepts `{ expectedVersion }`, validates the snapshot and completes the assignment. Authors cannot decide on their own submissions, including after a role change. |
 | C059 | `GET /api/reviews/me` returns only the caller's approved reports with matching independent QA evidence. Each report includes summary, limitations, approval time, reviewer display name when available, and source video reference and upload time. Raw timeline notes, QA feedback, moderator identity, and storage locators stay private. |
+| C060 | Focused tests exercise field and version validation, transition guards, authorization, and the owner projection. PostgreSQL integration scenarios cover concurrent submission, concurrent draft edit and submit, return and resubmission, moderator grant revocation, approval, and consent withdrawal. |
 
 QA and owner list endpoints accept an optional `after` cursor and return
 `nextCursor`. Each transition requires the current version. Invalid states and
