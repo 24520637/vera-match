@@ -1,6 +1,6 @@
 # C095 — Operations and synthetic recovery rehearsal
 
-Status: **PARTIAL**, T17 / Huong. Baseline: develop `3a21828` (12 migrations).
+Status: **PARTIAL**, T17 / Huong. Baseline refreshed to develop `8383d65` (15 migrations), including merged C035 and T08 draft APIs.
 This is an operational preparation deliverable, not production acceptance or full Release QA.
 
 ## Executed evidence and limits
