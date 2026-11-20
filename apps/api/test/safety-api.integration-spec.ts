@@ -1,4 +1,7 @@
 import { StaffAssuranceSource } from "../src/safety/staff-assurance.source";
+import { ModerationService } from "../src/safety/moderation.service";
+import { AssignmentQueuesService } from "../src/expert-admin/assignment-queues.service";
+import { AssignmentGrantsService } from "../src/expert-admin/assignment-grants.service";
 import { SafetyRateLimiter } from "../src/safety/safety-request.guard";
 import { INestApplication } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
@@ -46,6 +49,26 @@ describe("Safety API / real sessions / isolated PostgreSQL", () => {
   });
   afterAll(async () => {
     await db?.close();
+  });
+  it("shares one default-deny assurance provider across Safety and PA2 services", async () => {
+    const source = app.get(StaffAssuranceSource);
+    for (const service of [app.get(ModerationService), app.get(AssignmentQueuesService), app.get(AssignmentGrantsService)]) {
+      expect(Reflect.get(service, "assurance")).toBe(source);
+    }
+    const moderator = await account("MODERATOR");
+    await expect(source.resolve(db.client, moderator.auth)).resolves.toBeUndefined();
+    const proof = staffProof();
+    try {
+      for (const service of [app.get(ModerationService), app.get(AssignmentQueuesService), app.get(AssignmentGrantsService)]) {
+        const injected = Reflect.get(service, "assurance") as StaffAssuranceSource;
+        await expect(injected.resolve(db.client, moderator.auth)).resolves.toMatchObject({
+          userId: moderator.id, sessionId: moderator.auth.sessionId, level: "MFA", testOnly: true,
+        });
+      }
+    } finally {
+      proof.mockRestore();
+    }
+    await expect(source.resolve(db.client, moderator.auth)).resolves.toBeUndefined();
   });
   async function account(role: UserRole = "MEMBER") {
     const token = randomBytes(32).toString("base64url");
