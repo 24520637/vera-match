@@ -38,6 +38,43 @@ async function identity(db: PrismaClient, role: UserRole, target: BrowserContext
   return user;
 }
 
+async function checkPlaybackExpiry(db: PrismaClient, target: BrowserContext, expertId: string, workspace: string) {
+  const token = randomBytes(32).toString("base64url");
+  const tokenHash = createHash("sha256").update(token).digest("hex");
+  await db.session.create({ data: { userId: expertId, tokenHash, expiresAt: new Date(Date.now() + 60000) } });
+  await target.addCookies([{ name: "vera_e2e_session", value: token, url: origin, httpOnly: true }]);
+  const page = await target.newPage();
+  try {
+    await page.goto(workspace);
+    const load = page.getByRole("button", { name: "Load playback" });
+    await expect(load).toBeEnabled();
+    // The real signer bounds its grant to the remaining server-side session lifetime.
+    await db.session.update({ where: { tokenHash }, data: { expiresAt: new Date(Date.now() + 8000) } });
+    await load.click();
+    const player = page.getByLabel("Assigned video");
+    await expect.poll(() => player.evaluate((element: HTMLVideoElement) => element.readyState)).toBeGreaterThanOrEqual(1);
+    const signedUrl = await player.evaluate((element: HTMLVideoElement) => element.currentSrc);
+    await expect(page.getByText("Playback expired. Load playback to continue.")).toBeVisible({ timeout: 10000 });
+    await expect(player).toHaveCount(0);
+    // SigV4 uses whole seconds and may accept requests during the expiry second.
+    await expect.poll(async () => {
+      try {
+        const response = await fetch(signedUrl, { cache: "no-store", signal: AbortSignal.timeout(2000) });
+        await response.body?.cancel();
+        return response.status;
+      }
+      catch { throw new Error("Private-storage expiry check failed."); }
+    }, { timeout: 5000 }).toBe(403);
+    // The signed URL can expire up to a second before the session used to issue it.
+    await expect.poll(async () => (await target.request.get("/api/auth/me")).status()).toBe(401);
+    await load.click();
+    await expect(page.getByText("Review access could not be confirmed.", { exact: false })).toBeVisible();
+    await expect(player).toHaveCount(0);
+  } finally {
+    await page.close();
+  }
+}
+
 function nativeProbePath() {
   const ffprobe = process.env.VIDEO_DURATION_FFPROBE;
   if (!ffprobe) throw new Error("Native ffprobe is required for the video tests.");
@@ -54,7 +91,8 @@ type RecorderCapture = {
 };
 
 test("browser MediaRecorder finalizes before releasing capture tracks and produces a decoded timeline", async ({ db, page, context }, info) => {
-  await identity(db, "MEMBER", context);
+  test.setTimeout(60000);
+  const owner = await identity(db, "MEMBER", context);
   const consent = await page.request.patch("/api/consents/me", { headers: idempotent(), data: {
     expectedVersion: 0, consents: [{ purpose: "VIDEO_STORAGE", granted: true, policyVersion }],
   } });
@@ -114,6 +152,32 @@ test("browser MediaRecorder finalizes before releasing capture tracks and produc
   if (result.status === "measured") {
     expect(result.frameCount).toBeGreaterThanOrEqual(2);
     expect(result.durationMs).toBeGreaterThanOrEqual(500);
+    await page.getByRole("button", { name: "Upload private video", exact: true }).click();
+    await expect(page.getByText("Your private video has been confirmed.", { exact: true })).toBeVisible();
+    const uploaded = await db.video.findFirstOrThrow({ where: { ownerId: owner.id, status: "READY" } });
+    expect(uploaded.durationMs).toBe(result.durationMs);
+    expect(uploaded.durationRetryEtag).toBeNull();
+
+    const playback = await page.request.post(`/api/videos/${uploaded.id}/playback`, { headers: mutation, data: {} });
+    expect(playback.status()).toBe(201);
+    const { url } = await playback.json() as { url: string };
+    const promoted = await fetch(url, { headers: { Range: "bytes=0-0" }, signal: AbortSignal.timeout(5000) })
+      .catch(() => { throw new Error("Could not read promoted synthetic video identity."); });
+    await promoted.body?.cancel();
+    expect(promoted.status).toBe(206);
+    const etag = promoted.headers.get("etag");
+    expect(etag).toBeTruthy();
+
+    // Simulate a missed initial probe while keeping the actual promoted object in MinIO.
+    await db.video.update({ where: { id: uploaded.id }, data: { durationMs: null, durationRetryEtag: etag } });
+    const confirmPath = `/api/videos/${uploaded.id}/confirm`;
+    for (let repeat = 0; repeat < 2; repeat++) {
+      expect((await page.request.post(confirmPath, { headers: mutation, data: {} })).status()).toBe(201);
+      expect(await db.video.findUniqueOrThrow({ where: { id: uploaded.id } }))
+        .toMatchObject({ status: "READY", durationMs: result.durationMs, durationRetryEtag: null });
+    }
+    expect(await db.auditLog.count({ where: { action: "VIDEO_UPLOAD_CONFIRMED", subjectId: uploaded.id } })).toBe(1);
+    expect(await db.auditLog.count({ where: { action: "VIDEO_DURATION_VERIFIED", subjectId: uploaded.id } })).toBe(1);
   }
 });
 
@@ -121,13 +185,14 @@ for (const container of ["mp4", "webm"] as const) test(`reviewer plays synthetic
   test.setTimeout(90000);
   const others = await browser.newContext({ baseURL: origin });
   const staff = await browser.newContext({ baseURL: origin });
+  const ownerContext = await browser.newContext({ baseURL: origin });
   try {
-    const owner = await identity(db, "MEMBER", context);
-    const consent = await page.request.patch("/api/consents/me", { headers: idempotent(), data: {
+    const owner = await identity(db, "MEMBER", ownerContext);
+    const consent = await ownerContext.request.patch("/api/consents/me", { headers: idempotent(), data: {
       expectedVersion: 0, consents: ["VIDEO_STORAGE", "EXPERT_VIDEO_REVIEW"].map(purpose => ({ purpose, granted: true, policyVersion })),
     } });
     expect(consent.status()).toBe(200);
-    const forgedDuration = await page.request.post("/api/videos/upload-intent", { headers: mutation, data: {
+    const forgedDuration = await ownerContext.request.post("/api/videos/upload-intent", { headers: mutation, data: {
       mimeType: "video/webm", sizeBytes: 1024, durationMs: 500,
     } });
     expect(forgedDuration.status()).toBe(400);
@@ -141,7 +206,7 @@ for (const container of ["mp4", "webm"] as const) test(`reviewer plays synthetic
       ...(container === "mp4" ? ["-c:v", "libx264", "-movflags", "frag_keyframe+empty_moov"] : ["-c:v", "libvpx"]),
       "-f", container, "pipe:1",
     ], { timeout: 10000, maxBuffer: 1048576, windowsHide: true, stdio: ["ignore", "pipe", "ignore"] });
-    const intent = await page.request.post("/api/videos/upload-intent", { headers: mutation, data: {
+    const intent = await ownerContext.request.post("/api/videos/upload-intent", { headers: mutation, data: {
       mimeType, sizeBytes: bytes.length,
     } });
     expect(intent.status()).toBe(201);
@@ -151,7 +216,7 @@ for (const container of ["mp4", "webm"] as const) test(`reviewer plays synthetic
       signal: AbortSignal.timeout(10000),
     }).catch(() => { throw new Error("Synthetic video PUT failed."); });
     expect(put.ok).toBe(true);
-    const confirmed = await page.request.post(`/api/videos/${upload.id}/confirm`, { headers: mutation, data: {} });
+    const confirmed = await ownerContext.request.post(`/api/videos/${upload.id}/confirm`, { headers: mutation, data: {} });
     expect(confirmed.status()).toBe(201);
     const video = await db.video.findUniqueOrThrow({ where: { id: upload.id } });
     expect(video.status).toBe("READY");
@@ -171,6 +236,10 @@ for (const container of ["mp4", "webm"] as const) test(`reviewer plays synthetic
     const { assignment } = await assigned.json() as { assignment: { id: string } };
     const api = `/api/expert/assignments/${assignment.id}`;
     const workspace = `/expert/assignments/${assignment.id}/review`;
+    expect((await others.request.get(api + "/draft")).status()).toBe(401);
+    expect((await others.request.post(api + "/playback", { headers: mutation, data: {} })).status()).toBe(401);
+    expect((await ownerContext.request.get(api + "/draft")).status()).toBe(403);
+    expect((await ownerContext.request.post(api + "/playback", { headers: mutation, data: {} })).status()).toBe(403);
     await page.goto(workspace);
     await page.getByRole("button", { name: "Start draft" }).click();
     await expect(page.getByRole("button", { name: "Add observation" })).toBeEnabled();
@@ -208,41 +277,72 @@ for (const container of ["mp4", "webm"] as const) test(`reviewer plays synthetic
       return unsigned.toString();
     });
     expect((await fetch(unsignedObject, { cache: "no-store" })).status).toBe(403);
-    await page.getByRole("button", { name: "Add observation" }).click();
-    await page.getByLabel("Start (ms)").fill("100");
-    await page.getByLabel("End (ms)").fill(String(video.durationMs));
-    await page.getByLabel("Observable evidence").fill("Synthetic movement.");
-    await page.getByLabel("Context").fill("Opening frame.");
-    await expect(page.getByText("Saved version 3")).toBeVisible();
+    const categories = ["EYE", "FACIAL", "BODY", "SPEECH", "CROSS_MODAL"];
+    for (const [index, category] of categories.entries()) {
+      await page.getByRole("button", { name: "Add observation" }).click();
+      const note = page.getByRole("group", { name: `Observation ${index + 1}`, exact: true });
+      await note.getByLabel("Category").selectOption(category);
+      await note.getByLabel("Start (ms)").fill(String(100 + index * 100));
+      await note.getByLabel("End (ms)").fill(String(video.durationMs));
+      await note.getByLabel("Observable evidence").fill(`Synthetic ${category} observation.`);
+      await note.getByLabel("Context").fill("Opening frame.");
+      await expect(page.getByText(`Saved version ${index + 3}`, { exact: true })).toBeVisible();
+    }
     await page.reload();
-    await expect(page.getByLabel("Observable evidence")).toHaveValue("Synthetic movement.");
+    await expect(page.getByLabel("Summary")).toHaveValue("Synthetic recording reviewed.");
+    await expect(page.getByLabel("Category")).toHaveCount(categories.length);
+    for (const [index, category] of categories.entries()) {
+      const note = page.getByRole("group", { name: `Observation ${index + 1}`, exact: true });
+      await expect(note.getByLabel("Category")).toHaveValue(category);
+      await expect(note.getByLabel("Start (ms)")).toHaveValue(String(100 + index * 100));
+      await expect(note.getByLabel("End (ms)")).toHaveValue(String(video.durationMs));
+      await expect(note.getByLabel("Observable evidence")).toHaveValue(`Synthetic ${category} observation.`);
+      await expect(note.getByLabel("Context")).toHaveValue("Opening frame.");
+    }
+    const observationsById = { observations: { orderBy: { id: "asc" as const } } };
     const saved = await db.expertReview.findUniqueOrThrow({ where: { assignmentId: assignment.id },
-      include: { observations: true } });
-    expect(saved.version).toBe(3);
-    expect(saved.observations).toMatchObject([{ startMs: 100, endMs: video.durationMs, observation: "Synthetic movement." }]);
+      include: observationsById });
+    expect(saved.version).toBe(categories.length + 2);
+    expect(saved.observations).toHaveLength(categories.length);
+    expect(saved.observations).toEqual(expect.arrayContaining(categories.map((category, index) =>
+      expect.objectContaining({ category, startMs: 100 + index * 100, endMs: video.durationMs }))));
 
+    if (container === "mp4") await checkPlaybackExpiry(db, others, expert.id, workspace);
     await identity(db, "EXPERT", others);
     expect((await others.request.get(api + "/draft")).status()).toBe(404);
+    expect((await others.request.post(api + "/draft", { headers: mutation, data: {} })).status()).toBe(404);
     expect((await others.request.post(api + "/playback", { headers: mutation, data: {} })).status()).toBe(404);
     const draftApi = `/api/expert/reviews/${saved.id}/draft`;
     const change = { headers: mutation, data: { expectedVersion: saved.version, summary: "Unauthorized edit" } };
     expect((await others.request.patch(draftApi, change)).status()).toBe(404);
-    // Restore the original owner cookie without creating a new owner.
-    const ownerContext = await browser.newContext({ baseURL: origin });
+    const foreignPage = await others.newPage();
     try {
-      const token = randomBytes(32).toString("base64url");
-      await db.session.create({ data: { userId: owner.id, tokenHash: createHash("sha256").update(token).digest("hex"), expiresAt: new Date(Date.now() + 60000) } });
-      await ownerContext.addCookies([{ name: "vera_e2e_session", value: token, url: origin, httpOnly: true }]);
-      const revoke = await ownerContext.request.patch("/api/consents/me", { headers: idempotent(), data: {
-        expectedVersion: 1, consents: [{ purpose: "EXPERT_VIDEO_REVIEW", granted: false }],
-      } });
-      expect(revoke.status()).toBe(200);
-    } finally { await ownerContext.close(); }
+      await foreignPage.goto(workspace);
+      await expect(foreignPage.getByText("Review access could not be confirmed.", { exact: false })).toBeVisible();
+      await expect(foreignPage.getByLabel("Summary")).toHaveCount(0);
+      await expect(foreignPage.getByLabel("Assigned video")).toHaveCount(0);
+    } finally { await foreignPage.close(); }
+    expect((await ownerContext.request.patch(draftApi, change)).status()).toBe(403);
+    await page.getByRole("button", { name: "Load playback" }).click();
+    await expect.poll(() => player.evaluate((element: HTMLVideoElement) => element.readyState)).toBeGreaterThanOrEqual(1);
+    await page.getByRole("button", { name: "Jump to start" }).first().press("Enter");
+    await expect.poll(() => player.evaluate((element: HTMLVideoElement) => element.currentTime)).toBeCloseTo(0.1);
+    const revoke = await ownerContext.request.patch("/api/consents/me", { headers: idempotent(), data: {
+      expectedVersion: 1, consents: [{ purpose: "EXPERT_VIDEO_REVIEW", granted: false }],
+    } });
+    expect(revoke.status()).toBe(200);
+    await page.getByLabel("Summary").fill("Attempted browser edit after withdrawal");
+    await expect(page.getByText("Review access could not be confirmed.", { exact: false })).toBeVisible();
+    await expect(player).toHaveCount(0);
+    await expect(page.getByLabel("Summary")).toHaveCount(0);
+    expect((await page.request.get(api + "/draft")).status()).toBe(403);
+    expect((await page.request.post(api + "/draft", { headers: mutation, data: {} })).status()).toBe(403);
     expect((await page.request.post(api + "/playback", { headers: mutation, data: {} })).status()).toBe(403);
     expect((await page.request.patch(draftApi, change)).status()).toBe(403);
-    expect(await db.expertReview.findUnique({ where: { id: saved.id }, include: { observations: true } })).toEqual(saved);
-    expect(await db.auditLog.count({ where: { action: "EXPERT_DRAFT_SAVED", subjectId: saved.id } })).toBe(2);
-    expect(await db.auditLog.count({ where: { action: "EXPERT_PLAYBACK_ISSUED", subjectId: assignment.id } })).toBe(1);
+    expect(await db.expertReview.findUnique({ where: { id: saved.id }, include: observationsById })).toEqual(saved);
+    expect(await db.auditLog.count({ where: { action: "EXPERT_DRAFT_SAVED", subjectId: saved.id } })).toBe(categories.length + 1);
+    expect(await db.auditLog.count({ where: { action: "EXPERT_PLAYBACK_ISSUED", subjectId: assignment.id } }))
+      .toBe(container === "mp4" ? 3 : 2);
     await page.reload();
     await expect(page.getByText("Review access could not be confirmed.", { exact: false })).toBeVisible();
     await expect(page.getByLabel("Observable evidence")).toHaveCount(0);
@@ -250,5 +350,6 @@ for (const container of ["mp4", "webm"] as const) test(`reviewer plays synthetic
   } finally {
     await staff.close();
     await others.close();
+    await ownerContext.close();
   }
 });

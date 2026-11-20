@@ -51,6 +51,7 @@ function Workspace({ assignmentId }: { assignmentId: string }) {
   const [notesDirty, setNotesDirty] = useState(false);
   const [error, setError] = useState(""), [version, reload] = useState(0);
   const [media, setMedia] = useState<Playback>(), [playbackBusy, setPlaybackBusy] = useState(false);
+  const [playbackNotice, setPlaybackNotice] = useState("");
   const video = useRef<HTMLVideoElement>(null);
   const requests = useRef<AbortController | null>(null);
 
@@ -71,7 +72,7 @@ function Workspace({ assignmentId }: { assignmentId: string }) {
   useEffect(() => {
     const controller = new AbortController();
     requests.current = controller;
-    setBusy(true); setError(""); setMedia(undefined);
+    setBusy(true); setError(""); setMedia(undefined); setPlaybackNotice("");
     void apiJson<DraftResponse>(path + "/draft", { signal: controller.signal }).then(result => {
       if (controller.signal.aborted) return;
       if (!result) throw new Error("Missing draft response.");
@@ -83,7 +84,10 @@ function Workspace({ assignmentId }: { assignmentId: string }) {
 
   useEffect(() => {
     if (!media) return;
-    const timer = window.setTimeout(() => setMedia(undefined), Math.max(0, Date.parse(media.expiresAt) - Date.now()));
+    const timer = window.setTimeout(() => {
+      setMedia(undefined);
+      setPlaybackNotice("Playback expired. Load playback to continue.");
+    }, Math.max(0, Date.parse(media.expiresAt) - Date.now()));
     return () => window.clearTimeout(timer);
   }, [media]);
 
@@ -101,7 +105,7 @@ function Workspace({ assignmentId }: { assignmentId: string }) {
 
   async function playback() {
     const signal = requests.current!.signal;
-    setPlaybackBusy(true); setMedia(undefined);
+    setPlaybackBusy(true); setMedia(undefined); setPlaybackNotice("");
     try {
       const result = await apiJson<Playback>(path + "/playback", { method: "POST", json: {}, signal });
       if (signal.aborted) return;
@@ -111,7 +115,13 @@ function Workspace({ assignmentId }: { assignmentId: string }) {
         (url.protocol !== "https:" && !(url.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname))))
         throw new Error("Invalid playback URL.");
       setMedia(result);
-    } catch (err) { if (!signal.aborted) report(err); }
+    } catch (err) {
+      if (signal.aborted) return;
+      if (err instanceof ApiError && [401, 403, 404].includes(err.status ?? 0)) report(err);
+      else setPlaybackNotice(err instanceof ApiError && err.status === 429
+        ? "Too many playback requests. Wait before retrying."
+        : "Playback is unavailable. Try loading it again.");
+    }
     finally { if (!signal.aborted) setPlaybackBusy(false); }
   }
 
@@ -156,8 +166,12 @@ function Workspace({ assignmentId }: { assignmentId: string }) {
     {data && <>
       <h2>Assigned video</h2>
       <Button disabled={busy || playbackBusy} onClick={() => void playback()}>{media ? "Renew playback" : "Load playback"}</Button>
+      {playbackNotice && <p role="status">{playbackNotice}</p>}
       {media && <video ref={video} aria-label="Assigned video" controls preload="metadata" src={media.url}
-        style={{ width: "100%", maxHeight: "60vh" }} onError={() => setMedia(undefined)} />}
+        style={{ width: "100%", maxHeight: "60vh" }} onError={() => {
+          setMedia(undefined);
+          setPlaybackNotice("The video could not be played. Try loading it again.");
+        }} />}
       {!data.durationMs && <p role="status">Verified duration is unavailable. Timecoded observations cannot be saved.</p>}
       {!data.draft && <Button disabled={busy} onClick={() => void initialize()}>Start draft</Button>}
       {data.draft && form && <fieldset disabled={busy || playbackBusy}>

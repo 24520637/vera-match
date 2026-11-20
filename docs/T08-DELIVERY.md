@@ -1,6 +1,6 @@
 # T08 expert review workspace delivery
 
-Status: **PARTIAL**. The original requirements and six commit subjects are
+Status: **PARTIAL for the current worktree**. The original requirements and six commit subjects are
 preserved in `5deaf06:docs/COMMIT-PLAN.csv`. The workspace follows
 [the expert review workflow](EXPERT-REVIEW-WORKFLOW.md).
 
@@ -12,11 +12,11 @@ implementation SHA without changing its code or tests.
 | Step | Scope and actual delivery | Status |
 | --- | --- | --- |
 | C043 | Reuse the initial migration's ExpertReview and ExpertObservation entities. Add database checks for positive versions and nonnegative, ordered evidence timestamps. | DONE for database foundation |
-| C044 | Private assignment route, playback through C034, expiring video source, timestamps and keyboard-accessible jumps. CI #75 verified signed access and denied anonymous access using native MinIO on desktop and mobile. | DONE for assignment playback acceptance in isolated CI. Production authorization remains blocked. |
-| C045 | Persist all five observation categories. Recording confirmation can now store server-measured duration from decoded frames of the exact promoted MP4/WebM object. Text-only edits preserve existing observations when measurement is unavailable. | PARTIAL pending full upload integration on the new head and release validation |
+| C044 | Private assignment route, C034 playback, expiring video source, timestamp jumps, and explicit playback failure states. CI #90 passed native playback on the starting HEAD. | PARTIAL pending native expiry verification for the worktree changes. |
+| C045 | Persist all five categories and derive duration from decoded video frames. New uploads with a known promotion ETag can recover an unmeasured duration through owner reconfirmation. | PARTIAL pending PostgreSQL and native upload verification for the worktree changes. |
 | C046 | Validate integer milliseconds, order and stored duration. Out-of-range timecodes return 422. Unknown or nonpositive duration blocks new timecoded notes with 503. | DONE for validation contract; verified-duration ingest remains a dependency |
 | C047 | Versioned PATCH autosave; a stale version returns 409. A transaction includes the matching write and audit. | DONE for private draft behavior in the verified test environment |
-| C048 | CI #75 verified real browser/API/PostgreSQL/MinIO reload, reviewer isolation and withdrawal on desktop and mobile. The isolated scenarios seed duration for observation edits. | DONE for isolated draft persistence and reviewer isolation. The upload duration gap is tracked under C045. |
+| C048 | CI #90 passed the existing browser/API/PostgreSQL/MinIO cases with measured duration. The revised cases add all five categories, browser and API isolation, and withdrawal while the workspace is open. | PARTIAL pending native execution of the revised scenarios. |
 
 ## Contract
 
@@ -423,3 +423,47 @@ C045 remains PARTIAL pending a CI rerun on Linux with the patch. T07 READY
 still permits a null duration, and timecoded observation writes require a
 positive server-measured duration. READY-with-null recovery remains an
 unresolved design decision for agreement with Hương.
+
+### Draft PR #22 worktree audit
+
+[CI #90](https://github.com/24520637/vera-match/actions/runs/44588196227)
+passed the native PostgreSQL and private-video jobs on starting HEAD
+`5c6c8f4935bbc693a7cb4ba4ac81a5126a4ba1cc`, which includes the Linux WebM fix.
+
+The additive duration recovery migration stores a server-only retry ETag for
+new promotions with an unmeasured duration. The existing authenticated owner
+confirmation endpoint can consume one additional probe attempt. It verifies
+the original consent generation, uses the immutable playback key and saved
+ETag and size, and commits under the owner lock. A busy or disabled probe
+leaves the retry available. A completed attempt clears it, whether or not
+duration was recovered. Old READY rows have no recovery identity. Deployment
+still requires an isolated, patched FFprobe and the existing production
+reviewer assurance and evidence gates.
+
+The reviewer Playwright suite measures the exact recorded preview and compares
+it with the verified duration stored after browser upload. It then simulates a
+missed initial probe on the database row and checks that owner reconfirmation
+recovers duration from the promoted object in MinIO and writes one recovery
+audit. The PostgreSQL integration test checks the `VIDEO_WITHDRAWN` conflict
+after storage consent withdrawal and regrant.
+
+The private playback scenarios verify storage expiry and browser source removal
+with a short-lived reviewer session, then check that the expired session cannot
+renew playback. They also exercise keyboard timeline seeking, all five
+categories after reload, anonymous and owner API denial, foreign reviewer
+browser and API denial, and an open workspace clearing after a denied edit
+following withdrawal.
+
+The existing `CI` workflow runs API integration, shared UI checks, the native
+FFprobe unit suite, and the desktop and mobile private-video suite. PR #22
+targets `develop`, so a new commit pushed to its source branch starts the
+workflow through `pull_request`. The recorded CI run covers the starting
+commit. The expanded PostgreSQL and private-storage cases still need a
+successful run on the commit that contains these changes.
+
+Local verification passed Prisma validation and generation, the offline
+migration SQL comparison, API and test TypeScript, web TypeScript, both
+production builds, all 277 API unit tests with FFprobe, and all 126 shared UI
+tests. Local discovery included the assignment-access integration suite and
+all eight native video scenarios. The local PostgreSQL listener rejected the
+synthetic CI credentials, and no MinIO listener was available on port 9000.

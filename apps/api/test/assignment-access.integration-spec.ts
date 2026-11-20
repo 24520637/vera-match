@@ -130,7 +130,11 @@ describe("C034 assignment-bound playback / disposable PostgreSQL", () => {
     return { ...seed, path, assignment };
   }
 
-  test.each([900, null])("T08 confirms the promoted object and persists decoder result %s", async measuredDuration => {
+  test.each([
+    { measuredDuration: 900, retryDuration: null },
+    { measuredDuration: null, retryDuration: 900 },
+    { measuredDuration: null, retryDuration: null },
+  ])("T08 persists $measuredDuration and bounds recovery with result $retryDuration", async ({ measuredDuration, retryDuration }) => {
     const seed = await fixture();
     const { owner, expert, video } = seed;
     const storage = app.get(PrivateStorageService);
@@ -155,10 +159,8 @@ describe("C034 assignment-bound playback / disposable PostgreSQL", () => {
       expect(promote).toHaveBeenCalledWith(incoming, video.objectKey, '"incoming"', "video/mp4");
       expect(measure).toHaveBeenCalledWith(video.objectKey, '"promoted"', bytes.length, "video/mp4");
       expect(await db.client.video.findUniqueOrThrow({ where: { id: video.id } }))
-        .toMatchObject({ status: "READY", durationMs: measuredDuration });
-      expect((await confirm({})).status).toBe(201);
-      expect(measure).toHaveBeenCalledTimes(1);
-      expect(await db.client.auditLog.count({ where: { action: "VIDEO_UPLOAD_CONFIRMED", subjectId: video.id } })).toBe(1);
+        .toMatchObject({ status: "READY", durationMs: measuredDuration,
+          durationRetryEtag: measuredDuration === null ? '"promoted"' : null });
 
       const { assignment } = await create(seed);
       const { draft } = await draftJson(await draftRequest(expert.cookie, draftPath(assignment.id), "POST", {}));
@@ -170,9 +172,47 @@ describe("C034 assignment-bound playback / disposable PostgreSQL", () => {
       expect(await db.client.expertObservation.count({ where: { reviewId: draft.id } })).toBe(0);
       const boundary = await edit(900);
       expect(boundary.status).toBe(measuredDuration === null ? 503 : 200);
+      if (measuredDuration === null) {
+        measure.mockResolvedValueOnce(undefined);
+        expect((await confirm({})).status).toBe(201);
+        expect(await db.client.video.findUniqueOrThrow({ where: { id: video.id } }))
+          .toMatchObject({ durationMs: null, durationRetryEtag: '"promoted"' });
+        measure.mockResolvedValue(retryDuration);
+        const retries = await Promise.all([confirm({}), confirm({})]);
+        expect(retries.map(result => result.status)).toEqual([201, 201]);
+        expect(measure).toHaveBeenLastCalledWith(video.objectKey, '"promoted"', bytes.length, "video/mp4");
+        expect((await edit(901)).status).toBe(retryDuration === null ? 503 : 422);
+        expect((await edit(900)).status).toBe(retryDuration === null ? 503 : 200);
+      }
+      expect((await confirm({})).status).toBe(201);
+      expect(measure).toHaveBeenCalledTimes(measuredDuration === null ? 3 : 1);
+      expect(promote).toHaveBeenCalledTimes(1);
+      expect(await db.client.video.findUniqueOrThrow({ where: { id: video.id } }))
+        .toMatchObject({ durationMs: measuredDuration ?? retryDuration, durationRetryEtag: null });
+      expect(await db.client.auditLog.count({ where: { action: "VIDEO_UPLOAD_CONFIRMED", subjectId: video.id } })).toBe(1);
+      expect(await db.client.auditLog.count({ where: { action: "VIDEO_DURATION_VERIFIED", subjectId: video.id } }))
+        .toBe(retryDuration === null ? 0 : 1);
     } finally {
       inspect.mockRestore(); promote.mockRestore(); measure.mockRestore();
     }
+  });
+
+  test("T08 rejects duration recovery after storage withdrawal and regrant", async () => {
+    const { owner, video } = await fixture();
+    const storage = app.get(PrivateStorageService);
+    const measure = jest.spyOn(storage, "measureDuration");
+    await db.client.video.update({ where: { id: video.id }, data: {
+      durationRetryEtag: '"promoted"', sizeBytes: 1024,
+    } });
+    await patchConsent(owner.id, 1, "VIDEO_STORAGE", false);
+    await patchConsent(owner.id, 2, "VIDEO_STORAGE", true);
+    const response = await fetch(`${base}/api/videos/${video.id}/confirm`, {
+      method: "POST", headers: { Cookie: owner.cookie, Origin: origin, "Content-Type": "application/json" }, body: "{}",
+    });
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ code: "VIDEO_WITHDRAWN" });
+    expect(measure).not.toHaveBeenCalled();
+    expect(await db.client.video.findUniqueOrThrow({ where: { id: video.id } })).toMatchObject({ durationMs: null });
   });
 
   test("T08 initializes once and persists all five categories across independent HTTP reads", async () => {
