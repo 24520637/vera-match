@@ -223,13 +223,16 @@ export class VideoService {
           });
         // Never serve the writable incoming key. Conditional copy binds the checked
         // object to the immutable playback key; all owner operations hold User lock.
-        await this.storage.promote(
+        const promotedEtag = await this.storage.promote(
           video.uploadKey,
           video.objectKey,
           object.etag,
           video.mimeType,
         );
-        await tx.video.update({ where: { id }, data: { status: "READY" } });
+        const durationMs = promotedEtag ? await this.storage.measureDuration(
+          video.objectKey, promotedEtag, object.size, video.mimeType,
+        ) : null;
+        await tx.video.update({ where: { id }, data: { status: "READY", durationMs } });
         await tx.auditLog.create({
           data: {
             actorId: ownerId,
