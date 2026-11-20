@@ -9,6 +9,7 @@ import {
 import { randomUUID } from "node:crypto";
 import { ConsentPurpose } from "@prisma/client";
 import { ConsentPolicyRegistry } from "../src/consent/consent.policy";
+import { ExpertApprovalModule } from "../src/expert-admin/expert-approval.module";
 import {
   ExpertApprovalRegistry,
   ExpertEvidenceSource,
@@ -43,6 +44,10 @@ export async function securityMediaHarness() {
   const policyVersion = "synthetic-security-v1",
     training = "synthetic-security-training",
     confidentiality = "synthetic-security-confidentiality";
+  // Queues register separate providers. Approval and playback use these instances.
+  const approval = h.app.select(ExpertApprovalModule);
+  const approvalRegistry = approval.get(ExpertApprovalRegistry, { strict: true });
+  const evidenceSource = approval.get(ExpertEvidenceSource, { strict: true });
   const spies = [
     jest
       .spyOn(h.app.get(ConsentPolicyRegistry), "current")
@@ -54,21 +59,21 @@ export async function securityMediaHarness() {
         testOnly: true,
       })),
     jest
-      .spyOn(h.app.get(ExpertApprovalRegistry), "training")
+      .spyOn(approvalRegistry, "training")
       .mockImplementation((version) =>
         version === training
           ? { version, content: "SYNTHETIC TRAINING" }
           : undefined,
       ),
     jest
-      .spyOn(h.app.get(ExpertApprovalRegistry), "confidentiality")
+      .spyOn(approvalRegistry, "confidentiality")
       .mockImplementation((version) =>
         version === confidentiality
           ? { version, content: "SYNTHETIC CONFIDENTIALITY" }
           : undefined,
       ),
     jest
-      .spyOn(h.app.get(ExpertEvidenceSource), "find")
+      .spyOn(evidenceSource, "find")
       .mockImplementation(async (id) => records.get(id)),
     jest
       .spyOn(h.app.get(ExpertMfaSource), "resolve")
@@ -213,6 +218,8 @@ export async function securityMediaHarness() {
   }
   return {
     ...h,
+    approvalRegistry,
+    evidenceSource,
     bucket,
     records,
     proofs,

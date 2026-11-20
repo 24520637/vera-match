@@ -74,6 +74,7 @@ export function VideoUpload({ onUploaded }: { onUploaded?: () => void }) {
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState(0);
   const [recording, setRecording] = useState(false);
+  const [finalizing, setFinalizing] = useState(false);
   const [cameraPending, setCameraPending] = useState(false);
   const controller = useRef<AbortController | null>(null);
   const activeIntent = useRef<Intent | null>(null);
@@ -96,8 +97,11 @@ export function VideoUpload({ onUploaded }: { onUploaded?: () => void }) {
       alive.current = false;
       ++attempt.current;
       controller.current?.abort();
-      if (recorder.current?.state === "recording") recorder.current.stop();
+      const capture = recorder.current;
+      recorder.current = null;
+      if (capture && capture.state !== "inactive") capture.stop();
       stream.current?.getTracks().forEach((track) => track.stop());
+      stream.current = null;
       if (timer.current) clearTimeout(timer.current);
     };
   }, []);
@@ -126,12 +130,27 @@ export function VideoUpload({ onUploaded }: { onUploaded?: () => void }) {
     setFile(value);
   }
   function stop() {
-    if (recorder.current?.state === "recording") recorder.current.stop();
+    const capture = recorder.current;
+    if (!capture || capture.state === "inactive") return;
+    if (timer.current) clearTimeout(timer.current);
+    setFinalizing(true);
+    // Stopping input tracks here can leave the final WebM chunk incomplete.
+    // The stop event follows the final dataavailable event.
+    capture.stop();
+    timer.current = setTimeout(() => {
+      if (recorder.current !== capture || !alive.current) return;
+      releaseRecording();
+      setError("Recording could not be finalized. Record again or choose a video file.");
+    }, 5000);
+  }
+  function releaseRecording() {
+    recorder.current = null;
     stream.current?.getTracks().forEach((track) => track.stop());
     stream.current = null;
     if (camera.current) camera.current.srcObject = null;
     if (timer.current) clearTimeout(timer.current);
     setRecording(false);
+    setFinalizing(false);
   }
   async function record() {
     if (
@@ -166,12 +185,15 @@ export function VideoUpload({ onUploaded }: { onUploaded?: () => void }) {
       stream.current = media;
       const chunks: BlobPart[] = [];
       let size = 0;
+      let discarded = false;
       const capture = new MediaRecorder(media, { mimeType: mime });
       recorder.current = capture;
       capture.ondataavailable = (event) => {
+        if (discarded || recorder.current !== capture) return;
         size += event.data.size;
         if (size <= MAX_BYTES) chunks.push(event.data);
         else {
+          discarded = true;
           stop();
           if (alive.current)
             setError(
@@ -180,8 +202,9 @@ export function VideoUpload({ onUploaded }: { onUploaded?: () => void }) {
         }
       };
       capture.onstop = () => {
-        media.getTracks().forEach((track) => track.stop());
-        if (alive.current && size <= MAX_BYTES)
+        if (recorder.current !== capture || !alive.current) return;
+        releaseRecording();
+        if (!discarded)
           choose(
             new File(
               chunks,
@@ -191,7 +214,10 @@ export function VideoUpload({ onUploaded }: { onUploaded?: () => void }) {
           );
       };
       capture.onerror = () => {
-        stop();
+        if (recorder.current !== capture || !alive.current) return;
+        discarded = true;
+        if (capture.state !== "inactive") capture.stop();
+        releaseRecording();
         setError("Recording failed. Choose a video file instead.");
       };
       setRecording(true);
@@ -202,6 +228,7 @@ export function VideoUpload({ onUploaded }: { onUploaded?: () => void }) {
         if (camera.current) camera.current.srcObject = media;
       });
     } catch {
+      if (alive.current) releaseRecording();
       setError(
         "Camera or microphone access was unavailable. Choose a video file instead.",
       );
@@ -319,7 +346,7 @@ export function VideoUpload({ onUploaded }: { onUploaded?: () => void }) {
         />
         <FormActions>
           {recording ? (
-            <Button onClick={stop}>Stop recording</Button>
+            <Button onClick={stop} disabled={finalizing}>Stop recording</Button>
           ) : (
             <Button
               variant="secondary"
@@ -333,8 +360,9 @@ export function VideoUpload({ onUploaded }: { onUploaded?: () => void }) {
         {recording && (
           <>
             <p role="status">
-              Recording. Stop when you are finished; recording stops after three
-              minutes.
+              {finalizing
+                ? "Finishing recording…"
+                : "Recording. Stop when you are finished; recording stops after three minutes."}
             </p>
             <video
               ref={camera}

@@ -28,12 +28,16 @@ export class AssignmentAccessService {
     try { return await load(); } catch { unavailable(); }
   }
 
-  async withAuthorizedAssignment<T>(auth: AuthContext, assignmentId: string,
-    action: (tx: Prisma.TransactionClient, access: Readonly<{ assignmentId: string; videoId: string;
-      video: { bucket: string; objectKey: string; mimeType: string }; validateTime: () => Promise<{ now: Date; expiresAt: Date }> }>) => Promise<T>): Promise<T> {
+  requireRuntimeExpert(auth: AuthContext) {
     if (auth.user.role !== "EXPERT") denied();
     // NODE_ENV=test never authorizes real-policy records below. No production MFA source exists.
     if (this.environment.values.nodeEnv !== "test") denied();
+  }
+
+  async withAuthorizedAssignment<T>(auth: AuthContext, assignmentId: string,
+    action: (tx: Prisma.TransactionClient, access: Readonly<{ assignmentId: string; videoId: string;
+      video: { bucket: string; objectKey: string; mimeType: string; durationMs: number | null }; validateTime: () => Promise<{ now: Date; expiresAt: Date }> }>) => Promise<T>): Promise<T> {
+    this.requireRuntimeExpert(auth);
     // Match C033 resource identifiers; validate before any assignment DB lookup.
     if (typeof assignmentId !== "string" || !/^[A-Za-z0-9_-]{1,200}$/.test(assignmentId))
       approvalInvalid("assignmentId", "Send a valid identifier.");
@@ -83,7 +87,7 @@ export class AssignmentAccessService {
         };
         await validateTime();
         return action(tx, Object.freeze({ assignmentId, videoId: video.id,
-          video: { bucket: video.bucket, objectKey: video.objectKey, mimeType: video.mimeType }, validateTime }));
+          video: { bucket: video.bucket, objectKey: video.objectKey, mimeType: video.mimeType, durationMs: video.durationMs }, validateTime }));
       }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted, timeout: 10000 });
     } catch (error) {
       if (error instanceof HttpException) throw error;

@@ -13,7 +13,10 @@ import {
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { randomUUID } from "node:crypto";
+import { isAbsolute } from "node:path";
+import { Readable } from "node:stream";
 import { EnvironmentService } from "../config/environment.service";
+import { probeVideoDuration, VIDEO_PROBE_TIMEOUT_MS } from "./video-duration";
 
 export const PLAYBACK_TTL_SECONDS = 60;
 export const UPLOAD_TTL_SECONDS = 300;
@@ -25,6 +28,8 @@ export const VIDEO_TYPES = ["video/mp4", "video/webm"] as const;
 export class PrivateStorageService {
   readonly bucket: string;
   private readonly client: S3Client;
+  private readonly durationProbe = process.env.VIDEO_DURATION_FFPROBE;
+  private probing = false;
   constructor(environment: EnvironmentService) {
     const config = environment.values.minio;
     this.bucket = config.bucket;
@@ -143,7 +148,7 @@ export class PrivateStorageService {
     etag: string,
     mimeType: string,
   ) {
-    await this.safe(() =>
+    const copy = await this.safe(() =>
       this.client.send(
         new CopyObjectCommand({
           Bucket: this.bucket,
@@ -156,6 +161,31 @@ export class PrivateStorageService {
         }),
       ),
     );
+    return copy.CopyObjectResult?.ETag;
+  }
+  async measureDuration(key: string, etag: string, size: number, mime: string) {
+    // Undefined means no attempt started. A caller can retain its retry in
+    // that case without admitting any additional storage or decoder work.
+    if (!this.durationProbe || !isAbsolute(this.durationProbe) || this.probing) return undefined;
+    this.probing = true;
+    const signal = AbortSignal.timeout(VIDEO_PROBE_TIMEOUT_MS);
+    try {
+      // Only read the promoted object from its server-only key. A writable
+      // incoming URL is never a source of review duration.
+      const response = await this.client.send(new GetObjectCommand({
+        Bucket: this.bucket, Key: key, IfMatch: etag,
+      }), { abortSignal: signal });
+      if (!(response.Body instanceof Readable)) return null;
+      if (response.ETag !== etag || response.ContentLength !== size) {
+        response.Body.destroy();
+        return null;
+      }
+      return await probeVideoDuration(this.durationProbe, response.Body, size, mime, signal);
+    } catch {
+      return null;
+    } finally {
+      this.probing = false;
+    }
   }
   private validatePlaybackTtl(ttl: number) {
     if (!Number.isInteger(ttl) || ttl < 1 || ttl > PLAYBACK_TTL_SECONDS)
