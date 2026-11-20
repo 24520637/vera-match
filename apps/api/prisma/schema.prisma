@@ -299,6 +299,8 @@ model Video {
   mimeType String
   sizeBytes Int?
   durationMs Int?
+  // One retry for READY uploads whose original promoted object is identifiable.
+  durationRetryEtag String?
   status VideoStatus @default(UPLOADING)
   createdAt DateTime @default(now())
   deletedAt DateTime?

@@ -1,6 +1,6 @@
 import { AssignmentCancellationService } from "../src/assignment-cancellation/assignment-cancellation.service";
 import { PrismaService } from "../src/database/prisma.service";
-import { PrismaClient } from "@prisma/client";
+import { Prisma, PrismaClient } from "@prisma/client";
 import { randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { cpSync, mkdirSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
@@ -120,9 +120,11 @@ it("durable scan migration preserves existing C051 cancellation and evidence, in
     schema = "vera_c051_scan_" + randomUUID().replaceAll("-", "");
   const url = new URL(admin.url);
   url.searchParams.set("schema", schema);
-  const client = new PrismaClient({
+  const client = new PrismaClient<Prisma.PrismaClientOptions>({
     datasources: { db: { url: url.toString() } },
     log: [],
+    // Both the fixture update and cancellation reads use the pre-scan Video schema.
+    omit: { video: { durationRetryEtag: true } },
   });
   const temp = mkdtempSync(join(tmpdir(), "vera-c051-scan-")),
     prisma = resolve(__dirname, "../prisma");

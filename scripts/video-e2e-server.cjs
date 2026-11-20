@@ -131,6 +131,13 @@ async function cleanup() {
   const { VideoCleanupService } = require(
     resolve(root, "apps/api/dist/video/video-cleanup.service.js"),
   );
+  const { ExpertApprovalRegistry, ExpertEvidenceSource } = require(
+    resolve(root, "apps/api/dist/expert-admin/expert-approval.sources.js"),
+  );
+  const { ExpertMfaSource } = require(
+    resolve(root, "apps/api/dist/expert-admin/expert-mfa.source.js"),
+  );
+  const { PrismaService } = require(resolve(root, "apps/api/dist/database/prisma.service.js"));
   const { configureApplication } = require(
     resolve(root, "apps/api/dist/configure-app.js"),
   );
@@ -145,6 +152,34 @@ async function cleanup() {
           testOnly: true,
           content: `TEST ONLY - NOT A LEGAL POLICY - ${purpose}`,
         };
+      },
+    })
+    .overrideProvider(ExpertApprovalRegistry)
+    .useValue({
+      training: version => version === "t08-fixture-training" ? { version, content: "Synthetic T08 training" } : undefined,
+      confidentiality: version => version === "t08-fixture-confidentiality" ? { version, content: "Synthetic T08 confidentiality" } : undefined,
+    })
+    .overrideProvider(ExpertEvidenceSource)
+    .useValue({
+      async find(id) {
+        const match = /^t08-(training|confidentiality)-([a-z0-9]{20,40})$/.exec(id);
+        if (!match) return undefined;
+        const user = await app.get(PrismaService).user.findUnique({
+          where: { id: match[2] }, select: { role: true, email: true },
+        });
+        if (user?.role !== "EXPERT" || !user.email.endsWith("@t08.example.invalid")) return undefined;
+        const training = match[1] === "training";
+        return { id, userId: match[2], version: `t08-fixture-${match[1]}`,
+          kind: training ? "TRAINING_COMPLETION" : "CONFIDENTIALITY_ACCEPTANCE",
+          content: "Synthetic T08 evidence", recordedAt: new Date(0), validUntil: null };
+      },
+    })
+    .overrideProvider(ExpertMfaSource)
+    .useValue({
+      async resolve(auth, tx) {
+        const session = await tx.session.findUnique({ where: { id: auth.sessionId }, include: { user: true } });
+        if (session?.userId !== auth.user.id || !session.user.email.endsWith("@t08.example.invalid")) return undefined;
+        return { userId: session.userId, sessionId: session.id, expiresAt: session.expiresAt, testOnly: true };
       },
     })
     .compile();

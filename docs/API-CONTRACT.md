@@ -10,6 +10,20 @@ plus real session-bound staff assurance; its production source is not configured
 ADMIN does not inherit these permissions. Account closure/deletion and actual
 matching/expert block integration are explicitly deferred.
 
+**C035 / PA2 implementation (partial).** The [assignment queue contract](ASSIGNMENT-QUEUES-API.md)
+requires server-derived identity and session-bound staff assurance. Moderator
+queue reads filter by current, unrevoked, unexpired assignment-specific grants
+before pagination and require a successful read audit. Grant/revoke is an internal ADMIN service requiring
+trusted provisioning and MFA. Production gates remain in place and external
+grant administration is pending.
+
+**T08 / C043–C048 implementation.** The [private draft contract](T08-DELIVERY.md#contract)
+uses the C034 assignment authorization transaction for playback and draft access.
+An active, verified assigned EXPERT needs current storage and review consent with
+matching generations, valid qualification and session-bound assurance. Withdrawal,
+cancellation, expiry or qualification loss denies access. Draft writes and their
+minimal audits commit atomically. Submission and QA remain planned.
+
 **C033 implementation:** [Assignment API](ASSIGNMENT-API.md) defines
 `POST /expert-admin/assignments`, review-consent generation binding and durable
 idempotency. It is synthetic-test-only until real staff assurance is integrated.
@@ -22,7 +36,7 @@ mechanism and does not change the existing authentication responses below.
 **Status:** Health/readiness and `/auth/register`, `/auth/verify-email`, `/auth/resend-verification`, `/auth/login`, `/auth/me`, `/auth/logout`, `/auth/logout-all`, `/auth/forgot-password` and `/auth/reset-password` are implemented. Implemented business scope and release gates are defined by the feature notes above and their linked documents; remaining proposed routes are DESIGN ONLY. See `EMAIL-AUTH-SESSIONS.md` and [Authentication recovery](AUTH-RECOVERY.md) for tested details.
 
 API prefix: `/api`. The browser uses a server-issued HttpOnly session cookie. Mutating cookie-authenticated endpoints require CSRF protection. Implemented auth behavior is described below; `{code, message, details?}` is not a guarantee that every framework error has this shape. Auth DTO validation uses `400`, not `422`. Future feature `409` rules are approved MVP contracts, not implemented routes;
-`422` is not introduced by this contract.
+T08 review timecode bounds use `422` as specified below.
 
 **C012 / T02: MVP TECHNICALLY APPROVED; PRE-PRODUCTION GATES OPEN.**
 
@@ -77,7 +91,7 @@ not changes to current auth.
 | GET/PATCH | `/preferences/me`                  | Member                  | Desired ages, relationship goals, hard exclusions                                                         |
 | GET/PATCH | `/consents/me`                     | Member                  | Five separate purposes; default OFF; auditable withdrawal                                                 |
 | POST      | `/videos/upload-intent`            | Member                  | Consent, MIME/size validation; short-lived owner-scoped upload URL                                        |
-| POST      | `/videos/:id/confirm`              | Owner                   | Check actual object metadata; set READY only after verification                                           |
+| POST      | `/videos/:id/confirm`              | Owner                   | Verify object metadata and promote before setting READY. Eligible owner reconfirmation can recover duration from the promoted object. |
 | GET       | `/videos/me`                       | Owner                   | Private metadata list                                                                                     |
 | POST      | `/videos/:id/playback`             | Owner                   | Owner-only playback; expert access uses the assignment-bound route below                                  |
 | DELETE    | `/videos/:id`                      | Owner                   | Revoke owner access, atomically cancel active assignments (C051), and enqueue cleanup                   |
@@ -86,8 +100,10 @@ not changes to current auth.
 | GET       | `/expert/assignments/me`           | Expert                  | C035 own metadata only, server identity, assurance and cursor pagination; see [queue contract](ASSIGNMENT-QUEUES-API.md) |
 | GET       | `/expert-admin/assignments`        | Moderator               | C035 PA2 grant-filtered metadata/status/cursor reader; production assurance/provisioning gates remain; see [contract](ASSIGNMENT-QUEUES-API.md) |
 | GET       | `/expert-admin/assignments/candidate` | Moderator             | C035 known video/expert pair eligibility check; no public directory/search                               |
-| POST      | `/expert/reviews/:id/observations` | Assigned expert         | Time range, category, evidence/context, optimistic version                                                |
-| PATCH     | `/expert/reviews/:id/draft`        | Assigned expert         | Draft-only edit; version check and audit                                                                  |
+| GET       | `/expert/assignments/:id/draft`    | Assigned expert         | T08: return private draft or null with server-owned `durationMs` (nullable), and audit the read without initializing a draft. |
+| POST      | `/expert/assignments/:id/draft`    | Assigned expert         | T08: empty JSON initializes one DRAFT at version 1 per assignment or returns the existing draft. |
+| POST      | `/expert/reviews/:id/observations` | Assigned expert         | T08: append one categorized observation with integer timecodes and context using `expectedVersion` and the verified duration bound. |
+| PATCH     | `/expert/reviews/:id/draft`        | Assigned expert         | T08: versioned draft-only edit with atomic audit. Omitted observations are preserved, and an empty array clears them. Nonempty observation edits require a verified duration. |
 | POST      | `/expert/reviews/:id/submit`       | Assigned expert         | Required summary/limitations; freeze submitted snapshot                                                   |
 | POST      | `/qa/reviews/:id/return`           | Moderator               | Not original author; actionable reason required                                                           |
 | POST      | `/qa/reviews/:id/approve`          | Moderator               | Not original author; enforce independent QA and valid transition                                          |
@@ -101,6 +117,29 @@ not changes to current auth.
 | GET/PATCH | `/moderation/reports`              | Moderator               | Audited access limited to authorized scope                                                                |
 
 ## Contract checks that must be implemented
+
+### T08 video duration
+
+Upload confirmation records a conservative span between decoded frame starts
+when it can probe the exact promoted private MP4/WebM object. The API accepts
+no client duration and ignores container and per-frame duration declarations.
+Unsupported, incomplete, busy, disabled or timed-out probes can leave a READY
+video with `durationMs: null`.
+
+For a READY video with an unmeasured duration and a saved promotion ETag, the
+owner can repeat `POST /videos/:id/confirm` with an empty JSON object. The retry
+uses the immutable playback key, saved ETag and size, and original storage
+consent generation under the owner lock. A busy or disabled probe preserves
+eligibility. A completed attempt consumes it, and successful recovery commits
+the duration and one `VIDEO_DURATION_VERIFIED` audit together. Withdrawal
+invalidates the original generation even after consent is regranted. Earlier
+uploads without recorded promotion identity have no automatic backfill. See
+[Private video](PRIVATE-VIDEO.md#owner-api).
+
+Observation append and nonempty replacement require a positive integer server
+measurement. Missing duration returns `503 REVIEW_DURATION_UNAVAILABLE`, and
+out-of-range timecodes return `422`. A stale `expectedVersion` returns `409`.
+Denied edits make no draft or success audit change.
 
 ### C009 browser transport
 
