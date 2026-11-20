@@ -1,6 +1,5 @@
 import { ServiceUnavailableException } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
-import { ExpertApprovalRegistry, ExpertEvidenceSource } from "../src/expert-admin/expert-approval.sources";
 import { StaffAssuranceSource } from "../src/safety/staff-assurance.source";
 import { AssignmentCancellationWorker } from "../src/assignment-cancellation/assignment-cancellation.worker";
 import { securityMediaHarness, SecurityMediaHarness } from "./security-media-fixtures";
@@ -12,8 +11,8 @@ describe("C053 merged API privacy and atomic audit", () => {
   const canary = "synthetic-provider-diagnostic-canary";
   function fail(kind: "training" | "confidentiality" | "evidence") {
     const failure = new ServiceUnavailableException({ code: "SYNTHETIC_UPSTREAM", message: canary });
-    if (kind === "evidence") (h.app.get(ExpertEvidenceSource).find as jest.Mock).mockRejectedValueOnce(failure);
-    else (h.app.get(ExpertApprovalRegistry)[kind] as jest.Mock).mockImplementationOnce(() => { throw failure; });
+    if (kind === "evidence") (h.evidenceSource.find as jest.Mock).mockRejectedValueOnce(failure);
+    else (h.approvalRegistry[kind] as jest.Mock).mockImplementationOnce(() => { throw failure; });
   }
   for (const operation of ["approval", "assignment"] as const)
     test.each(["training", "confidentiality", "evidence"] as const)(operation + " sanitizes %s provider HttpException", async kind => {
