@@ -21,10 +21,12 @@ import { ReviewDraftService } from "./review-draft.service";
 import { SafetyModule } from "../safety/safety.module";
 import { ReviewQaController } from "./review-qa.controller";
 import { ReviewQaService } from "./review-qa.service";
+import { ReviewOwnerController } from "./review-owner.controller";
+import { ReviewOwnerService } from "./review-owner.service";
 
-@Module({ imports: [AuthModule, DatabaseModule, EnvironmentModule, ConsentModule, VideoModule, SafetyModule], controllers: [ExpertApprovalController, AssignmentController, ExpertPlaybackController, AssignmentDraftController, ReviewDraftController, ReviewQaController],
+@Module({ imports: [AuthModule, DatabaseModule, EnvironmentModule, ConsentModule, VideoModule, SafetyModule], controllers: [ExpertApprovalController, AssignmentController, ExpertPlaybackController, AssignmentDraftController, ReviewDraftController, ReviewQaController, ReviewOwnerController],
   providers: [ExpertApprovalService, ExpertApprovalRegistry, ExpertEvidenceSource, ExpertApprovalRateLimiter, ExpertApprovalRequestGuard, AssignmentService,
-    AssignmentAccessService, ExpertMfaSource, ExpertPlaybackService, ExpertPlaybackLimiter, ExpertPlaybackRequestGuard, ReviewDraftService, ReviewDraftRequestGuard, ReviewQaService] })
+    AssignmentAccessService, ExpertMfaSource, ExpertPlaybackService, ExpertPlaybackLimiter, ExpertPlaybackRequestGuard, ReviewDraftService, ReviewDraftRequestGuard, ReviewQaService, ReviewOwnerService] })
 export class ExpertApprovalModule implements NestModule {
   configure(consumer: MiddlewareConsumer) {
     consumer.apply((_request: Request, response: Response, next: NextFunction) => {
@@ -33,6 +35,6 @@ export class ExpertApprovalModule implements NestModule {
       response.setHeader("Referrer-Policy", "no-referrer");
       response.vary("Cookie");
       next();
-    }).forRoutes(ExpertApprovalController, AssignmentController, ExpertPlaybackController, AssignmentDraftController, ReviewDraftController, ReviewQaController);
+    }).forRoutes(ExpertApprovalController, AssignmentController, ExpertPlaybackController, AssignmentDraftController, ReviewDraftController, ReviewQaController, ReviewOwnerController);
   }
 }

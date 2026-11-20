@@ -1,5 +1,9 @@
 # API contract — VERA Match
 
+**T10 implementation:** [Expert review](EXPERT-REVIEW-WORKFLOW.md#6-t10-implementation) defines
+versioned submit and independent QA decisions, the submitted QA queue, and the
+current video owner's approved-report response.
+
 **C051 implementation:** [Assignment cancellation](ASSIGNMENT-CANCELLATION.md) adds
 transactional cancellation to owner video deletion and a durable, source-bound
 consumer for storage/review withdrawals. It grants no new access or account deletion.
