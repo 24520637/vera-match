@@ -18,8 +18,11 @@ describe("C060 private review HTTP routes", () => {
   const sessions = new Map(Object.entries(tokens).map(([role, token]) => [token, {
     sessionId: role, user: { id: role, role, email: "synthetic@example.invalid", displayName: null },
   }]));
-  const owner = { list: jest.fn(async () => ({ reports: [], nextCursor: null })) };
-  const qa = { approve: jest.fn(async () => ({ status: "APPROVED" })) };
+  const owner = { list: jest.fn(async () => ({ reports: [], nextCursor: null })),
+    saveFeedback: jest.fn(async () => ({ feedback: { revision: 1 } })),
+    updateClaim: jest.fn(async () => ({ claim: { revision: 1 } })), openDispute: jest.fn(async () => ({ dispute: { status: "OPEN" } })) };
+  const qa = { approve: jest.fn(async () => ({ status: "APPROVED" })), listDisputes: jest.fn(async () => ({ disputes: [] })),
+    decideDispute: jest.fn(async () => ({ dispute: { status: "IN_REVIEW" } })) };
   const drafts = { submit: jest.fn(async () => ({ status: "SUBMITTED" })) };
   let app: INestApplication;
   let base: string;
@@ -43,9 +46,9 @@ describe("C060 private review HTTP routes", () => {
 
   afterAll(async () => { await app?.close(); });
 
-  function request(path: string, role?: UserRole, body?: string, extra?: Record<string, string>) {
+  function request(path: string, role?: UserRole, body?: string, extra?: Record<string, string>, method = body === undefined ? "GET" : "POST") {
     return fetch(`${base}/api/${path}`, {
-      method: body === undefined ? "GET" : "POST",
+      method,
       headers: { ...(role ? { Cookie: `test-session=${tokens[role]}` } : {}),
         ...(body === undefined ? {} : { Origin: origin, "Content-Type": "application/json" }), ...extra },
       body,
@@ -78,5 +81,45 @@ describe("C060 private review HTTP routes", () => {
     expect((await request("expert/reviews/r/submit", "EXPERT", body)).status).toBe(200);
     expect(qa.approve).toHaveBeenCalledTimes(1);
     expect(drafts.submit).toHaveBeenCalledTimes(1);
+  });
+
+  it("accepts owner claim mutations only from a member session with the approved origin", async () => {
+    const path = "reviews/claims/claim";
+    const body = '{"action":"SHARE","expectedRevision":1}';
+    expect((await request(path, undefined, body, undefined, "PATCH")).status).toBe(401);
+    expect((await request(path, "MODERATOR", body, undefined, "PATCH")).status).toBe(403);
+    expect((await request(path, "MEMBER", body, { Origin: "https://foreign.invalid" }, "PATCH")).status).toBe(403);
+    const response = await request(path, "MEMBER", body, undefined, "PATCH");
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
+    expect(owner.updateClaim).toHaveBeenCalledTimes(1);
+    expect(owner.updateClaim).toHaveBeenCalledWith(expect.objectContaining({ sessionId: "MEMBER" }), "claim", JSON.parse(body));
+  });
+
+  it("keeps owner dispute creation and scoped moderation on distinct private routes", async () => {
+    const ownerPath = "reviews/review/disputes";
+    const staffPath = "qa/reviews/disputes";
+    expect((await request(ownerPath, "MODERATOR", '{"reason":"Synthetic case"}')).status).toBe(403);
+    expect((await request(ownerPath, "MEMBER", '{"reason":"Synthetic case"}')).status).toBe(201);
+    expect((await request(staffPath, "MEMBER")).status).toBe(403);
+    expect((await request(staffPath + "?after=case", "MODERATOR")).status).toBe(200);
+    const response = await request(staffPath + "/case", "MODERATOR", '{"status":"IN_REVIEW","expectedRevision":0}', undefined, "PATCH");
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
+    expect(owner.openDispute).toHaveBeenCalledTimes(1);
+    expect(qa.listDisputes).toHaveBeenCalledWith(expect.objectContaining({ sessionId: "MODERATOR" }), "case");
+  });
+
+  it("protects evidence feedback with the member session and origin guards", async () => {
+    const path = "reviews/claims/claim/feedback";
+    const body = '{"target":"CONTEXT","note":"The question was about my family.","expectedRevision":0}';
+    expect((await request(path, undefined, body, undefined, "PATCH")).status).toBe(401);
+    expect((await request(path, "MODERATOR", body, undefined, "PATCH")).status).toBe(403);
+    expect((await request(path, "MEMBER", body, { Origin: "https://foreign.invalid" }, "PATCH")).status).toBe(403);
+    const response = await request(path, "MEMBER", body, undefined, "PATCH");
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
+    expect(owner.saveFeedback).toHaveBeenCalledTimes(1);
+    expect(owner.saveFeedback).toHaveBeenCalledWith(expect.objectContaining({ sessionId: "MEMBER" }), "claim", JSON.parse(body));
   });
 });
