@@ -26,8 +26,10 @@ pg_dump/pg_restore, and checks data, all completed migrations, every public FK a
 non-internal trigger, an invalid FK insert, and rejection of deleting that SAFETY audit.
 This does not imply that every AuditLog action is database-immutable.
 
-PASS locally: two successive successful rehearsals, each with 12 migrations,
-42 FKs and 41 triggers restored; source, target and archive removed after each run.
+PASS locally: two successive initial rehearsals on `3a21828` restored 12 migrations,
+42 FKs and 41 triggers. A fresh rehearsal after updating to `8383d65` restored all
+15 migrations, 46 FKs and 48 triggers, including C035 grants and draft invariants.
+Source, target and archive were removed after every successful run.
 An initial rehearsal incorrectly assumed an arbitrary audit action had the SAFETY
 immutability guarantee; the fixture was corrected to exercise the actual contract.
 No application or migration change was needed. CI repeats the real rehearsal.
