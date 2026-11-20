@@ -1,0 +1,8 @@
+.expert-queue { padding-block: var(--space-6, 2rem); }
+.expert-queue__rows { list-style: none; padding: 0; margin-block: 1.5rem; }
+.expert-queue__rows > li { padding-block: 1.25rem; border-bottom: 1px solid var(--color-line); overflow-wrap: anywhere; }
+.expert-queue__rows h3 { margin-block: 0 .75rem; }
+.expert-queue .form-actions { display: flex; flex-wrap: wrap; gap: .75rem; margin-block: 1rem; }
+@media (max-width: 40rem) {
+  .expert-queue .form-actions > .button { width: 100%; }
+}

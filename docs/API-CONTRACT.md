@@ -83,7 +83,9 @@ not changes to current auth.
 | DELETE    | `/videos/:id`                      | Owner                   | Revoke owner access, atomically cancel active assignments (C051), and enqueue cleanup                   |
 | POST      | `/expert-admin/assignments`        | Moderator               | C033: strict DTO, both consents, generation, qualification revision and Idempotency-Key; synthetic only    |
 | POST      | `/expert/assignments/:assignmentId/playback` | Expert | C034 assignment-bound playback; synthetic-only until trusted MFA and approved evidence integrations exist; see [contract](EXPERT-PLAYBACK-API.md) |
-| GET       | `/expert/assignments/me`           | Expert (planned)        | Queue metadata remains unimplemented; not part of C034 playback                                          |
+| GET       | `/expert/assignments/me`           | Expert                  | C035 own metadata only, server identity, assurance and cursor pagination; see [queue contract](ASSIGNMENT-QUEUES-API.md) |
+| GET       | `/expert-admin/assignments`        | Moderator               | C035 PA2 grant-filtered metadata/status/cursor reader; production assurance/provisioning gates remain; see [contract](ASSIGNMENT-QUEUES-API.md) |
+| GET       | `/expert-admin/assignments/candidate` | Moderator             | C035 known video/expert pair eligibility check; no public directory/search                               |
 | POST      | `/expert/reviews/:id/observations` | Assigned expert         | Time range, category, evidence/context, optimistic version                                                |
 | PATCH     | `/expert/reviews/:id/draft`        | Assigned expert         | Draft-only edit; version check and audit                                                                  |
 | POST      | `/expert/reviews/:id/submit`       | Assigned expert         | Required summary/limitations; freeze submitted snapshot                                                   |

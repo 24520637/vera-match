@@ -2,6 +2,46 @@
 
 Each feature needs valid inputs, invalid inputs, unauthorized access, state/race tests, UI feedback states, and audit/revoke behavior when relevant.
 
+## C035 assignment queues and PA2 integration (partial)
+
+PA2 Stage 1 persists assignment-specific moderator grants with mandatory expiry,
+monotonic revisions and append-only lifecycle evidence. The database/migration
+suites use disposable PostgreSQL and cover fresh deployment, upgrade preservation,
+rollback after DDL, deletion evidence, CAS and regrant lifecycle rules.
+
+PA2 Stage 2 provides internal grant/revoke service operations. Authorization
+requires an ACTIVE, verified ADMIN and transaction-bound provisioning/MFA sources;
+missing production providers fail closed. The external grant/revoke HTTP contract
+is not implemented. Stage 3 reads moderator queues only through current,
+unrevoked, unexpired assignment-specific grants, before status filtering and cursor
+pagination. Queue reads are audited and serialized with grant/revoke; responses
+contain only assignment metadata. Creator ownership, wildcard and global access are
+never fallbacks. Production moderator reads return 503
+`MODERATOR_QUEUE_PROVISIONING_UNAVAILABLE` while trusted provisioning is absent.
+The candidate endpoint remains unavailable outside the isolated test environment.
+
+`assignment-grants-database.integration-spec.ts`,
+`assignment-grants-migration.integration-spec.ts`,
+`assignment-grants-service.integration-spec.ts` and
+`moderator-assignment-queue.integration-spec.ts` use synthetic providers and
+UUID-scoped disposable schemas only. They cover role/account/session checks,
+provider outages, expiry, audit rollback, cross-scope pagination, forged scope
+claims and read/revoke lock orderings. Synthetic assurance, provisioning, policy
+and evidence fixtures never establish production access.
+
+The expert and moderator queue UI uses the existing session and API client
+patterns. Browser component tests use HTTP contract mocks, not full-stack browser /
+PostgreSQL E2E. C033 assignment confirmation retains the original payload and
+idempotency key for manual retry. C051 cancellation and its migrations are
+integrated from develop; C034 playback authorization and the merged timezone
+regression fix are integrated. C051 tests cover owner deletion, consent withdrawal,
+queue metadata, grant evidence retention and playback denial after cancellation.
+
+C035 remains **PARTIAL**. Production trusted ADMIN provisioning, real
+session-bound MFA and approved evidence providers are unavailable; the external
+grant/revoke HTTP contract and full-stack queue E2E remain open. C050 review
+editing/submission and Safety Report moderation are outside this feature. Do not
+claim production readiness or weaken the default-deny gates.
 ## C036 - cancellation and reassignment race acceptance
 
 Plan-Step: C036. Ticket: T06. Planned subject:
