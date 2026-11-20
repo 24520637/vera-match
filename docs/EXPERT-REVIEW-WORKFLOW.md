@@ -1,6 +1,10 @@
 # Expert-led video review — workflow and interface specification
 
-**Implementation status:** PLANNED. Human reviewers perform and document assessments through the VERA Match application. No pretrained personality model performs the analysis.
+**Implementation status:** PARTIAL. T08 implements the assigned workspace and private draft lifecycle. See [T08 delivery and verification](T08-DELIVERY.md). Submission, QA, member reports, and claims remain separate. Human reviewers perform and document assessments through the VERA Match application. No pretrained personality model performs the analysis.
+
+Server-owned video duration gates timecoded observation edits. When the media
+ingest path cannot verify duration, reviewers can save text-only changes while
+preserving existing observations.
 
 ## 1. Participants and safeguards
 

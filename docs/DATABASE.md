@@ -5,6 +5,57 @@
 > and adds incremental migrations only for verified gaps. Never recreate the
 > initial migration. Production security/data-lifecycle approval remains separate.
 
+## C035 PA2 persistence and reader
+
+Migration `20261118120000_assignment_moderator_grants` adds explicit per-assignment
+metadata scope. It backfills no authority and changes no C031-C034 lifecycle.
+`AssignmentModeratorScope` is unique by retained assignment ID and opaque moderator
+subject, with independent revision/CAS and a nullable current lifecycle pointer.
+`AssignmentModeratorGrantEvent` is append-only: GRANTED starts a new UUID lifecycle;
+REVOKED refers to that original grant. Every event has mandatory finite expiresAt
+(TIMESTAMPTZ(3)); grants must expire after actual PostgreSQL insertion time. Audit
+recording time is always database-owned. Revocation retains the original expiry,
+even when it has passed. A valid grant must be revoked before replacement; after
+expiry a new lifecycle may replace its pointer. Old lifecycles can never be rebound.
+
+Scope changes advance revision exactly once and require matching events in the
+same transaction via database-owned witnesses and deferred constraints. The current
+pointer FK is deferred so state and history can be written atomically. Standalone
+DELETE/TRUNCATE cannot reset scope revisions; events cannot be changed or removed.
+Services must still use expectedRevision CAS and the agreed global lock order.
+
+Scopes reference ExpertAssignmentIdentity, not the cascading live assignment.
+Moderator subjects are retained opaque UUIDs, resolved from the existing live
+ExpertActorIdentity only by a future trusted service. User/Video deletion preserves
+history; loss of the live mapping gives no authority and a new account subject
+cannot inherit old grants. No retention period or production erasure policy is
+approved by this stage. These models do not establish ADMIN provisioning or MFA.
+
+Stage 1 implements persistence tests. Stage 2 adds an internal grant/revoke service
+with exact ADMIN authorization boundaries, revision CAS and atomic success audit.
+Stage 3 adds grant-filtered moderator queue reads with atomic minimal read audit.
+External grant mutation DTOs and HTTP idempotency remain future integration work;
+no proposed route is an approved or implemented external contract. Moderator queue
+uses valid per-assignment grants, not creator identity. Empty membership is an empty
+queue. Default trusted provisioning/MFA sources remain unavailable; explicit
+production gates still prevent real-data authorization.
+
+The service never changes these Stage 1 tables/triggers. Trusted provisioning and
+session-bound MFA providers default-deny; synthetic proofs are test-only. Mutation
+evidence retains an opaque actor subject, server provisioning reference and MFA
+verification/expiry times, not tokens or raw private data. Mandatory expiry and
+fresh PostgreSQL time remain authoritative. Missing scopes use virtual revision 0;
+revocation removes only the explicitly identified current lifecycle. No HTTP
+idempotency or automatic retry is implied by the internal CAS service.
+
+Queue readers serialize with grant/revoke through the same moderator User lock,
+then Session, and join only the current live identity/current unrevoked grant.
+PostgreSQL expiry filters apply before status/cursor pagination; a fresh post-audit
+clock prevents returning selected grants that expired during the audit. Reads do
+not change scope/assignment revisions or create missing identities. Deleted/recreated
+accounts cannot inherit retained opaque scope evidence. No schema/migration changes
+are needed in Stage 3, and no C050/C051 behavior is added.
+
 | Area | Models | Why they exist |
 | --- | --- | --- |
 | Identity and sessions | `User`, `Session`, `EmailVerificationToken`, `PasswordResetToken` | Verified email, account status, token hashes, session revocation |
