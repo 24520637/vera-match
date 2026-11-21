@@ -62,7 +62,7 @@ are needed in Stage 3, and no C050/C051 behavior is added.
 | Member data | `Profile`, `MatchPreference`, `QuestionnaireAnswer`, `Consent` | Member attributes, versioned answers, five privacy purposes |
 | Private media | `Video` | Object metadata and authorization state, not video bytes |
 | Expert review | `ExpertAssignment`, `ExpertReview`, `ExpertObservation` | Assigned jobs, drafts, timestamps, QA/version tracking |
-| Claims and disputes | `ReviewClaim`, `ReviewDispute` | Factual claim approval, owner permission/withdrawal and feedback |
+| Claims and disputes | `ReviewClaim`, `ReviewClaimFeedback`, `ReviewDispute` | Factual claim approval, owner permission and withdrawal, private evidence annotations, and dispute decisions |
 | Connections | `MatchPair`, `MatchDecision` | Canonical pairs and both users' decisions |
 | Trust and safety | `Block`, `Report`, `AuditLog` | Blocking, member reports, scoped moderation, redacted audit data |
 

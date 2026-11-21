@@ -53,6 +53,18 @@ PostgreSQL and native MinIO/browser scenarios, including duration recovery and
 expiry, still need a passing run on the revision containing those changes.
 See [T08 delivery verification](T08-DELIVERY.md#draft-pr-22-worktree-audit).
 
+## T10 submission, QA, and member reports (C055–C060)
+
+- In `assignment-access.integration-spec.ts`, verify submission locks editing
+  and playback, an independent moderator with a current assignment grant can
+  return or approve, returned feedback reaches the assigned expert, and only
+  the source owner can read the approved report after resubmission.
+- Exercise concurrent decisions, audit failure rollback, grant revocation, and
+  consent withdrawal followed by regrant. Verify source deletion removes live
+  QA details while retaining immutable decision evidence.
+- Run `assignment-cancellation-migration.integration-spec.ts` to verify the
+  C051 regression with the complete T08 and T10 migration chain.
+
 ## C035 assignment queues and PA2 integration (partial)
 
 PA2 Stage 1 persists assignment-specific moderator grants with mandatory expiry,

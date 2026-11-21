@@ -23,6 +23,7 @@ export function MemberSettingsNav() {
         </Link>
       ))}
       <Link href="/account/videos">Your videos</Link>
+      <Link href="/account/reviews">Your review reports</Link>
       <Link href="/account/safety">Safety choices</Link>
     </nav>
   );

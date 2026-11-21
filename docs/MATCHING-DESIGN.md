@@ -11,6 +11,11 @@
 7. Generate explanations only from fields the member has permitted to share. Never disclose private reports or raw expert observations.
 8. Support authenticated `ACCEPT`/`DECLINE` decisions from both sides; create a mutual connection only when both accept. Blocking or consent withdrawal must remove or invalidate ineligible recommendations promptly.
 
+T14 can consume T12 facts through `readMatchingClaimsInTransaction` under the
+matching transaction's participant locks. Claim eligibility includes current
+source consent and excludes claims affected by an active or upheld dispute.
+See [T12 claims and disputes](EXPERT-REVIEW-WORKFLOW.md#7-t12-claims-and-disputes).
+
 ## Essential tests
 
 - A satisfies B's conditions, but B does not satisfy A's → reject the pair.

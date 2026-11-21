@@ -8,6 +8,9 @@ import { Prisma } from "@prisma/client";
 import { PrismaService } from "../database/prisma.service";
 import { EnvironmentService } from "../config/environment.service";
 import { AssignmentCancellationService } from "./assignment-cancellation.service";
+import { sourceUnavailableDisputes } from "./review-dispute-source-closure";
+
+type Lane = "withdrawal" | "deleted-video" | "review-dispute-source";
 
 @Injectable()
 export class AssignmentCancellationWorker
@@ -55,7 +58,7 @@ export class AssignmentCancellationWorker
    * taking domain locks; crashed/failed batches remain eligible on the next lap.
    * A fixed upper bound ensures continuous arrivals cannot postpone that lap.
    */
-  private nextBatch(lane: "withdrawal" | "deleted-video") {
+  private nextBatch(lane: Lane) {
     return this.prisma.$transaction(
       async (tx) => {
         await tx.$executeRaw`INSERT INTO "AssignmentCancellationScan" (lane)
@@ -94,7 +97,8 @@ export class AssignmentCancellationWorker
       { timeout: 10000 },
     );
   }
-  private pending(lane: "withdrawal" | "deleted-video") {
+  private pending(lane: Lane) {
+    if (lane === "review-dispute-source") return sourceUnavailableDisputes();
     return lane === "withdrawal"
       ? Prisma.sql`SELECT t.id::text COLLATE "C" AS id, t."createdAt" AS "queuedAt"
           FROM "ConsentWithdrawalTask" t
@@ -107,19 +111,20 @@ export class AssignmentCancellationWorker
   }
   /** Aggregates only: no source IDs, SQL exceptions or media/account payloads. */
   private async observeBacklog() {
-    const summary = (lane: "withdrawal" | "deleted-video") => Prisma.sql`
+    const summary = (lane: Lane) => Prisma.sql`
       SELECT ${lane}::text AS lane, count(*)::double precision AS pending,
         GREATEST(0,COALESCE(FLOOR(EXTRACT(EPOCH FROM
           ((clock_timestamp() AT TIME ZONE 'UTC') - min("queuedAt")))),0))::double precision AS "oldestSeconds"
       FROM (${this.pending(lane)}) pending`;
     const rows = await this.prisma.$queryRaw<
       {
-        lane: "withdrawal" | "deleted-video";
+        lane: Lane;
         pending: number;
         oldestSeconds: number;
       }[]
     >(
-      Prisma.sql`${summary("withdrawal")} UNION ALL ${summary("deleted-video")}`,
+      Prisma.sql`${summary("withdrawal")} UNION ALL ${summary("deleted-video")}
+        UNION ALL ${summary("review-dispute-source")}`,
     );
     const withdrawal = rows.find((r) => r.lane === "withdrawal")!,
       deleted = rows.find((r) => r.lane === "deleted-video")!;
@@ -155,6 +160,13 @@ export class AssignmentCancellationWorker
     for (const video of videos)
       try {
         await this.cancellation.processDeletedVideo(video.id);
+      } catch {
+        retry = true;
+      }
+    const disputes = await this.nextBatch("review-dispute-source");
+    for (const dispute of disputes)
+      try {
+        await this.cancellation.processSourceUnavailableDispute(dispute.id);
       } catch {
         retry = true;
       }
