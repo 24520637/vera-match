@@ -1,5 +1,9 @@
 # API contract — VERA Match
 
+**T10 implementation:** [Expert review](EXPERT-REVIEW-WORKFLOW.md#6-t10-implementation) defines
+versioned submit and independent QA decisions, the submitted QA queue, and the
+current video owner's approved-report response.
+
 **C051 implementation:** [Assignment cancellation](ASSIGNMENT-CANCELLATION.md) adds
 transactional cancellation to owner video deletion and a durable, source-bound
 consumer for storage/review withdrawals. It grants no new access or account deletion.
@@ -22,7 +26,8 @@ uses the C034 assignment authorization transaction for playback and draft access
 An active, verified assigned EXPERT needs current storage and review consent with
 matching generations, valid qualification and session-bound assurance. Withdrawal,
 cancellation, expiry or qualification loss denies access. Draft writes and their
-minimal audits commit atomically. Submission and QA remain planned.
+minimal audits commit atomically. T10 extends the workspace with submission,
+QA return and resubmission, and an approved review receipt.
 
 **C033 implementation:** [Assignment API](ASSIGNMENT-API.md) defines
 `POST /expert-admin/assignments`, review-consent generation binding and durable
@@ -100,13 +105,15 @@ not changes to current auth.
 | GET       | `/expert/assignments/me`           | Expert                  | C035 own metadata only, server identity, assurance and cursor pagination; see [queue contract](ASSIGNMENT-QUEUES-API.md) |
 | GET       | `/expert-admin/assignments`        | Moderator               | C035 PA2 grant-filtered metadata/status/cursor reader; production assurance/provisioning gates remain; see [contract](ASSIGNMENT-QUEUES-API.md) |
 | GET       | `/expert-admin/assignments/candidate` | Moderator             | C035 known video/expert pair eligibility check; no public directory/search                               |
-| GET       | `/expert/assignments/:id/draft`    | Assigned expert         | T08: return private draft or null with server-owned `durationMs` (nullable), and audit the read without initializing a draft. |
-| POST      | `/expert/assignments/:id/draft`    | Assigned expert         | T08: empty JSON initializes one DRAFT at version 1 per assignment or returns the existing draft. |
+| GET       | `/expert/assignments/:id/draft`    | Assigned expert         | Audit the private draft read without initializing a draft. Return the draft or null with nullable, server-owned `durationMs`, or the submitted or approved receipt while the editor is locked. |
+| POST      | `/expert/assignments/:id/draft`    | Assigned expert         | Empty JSON initializes one DRAFT at version 1 per assignment or returns the existing editable review. A locked submission returns `409`. |
 | POST      | `/expert/reviews/:id/observations` | Assigned expert         | T08: append one categorized observation with integer timecodes and context using `expectedVersion` and the verified duration bound. |
-| PATCH     | `/expert/reviews/:id/draft`        | Assigned expert         | T08: versioned draft-only edit with atomic audit. Omitted observations are preserved, and an empty array clears them. Nonempty observation edits require a verified duration. |
+| PATCH     | `/expert/reviews/:id/draft`        | Assigned expert         | Versioned DRAFT or RETURNED edit with atomic audit. Omitted observations are preserved, and an empty array clears them. Nonempty observation edits require a verified duration. |
 | POST      | `/expert/reviews/:id/submit`       | Assigned expert         | Required summary/limitations; freeze submitted snapshot                                                   |
-| POST      | `/qa/reviews/:id/return`           | Moderator               | Not original author; actionable reason required                                                           |
-| POST      | `/qa/reviews/:id/approve`          | Moderator               | Not original author; enforce independent QA and valid transition                                          |
+| GET       | `/qa/reviews`                      | Scoped moderator       | Submitted queue with session-bound MFA, current assignment grants, and optional `after` cursor            |
+| GET       | `/qa/reviews/:id`                  | Scoped moderator       | Submitted version with private evidence for independent QA                                               |
+| POST      | `/qa/reviews/:id/return`           | Scoped moderator       | Independent QA, current assignment grant, and actionable reason                                          |
+| POST      | `/qa/reviews/:id/approve`          | Scoped moderator       | Independent QA, current assignment grant, and valid transition                                           |
 | GET       | `/reviews/me`                      | Owner                   | Only QA-approved reports for the caller                                                                   |
 | POST      | `/reviews/:id/disputes`            | Owner                   | Reason, dispute status and audit                                                                          |
 | PATCH     | `/reviews/claims/:id`              | Owner                   | Granular confirmation, share permission, withdrawal                                                       |

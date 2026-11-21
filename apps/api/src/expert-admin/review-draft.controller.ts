@@ -19,10 +19,11 @@ export class ReviewDraftRequestGuard implements CanActivate {
       throw new ForbiddenException({ code: "ORIGIN_DENIED", message: "This request origin is not allowed." });
     if (request.method !== "GET" && !request.is("application/json"))
       throw new HttpException({ code: "JSON_REQUIRED", message: "Send a JSON request." }, 415);
-    if (Object.keys(request.query).length)
+    const path = request.path.toLowerCase().replace(/\/$/, "");
+    if (Object.keys(request.query).length && !(request.method === "GET" && ["/api/qa/reviews", "/api/reviews/me"].includes(path)))
       throw new HttpException({ code: "INVALID_REQUEST", message: "Query parameters are not supported." }, 400);
-    this.limiter.consume("review-draft:ip", request.socket.remoteAddress ?? "unknown", 600, 60000);
-    this.limiter.consume("review-draft:expert", request.auth!.user.id, 60, 60000);
+    this.limiter.consume("review:ip", request.socket.remoteAddress ?? "unknown", 600, 60000);
+    this.limiter.consume("review:" + request.auth!.user.role, request.auth!.user.id, 60, 60000);
     return true;
   }
 }
@@ -61,5 +62,11 @@ export class ReviewDraftController {
   @HttpCode(200)
   append(@Req() request: AuthenticatedRequest, @Param("id") id: string, @Body() body: unknown) {
     return this.drafts.save(request.auth!, id, body, true);
+  }
+
+  @Post(":id/submit")
+  @HttpCode(200)
+  submit(@Req() request: AuthenticatedRequest, @Param("id") id: string, @Body() body: unknown) {
+    return this.drafts.submit(request.auth!, id, body);
   }
 }

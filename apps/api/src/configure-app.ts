@@ -15,7 +15,9 @@ export function configureApplication(app: INestApplication) {
   });
   app.use((request: Request, response: Response, next: NextFunction) => {
     // Before body parsing: malformed JSON denials must also remain private.
-    if (request.path.startsWith("/api/expert/assignments") || request.path.startsWith("/api/expert/reviews")) {
+    const path = request.path.toLowerCase();
+    if (["/api/expert/assignments", "/api/expert/reviews", "/api/qa/reviews", "/api/reviews"]
+      .some(prefix => path === prefix || path.startsWith(prefix + "/"))) {
       response.setHeader("Cache-Control", "private, no-store");
       response.setHeader("Referrer-Policy", "no-referrer");
       response.vary("Cookie");

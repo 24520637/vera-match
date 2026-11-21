@@ -386,6 +386,7 @@ model ExpertAssignmentIdentity {
   assignmentId String @id
   receipts AssignmentIdempotency[]
   moderatorScopes AssignmentModeratorScope[]
+  reviewDecisionEvidence ReviewDecisionEvidence[]
 }
 
 // PA2 persistence only. Live moderator identity resolves through ExpertActorIdentity;
@@ -530,11 +531,34 @@ model ExpertReview {
   qaAt DateTime?
   qaFeedback String? @db.Text
   observations ExpertObservation[]
+  decisions ReviewDecision[]
   claims ReviewClaim[]
   disputes ReviewDispute[]
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
+model ReviewDecision {
+  reviewId String
+  review ExpertReview @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+  version Int
+  status ReviewStatus
+  moderatorId String
+  reason String? @db.Text
+  decidedAt DateTime
+  @@id([reviewId, version])
+}
+
+model ReviewDecisionEvidence {
+  assignmentId String
+  assignmentIdentity ExpertAssignmentIdentity @relation(fields: [assignmentId], references: [assignmentId], onDelete: Restrict, onUpdate: NoAction)
+  reviewId String
+  version Int
+  status ReviewStatus
+  moderatorSubjectId String? @db.Uuid
+  decidedAt DateTime
+  @@id([assignmentId, reviewId, version])
+}
+
 model ExpertObservation {
   id String @id @default(cuid())
   reviewId String
