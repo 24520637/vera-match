@@ -195,4 +195,48 @@ describe("C053 merged API privacy and atomic audit", () => {
     expect((await h.db.client.expertAssignment.findUniqueOrThrow({ where: { id: f.id } })).status).toBe("CANCELLED");
     expect(await h.db.client.assignmentEvent.count({ where: { assignmentId: f.id } })).toBe(before);
   });
+  test.each(["review withdrawal", "storage withdrawal", "owner deletion"] as const)(
+    "concurrent submit and %s keep one audit chain and never restore old access", async operation => {
+      const f = await h.fixture();
+      const draftPath = "expert/assignments/" + f.id + "/draft";
+      expect((await h.request(f.expert.cookie, draftPath, {})).status).toBe(200);
+      const draft = await h.db.client.expertReview.findUniqueOrThrow({ where: { assignmentId: f.id } });
+      const summary = "Synthetic concurrent submission private summary.";
+      // No observations: this test does not seed or pretend to verify media duration.
+      expect((await h.request(f.expert.cookie, "expert/reviews/" + draft.id + "/draft", {
+        expectedVersion: 1, summary, limitations: "Synthetic privacy race fixture only.",
+      }, "PATCH")).status).toBe(200);
+      const submit = () => h.request(f.expert.cookie, "expert/reviews/" + draft.id + "/submit", { expectedVersion: 2 });
+      const closeAccess = async () => {
+        if (operation === "owner deletion") {
+          expect((await h.request(f.owner.cookie, "videos/" + f.videoId, undefined, "DELETE")).status).toBe(202);
+        } else {
+          await h.consent(f.owner, 2, operation === "review withdrawal" ? "EXPERT_VIDEO_REVIEW" : "VIDEO_STORAGE", false);
+        }
+      };
+      const [first, retry] = await Promise.all([submit(), submit(), closeAccess()]);
+      const statuses = [first.status, retry.status];
+      for (const status of statuses) expect([200, 403, 404]).toContain(status);
+      await h.app.get(AssignmentCancellationWorker).runOnce();
+      const row = await h.db.client.expertAssignment.findUniqueOrThrow({ where: { id: f.id } });
+      expect(row.status).toBe("CANCELLED");
+      const cancellations = await h.db.client.assignmentEvent.findMany({ where: { assignmentId: f.id, toStatus: "CANCELLED" } });
+      expect(cancellations).toHaveLength(1);
+      expect(cancellations[0].revision).toBe(row.revision);
+      const submitted = await h.db.client.auditLog.findMany({ where: { action: "EXPERT_REVIEW_SUBMITTED", subjectId: draft.id } });
+      expect(submitted).toHaveLength(statuses.includes(200) ? 1 : 0);
+      if (operation !== "owner deletion")
+        await h.consent(f.owner, 3, operation === "review withdrawal" ? "EXPERT_VIDEO_REVIEW" : "VIDEO_STORAGE", true);
+      const before = await h.db.client.auditLog.count();
+      expect([403, 404]).toContain((await submit()).status);
+      expect([403, 404]).toContain((await h.play(f.expert.cookie, f.id)).status);
+      await Promise.all([h.app.get(AssignmentCancellationWorker).runOnce(), h.app.get(AssignmentCancellationWorker).runOnce()]);
+      expect(await h.db.client.auditLog.count()).toBe(before);
+      expect(await h.db.client.assignmentEvent.count({ where: { assignmentId: f.id, toStatus: "CANCELLED" } })).toBe(1);
+      const audit = JSON.stringify(await h.db.client.auditLog.findMany());
+      expect(audit).not.toContain(summary);
+      expect(audit).not.toContain(f.expert.token);
+      expect(audit).not.toContain((await h.db.client.video.findUniqueOrThrow({ where: { id: f.videoId } })).objectKey);
+    });
+
 });
