@@ -39,6 +39,16 @@ describe("auth request safety", () => {
       "Too many attempts",
     );
   });
+  it("charges shared and member buckets together and leaves both intact on rejection", () => {
+    const limiter = new AuthRateLimiter();
+    const ip = { scope: "matching:ip", identity: "proxy", limit: 2 };
+    const member = (identity: string) => ({ scope: "matching:read", identity, limit: 1 });
+    limiter.consumeAll(ip, member("a"));
+    expect(() => limiter.consumeAll(ip, member("a"))).toThrow(AuthRateLimitException);
+    expect(() => limiter.consumeAll(ip, member("b"))).not.toThrow();
+    expect(() => limiter.consumeAll(ip, member("c"))).toThrow(AuthRateLimitException);
+    expect(() => limiter.consumeAll({ ...ip, identity: "other-proxy" }, member("c"))).not.toThrow();
+  });
   it("reports rounded remaining time and opens a new window only after expiry", () => {
     const clock = jest.spyOn(Date, "now").mockReturnValue(1000);
     try {

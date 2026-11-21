@@ -140,12 +140,15 @@ not changes to current auth.
 All three routes require a valid session cookie for an `ACTIVE`, email-verified
 account with role `MEMBER`. The server takes the caller identity from the
 session and rechecks the account, role and session in the matching transaction.
+Matching uses `READ COMMITTED` so checks after a participant lock wait see
+restrictions committed by the preceding writer.
 Responses carry `Cache-Control: private, no-store`, `Vary: Cookie`, and
 `Referrer-Policy: no-referrer`.
 
 Rate limits apply per API process in a one-minute window. The two GET routes
 share 60 requests per member. POST has a separate limit of 30 per member.
-All three routes share a limit of 300 per socket IP. A `429` response includes
+All three routes share a limit of 300 per socket IP. The guard charges both
+counters only when both quotas allow the request. A `429` response includes
 `Retry-After`, which CORS exposes, and `{ code: "RATE_LIMITED", message,
 retryAfterSeconds }`. `Retry-After` and `retryAfterSeconds` report the same
 integer number of seconds.

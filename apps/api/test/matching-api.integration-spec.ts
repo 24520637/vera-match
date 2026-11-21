@@ -1,7 +1,8 @@
 import type { INestApplication } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
-import type { ConsentPurpose, UserRole } from "@prisma/client";
+import { Prisma, PrismaClient, type ConsentPurpose, type UserRole } from "@prisma/client";
 import { randomBytes, randomUUID } from "node:crypto";
+import { createServer, request } from "node:http";
 import { AppModule } from "../src/app.module";
 import { hashSessionToken } from "../src/auth/session-token";
 import { configureApplication } from "../src/configure-app";
@@ -20,13 +21,13 @@ describe("T14 real matching HTTP and PostgreSQL", () => {
   let app: INestApplication;
   let db: Awaited<ReturnType<typeof createAuthDatabase>>;
   let base: string;
+  let configuredClient: PrismaClient | undefined;
 
-  beforeEach(async () => {
-    db = await createAuthDatabase();
+  async function startApi(client: PrismaClient) {
     const values = parseEnvironment({ ...process.env, NODE_ENV: "test", DATABASE_URL: db.url,
       CORS_ORIGIN: origin, MINIO_ROOT_USER: "synthetic-test", MINIO_ROOT_PASSWORD: "synthetic-test-only" });
     const module = await Test.createTestingModule({ imports: [AppModule] })
-      .overrideProvider(PrismaService).useValue(db.client)
+      .overrideProvider(PrismaService).useValue(client)
       .overrideProvider(EnvironmentService).useValue({ values })
       .overrideProvider(ConsentPolicyRegistry).useValue({ current: (purpose: ConsentPurpose) => ({
         purpose, policyVersion, locale: "en-test", content: "Synthetic matching test only.", testOnly: true,
@@ -35,10 +36,18 @@ describe("T14 real matching HTTP and PostgreSQL", () => {
     configureApplication(app);
     await app.listen(0, "127.0.0.1");
     base = await app.getUrl();
+  }
+
+  beforeEach(async () => {
+    db = await createAuthDatabase();
+    await startApi(db.client);
   }, 60_000);
 
   afterEach(async () => {
-    try { await app?.close(); } finally { await db?.close(); }
+    try { await app?.close(); } finally {
+      try { await configuredClient?.$disconnect(); } finally { await db?.close(); }
+      configuredClient = undefined;
+    }
   });
 
   function api(path: string, actor?: Actor, init: RequestInit = {}) {
@@ -69,6 +78,13 @@ describe("T14 real matching HTTP and PostgreSQL", () => {
     const actor = { id, token };
     if (granted) await consent(actor, true, 0);
     return actor;
+  }
+
+  async function newSession(actor: Actor): Promise<Actor> {
+    const token = randomBytes(32).toString("base64url");
+    await db.client.session.create({ data: { userId: actor.id, tokenHash: hashSessionToken(token),
+      expiresAt: new Date(Date.now() + 600_000) } });
+    return { id: actor.id, token };
   }
   async function recommendation(actor: Actor) {
     const response = await api("matches/recommendations", actor);
@@ -133,6 +149,42 @@ describe("T14 real matching HTTP and PostgreSQL", () => {
     expect(await db.client.matchDecision.count()).toBe(0);
   });
 
+  it("does not charge rejected member requests to the shared proxy quota", async () => {
+    const a = await user();
+    const b = await user();
+    const bHandle = await recommendation(b);
+    const proxy = createServer((incoming, outgoing) => {
+      const upstream = request(new URL(incoming.url!, base), { method: incoming.method, headers: incoming.headers }, response => {
+        outgoing.writeHead(response.statusCode!, response.headers);
+        response.pipe(outgoing);
+      });
+      upstream.on("error", () => { outgoing.writeHead(502).end(); });
+      incoming.pipe(upstream);
+    });
+    await new Promise<void>(resolve => proxy.listen(0, "127.0.0.1", resolve));
+    const address = proxy.address();
+    if (!address || typeof address === "string") throw new Error("Expected a loopback proxy");
+    const proxyBase = `http://127.0.0.1:${address.port}/api`;
+    try {
+      // Query validation occurs after the matching guard and keeps this test off the discovery path.
+      for (let i = 0; i < 300; i++) {
+        const response = await fetch(`${proxyBase}/matches/recommendations?unsupported=1`, {
+          headers: { cookie: `vera_session=${a.token}` },
+        });
+        expect(response.status).toBe(i < 60 ? 400 : 429);
+        await response.arrayBuffer();
+      }
+      const response = await fetch(`${proxyBase}/matches/${bHandle}/decision`, {
+        ...json("POST", { choice: "ACCEPT" }),
+        headers: { "content-type": "application/json", origin, cookie: `vera_session=${b.token}` },
+      });
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ choice: "ACCEPT", mutual: false });
+    } finally {
+      await new Promise<void>((resolve, reject) => proxy.close(error => error ? reject(error) : resolve()));
+    }
+  });
+
   it("serializes two accepts and replays a choice without duplicate records or audit", async () => {
     const a = await user();
     const b = await user();
@@ -154,6 +206,24 @@ describe("T14 real matching HTTP and PostgreSQL", () => {
     await expect(db.client.auditLog.delete({ where: { id: audits[0].id } })).rejects.toThrow();
     const { actorId, action, subjectType, subjectId } = audits[0];
     await expect(db.client.auditLog.create({ data: { actorId, action, subjectType, subjectId } })).rejects.toThrow();
+  });
+
+  it("commits one conflicting choice and audit across two sessions of the same member", async () => {
+    const a = await user();
+    await user();
+    const second = await newSession(a);
+    const [firstHandle, secondHandle] = await Promise.all([recommendation(a), recommendation(second)]);
+    const outcomes = await Promise.all([decide(a, firstHandle, "ACCEPT"), decide(second, secondHandle, "DECLINE")]);
+    expect(outcomes.map(outcome => outcome.status).sort()).toEqual([200, 409]);
+    const choice = outcomes[0].status === 200 ? "ACCEPT" : "DECLINE";
+    expect(await outcomes.find(outcome => outcome.ok)!.json()).toEqual({ choice, mutual: false });
+    expect(await outcomes.find(outcome => !outcome.ok)!.json()).toMatchObject({ code: "MATCH_DECISION_CONFLICT" });
+    expect(await db.client.matchPair.count()).toBe(1);
+    const rows = await db.client.matchDecision.findMany();
+    expect(rows).toEqual([expect.objectContaining({ actorUserId: a.id, choice })]);
+    expect(await db.client.auditLog.findMany({ where: { action: "MATCH_DECISION_RECORDED" } })).toEqual([
+      expect.objectContaining({ subjectId: rows[0].id }),
+    ]);
   });
 
   it("does not invalidate decisions on changes to other consent purposes", async () => {
@@ -328,29 +398,62 @@ describe("T14 real matching HTTP and PostgreSQL", () => {
     expect((await decisions(a)).every((row: { mutual: boolean }) => !row.mutual)).toBe(true);
   });
 
-  it("rechecks a blocked pair after waiting on the shared participant lock", async () => {
-    const a = await user();
-    const b = await user();
-    const handle = await recommendation(a);
-    let decision!: Promise<Response>;
-    await db.client.$transaction(async tx => {
-      await tx.$queryRaw`SELECT id FROM "User" WHERE id IN (${a.id}, ${b.id}) ORDER BY id FOR UPDATE`;
-      decision = decide(a, handle);
-      await tx.block.create({ data: { blockerId: b.id, blockedId: a.id } });
-      // Observe the blocked transaction before releasing the competing write.
-      const deadline = Date.now() + 2500;
-      let waiting = false;
-      while (!waiting && Date.now() < deadline) {
-        const [row] = await db.client.$queryRaw<{ waiting: boolean }[]>`
-          SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE wait_event_type = 'Lock'
-          AND query LIKE '%ORDER BY id FOR UPDATE%' AND pid <> pg_backend_pid()) AS waiting`;
-        waiting = row.waiting;
-        if (!waiting) await new Promise(resolve => setTimeout(resolve, 30));
+  describe.each([
+    [Prisma.TransactionIsolationLevel.ReadCommitted, "read committed"],
+    [Prisma.TransactionIsolationLevel.RepeatableRead, "repeatable read"],
+  ] as const)("matching with %s as the client default", (isolationLevel, expectedIsolation) => {
+    it.each([
+      ["read", "consent"], ["write", "consent"], ["read", "block"], ["write", "block"],
+    ] as const)("rechecks a waiting %s after a committed %s change", async (operation, restriction) => {
+      await app.close();
+      configuredClient = new PrismaClient({
+        datasources: { db: { url: db.url } }, transactionOptions: { isolationLevel },
+      });
+      const [level] = await configuredClient.$transaction(tx =>
+        tx.$queryRaw<{ transaction_isolation: string }[]>`SHOW transaction_isolation`);
+      expect(level.transaction_isolation).toBe(expectedIsolation);
+      await startApi(configuredClient);
+      const a = await user();
+      const b = await user();
+      const handle = await recommendation(a);
+
+      let result!: Promise<Response>;
+      await db.client.$transaction(async tx => {
+        await tx.$queryRaw`SELECT id FROM "User" WHERE id IN (${a.id}, ${b.id}) ORDER BY id FOR UPDATE`;
+        const [writer] = await tx.$queryRaw<{ pid: number }[]>`SELECT pg_backend_pid() AS pid`;
+        result = operation === "write" ? decide(a, handle) : api("matches/recommendations", a);
+        const deadline = Date.now() + 2500;
+        let waiting = false;
+        while (!waiting && Date.now() < deadline) {
+          const [row] = await db.client.$queryRaw<{ waiting: boolean }[]>`
+            SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE wait_event_type = 'Lock'
+            AND query LIKE '%ORDER BY id FOR UPDATE%' AND ${writer.pid} = ANY(pg_blocking_pids(pid))) AS waiting`;
+          waiting = row.waiting;
+          if (!waiting) await new Promise(resolve => setTimeout(resolve, 30));
+        }
+        expect(waiting).toBe(true);
+        // Change the live eligibility row without modifying the participant lock row.
+        if (restriction === "block") {
+          await tx.block.create({ data: { blockerId: b.id, blockedId: a.id } });
+        } else {
+          await tx.consent.update({
+            where: { userId_purpose: { userId: b.id, purpose: "PROFILE_MATCHING" } },
+            data: { granted: false, revokedAt: new Date() },
+          });
+        }
+      });
+      const response = await result;
+      if (operation === "write") {
+        expect(response.status).toBe(404);
+        expect(await response.json()).toMatchObject({ code: "MATCH_UNAVAILABLE" });
+      } else {
+        expect(response.status).toBe(200);
+        expect(await response.json()).toEqual({ available: true, recommendations: [], nextCursor: null });
       }
-      expect(waiting).toBe(true);
+      expect(await db.client.matchPair.count()).toBe(0);
+      expect(await db.client.matchDecision.count()).toBe(0);
+      expect(await db.client.auditLog.count({ where: { action: "MATCH_DECISION_RECORDED" } })).toBe(0);
     });
-    expect((await decision).status).toBe(404);
-    expect(await db.client.matchPair.count()).toBe(0);
   });
 
   it("rolls back a new decision and pair if the audit insert fails", async () => {

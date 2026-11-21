@@ -20,8 +20,11 @@ export class MatchingRequestGuard implements CanActivate {
     if (write && !request.is("application/json")) {
       throw new HttpException({ code: "JSON_REQUIRED", message: "Send a JSON request." }, 415);
     }
-    this.limiter.consume("matching:ip", request.socket.remoteAddress ?? "unknown", 300, 60_000);
-    this.limiter.consume(write ? "matching:decision" : "matching:read", request.auth!.user.id, write ? 30 : 60, 60_000);
+    this.limiter.consumeAll(
+      { scope: "matching:ip", identity: request.socket.remoteAddress ?? "unknown", limit: 300, durationMs: 60_000 },
+      { scope: write ? "matching:decision" : "matching:read", identity: request.auth!.user.id,
+        limit: write ? 30 : 60, durationMs: 60_000 },
+    );
     return true;
   }
 }

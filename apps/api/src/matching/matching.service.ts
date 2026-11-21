@@ -18,6 +18,8 @@ const discoverySize = 16;
 const discoveryScanLimit = 48;
 const historySize = 20;
 const handleLifetime = 15 * 60_000;
+// Reads following a participant lock wait must see the writer's committed restrictions.
+const matchingIsolation = Prisma.TransactionIsolationLevel.ReadCommitted;
 
 const unavailable = () => new NotFoundException({
   code: "MATCH_UNAVAILABLE", message: "This recommendation is unavailable. Refresh your matches.",
@@ -140,7 +142,7 @@ export class MatchingService {
           recommendations: ranked.sort(compareRank).map(row => row.recommendation),
           nextCursor,
         };
-      });
+      }, matchingIsolation);
     });
   }
 
@@ -200,7 +202,7 @@ export class MatchingService {
       }
 
       return { choice, mutual: choice === "ACCEPT" && this.peerAccepted(pair.decisions, peer) };
-    }));
+    }, matchingIsolation));
   }
 
   async history(auth: AuthContext, query: unknown) {
@@ -254,7 +256,7 @@ export class MatchingService {
             createdAt: shortlist[historySize - 1].createdAt.toISOString(),
           }) : null,
         };
-      });
+      }, matchingIsolation);
     });
   }
 

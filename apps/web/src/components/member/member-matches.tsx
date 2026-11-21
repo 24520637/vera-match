@@ -20,6 +20,35 @@ type History = { decisions: Decision[]; nextCursor: string | null };
 type Load<T> = { kind: "loading" } | { kind: "error"; error: unknown } | { kind: "ready"; data: T };
 type NoticeData = { tone: "success" | "warning" | "error"; message: string };
 
+function hasFields(value: unknown, ...fields: string[]): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value) &&
+    Object.keys(value).length === fields.length && fields.every(field => Object.hasOwn(value, field));
+}
+
+function isReference(value: unknown): value is string {
+  return typeof value === "string" && /^[A-Za-z0-9_-]{1,768}$/.test(value);
+}
+
+function isRecommendations(value: unknown): value is Recommendations {
+  if (!hasFields(value, "available", "recommendations", "nextCursor") || typeof value.available !== "boolean" ||
+    !Array.isArray(value.recommendations) || (value.nextCursor !== null && !isReference(value.nextCursor))) return false;
+  if (!value.available) return value.recommendations.length === 0 && value.nextCursor === null;
+  return value.recommendations.every((item: unknown) => hasFields(item, "key", "pairId", "reasons") &&
+    isReference(item.key) && isReference(item.pairId) && Array.isArray(item.reasons) &&
+    item.reasons.every((reason: unknown) => typeof reason === "string"));
+}
+
+function isHistory(value: unknown): value is History {
+  if (!hasFields(value, "decisions", "nextCursor") || !Array.isArray(value.decisions) ||
+    (value.nextCursor !== null && !isReference(value.nextCursor))) return false;
+  return value.decisions.every((item: unknown) => hasFields(item, "id", "choice", "createdAt", "available", "mutual") &&
+    isReference(item.id) && (item.choice === "ACCEPT" || item.choice === "DECLINE") &&
+    typeof item.createdAt === "string" && Number.isFinite(Date.parse(item.createdAt)) &&
+    new Date(item.createdAt).toISOString() === item.createdAt &&
+    typeof item.available === "boolean" && typeof item.mutual === "boolean" &&
+    (!item.mutual || (item.available && item.choice === "ACCEPT")));
+}
+
 function requestError(error: unknown) {
   if (error instanceof ApiError) {
     if (error.status === 401) return "Sign in again to see your matches.";
@@ -31,7 +60,7 @@ function requestError(error: unknown) {
   return "Matching could not be loaded. Try again.";
 }
 
-function useMatchPage<T>(path: string) {
+function useMatchPage<T>(path: string, isPage: (value: unknown) => value is T) {
   const [state, setState] = useState<Load<T>>({ kind: "loading" });
   const active = useRef<AbortController | null>(null);
   const load = useCallback((after?: string) => {
@@ -40,16 +69,15 @@ function useMatchPage<T>(path: string) {
     active.current = controller;
     setState({ kind: "loading" });
     const url = after ? `${path}?after=${encodeURIComponent(after)}` : path;
-    void apiJson<T>(url, { signal: controller.signal }).then(
+    void apiJson<unknown>(url, { signal: controller.signal }).then(
       (data) => {
         if (controller.signal.aborted) return;
-        setState(data === undefined
-          ? { kind: "error", error: new Error("Missing matching response") }
-          : { kind: "ready", data });
+        setState(isPage(data) ? { kind: "ready", data }
+          : { kind: "error", error: new ApiError("invalid-response", "Invalid matching response.") });
       },
       (error: unknown) => { if (!controller.signal.aborted) setState({ kind: "error", error }); },
     );
-  }, [path]);
+  }, [isPage, path]);
   const clear = useCallback(() => {
     active.current?.abort();
     setState({ kind: "loading" });
@@ -73,8 +101,8 @@ function decisionMessage(error: unknown): NoticeData {
 
 function MatchesScreen() {
   const { state: recommendations, load: loadRecommendations, clear: clearRecommendations } =
-    useMatchPage<Recommendations>("/matches/recommendations");
-  const { state: history, load: loadHistory, clear: clearHistory } = useMatchPage<History>("/matches/decisions");
+    useMatchPage("/matches/recommendations", isRecommendations);
+  const { state: history, load: loadHistory, clear: clearHistory } = useMatchPage("/matches/decisions", isHistory);
   const [pending, setPending] = useState(false);
   const decisionQuota = useRetryAfter();
   const decisionDisabled = pending || decisionQuota.seconds > 0;
