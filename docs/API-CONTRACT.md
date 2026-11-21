@@ -1,8 +1,8 @@
 # API contract — VERA Match
 
-**T14 implementation:** [Reciprocal matching](MATCHING-DESIGN.md) defines the
-member-only recommendations, decision creation and caller-scoped decision history
-contracts, including temporary references and revocation behavior.
+**T14 implementation:** [Matching API](#implemented-t14-matching-api) documents
+member recommendations, decision creation and caller-scoped history. See
+[Reciprocal matching](MATCHING-DESIGN.md) for the design and release dependencies.
 
 **T10 implementation:** [Expert review](EXPERT-REVIEW-WORKFLOW.md#6-t10-implementation) defines
 versioned submit and independent QA decisions, the submitted QA queue, and the
@@ -43,8 +43,12 @@ mechanism and does not change the existing authentication responses below.
 
 **Status:** Health/readiness and `/auth/register`, `/auth/verify-email`, `/auth/resend-verification`, `/auth/login`, `/auth/me`, `/auth/logout`, `/auth/logout-all`, `/auth/forgot-password` and `/auth/reset-password` are implemented. Implemented business scope and release gates are defined by the feature notes above and their linked documents; remaining proposed routes are DESIGN ONLY. See `EMAIL-AUTH-SESSIONS.md` and [Authentication recovery](AUTH-RECOVERY.md) for tested details.
 
-API prefix: `/api`. The browser uses a server-issued HttpOnly session cookie. Mutating cookie-authenticated endpoints require CSRF protection. Implemented auth behavior is described below; `{code, message, details?}` is not a guarantee that every framework error has this shape. Auth DTO validation uses `400`, not `422`. Future feature `409` rules are approved MVP contracts, not implemented routes;
-T08 review timecode bounds use `422` as specified below.
+API prefix: `/api`. The browser uses a server-issued HttpOnly session cookie.
+Mutating cookie-authenticated endpoints require CSRF protection. Framework
+errors can have a different shape from `{ code, message, details? }`. Auth DTO
+validation uses `400`, and T08 review timecode bounds use `422`. The feature
+sections identify implemented conflicts, including `409 MATCH_DECISION_CONFLICT`
+in T14. A design-only contract describes planned behavior.
 
 **C012 / T02: MVP TECHNICALLY APPROVED; PRE-PRODUCTION GATES OPEN.**
 
@@ -54,8 +58,8 @@ contract, with no further technical corrections in this review round.
 The [Profile/Consent contract](PROFILE-CONSENT-CONTRACT.md) decision register
 records approved D1-D11, concrete catalogs/three prompts/limits, independent
 withdrawal quota, CAS/idempotency and 60-second playback URLs. Existing auth
-behavior is unchanged. Feature routes remain unimplemented; PR #8 is not
-represented as merged and production policies are not approved.
+behavior was unchanged by that review. The C012 approval covered the contract
+and left implementation and production policy approval to later work.
 
 New routes use resource wrappers, HTTP 400, nested dot/index field errors,
 visible `_form` errors, non-provisioning GET defaults and active verified MEMBER
@@ -72,7 +76,7 @@ writes return 409 `RESOURCE_REVISION_CONFLICT`. `questionnaireVersion` selects a
 catalog, not editing concurrency. Consent keeps its separate aggregate
 `version`/`expectedVersion` CAS/idempotency contract.
 
-Malformed persisted feature data returns safe actionable 503
+For the C012 profile and preferences resource contract, malformed persisted data returns an actionable `503`
 `DATA_SHAPE_UNAVAILABLE` with allowlisted affected paths/current resource revision,
 never private values or database internals. Validate the complete resulting
 resource before success; no automatic repair of unrelated fields. The contract
@@ -124,12 +128,153 @@ not changes to current auth.
 | GET       | `/qa/reviews/disputes`             | Scoped moderator       | Open and in-review disputes with optional `after` cursor                                                 |
 | GET       | `/qa/reviews/disputes/:id`         | Scoped moderator       | Private dispute status and reason with approved report context or linked claim evidence                   |
 | PATCH     | `/qa/reviews/disputes/:id`         | Scoped moderator       | Revision-checked intake and final response                                                               |
-| GET | `/matches/recommendations` | Member | Bounded live reciprocal discovery page with private response and optional `after` cursor |
-| POST | `/matches/:pairId/decision` | Member | `{ choice }` with a current session-bound recommendation reference. Returns `{ choice, mutual }`. |
-| GET | `/matches/decisions` | Member | Own choices, current availability and mutual status, with optional `after` cursor |
+| GET | `/matches/recommendations` | Member | [Reciprocal recommendations](#get-apimatchesrecommendations) with an optional `after` cursor |
+| POST | `/matches/:pairId/decision` | Member | [Record `ACCEPT` or `DECLINE`](#post-apimatchespairiddecision) using a current recommendation reference |
+| GET | `/matches/decisions` | Member | [Own decision history](#get-apimatchesdecisions) with an optional `after` cursor |
 | POST      | `/blocks`                          | Member                  | Block another user and immediately exclude both directions                                                |
 | POST      | `/reports`                         | Member                  | Validated reason and target; avoid user enumeration                                                       |
 | GET/PATCH | `/moderation/reports`              | Moderator               | Audited access limited to authorized scope                                                                |
+
+## Implemented T14 matching API
+
+All three routes require a valid session cookie for an `ACTIVE`, email-verified
+account with role `MEMBER`. The server takes the caller identity from the
+session and rechecks the account, role and session in the matching transaction.
+Responses carry `Cache-Control: private, no-store`, `Vary: Cookie`, and
+`Referrer-Policy: no-referrer`.
+
+Rate limits apply per API process in a one-minute window. The two GET routes
+share 60 requests per member. POST has a separate limit of 30 per member.
+All three routes share a limit of 300 per socket IP. A `429` response includes
+`Retry-After`, which CORS exposes, and `{ code: "RATE_LIMITED", message,
+retryAfterSeconds }`. `Retry-After` and `retryAfterSeconds` report the same
+integer number of seconds.
+
+| Status | Common matching errors |
+| --- | --- |
+| `401` | `UNAUTHENTICATED` for a missing, invalid, expired or revoked session, or an inactive or unverified account. |
+| `403` | `FORBIDDEN` when the authenticated account lacks the `MEMBER` role. |
+| `429` | `RATE_LIMITED` when the member or socket-IP quota is exceeded. |
+| `503` | `SESSION_STORE_UNAVAILABLE` if the session lookup fails, `AUTH_CAPACITY` if the limiter cannot allocate a counter, or `MATCHING_UNAVAILABLE` for matching storage, transaction, audit or reference-key failures. Production requires a valid `MATCHING_HANDLE_KEY`. |
+
+The GET routes accept only the optional query parameter `after`. Omit it on
+the first request. For later pages, pass the `nextCursor` string verbatim as
+the `after` value, URL-encoded as a query parameter. Cursors are opaque,
+authenticated encrypted references with a 15-minute lifetime. Each cursor
+is scoped to its issuing account, session and endpoint. An empty, repeated,
+malformed, expired or out-of-scope cursor, or an extra query parameter, returns
+`400 INVALID_REQUEST`. A `null` cursor means the current response offers no
+continuation. The GET routes take no business input from the request body.
+
+### GET /api/matches/recommendations
+
+Discovery requires two distinct, active, email-verified members. Both must have
+declared that they are adults, have visibility enabled, have a valid UTC birth
+date yielding a self-reported age of 18–120, and have current evidence-backed
+`PROFILE_MATCHING` consent. Both members' age bounds and explicit dealbreakers
+apply. An explicit `different-relationship-goal` dealbreaker requires equal,
+known profile goals. A desired goal by itself is a ranking priority. Blocks in
+either direction, ineligible pairs and pairs on which the caller already decided
+are excluded. Invalid stored matching inputs fail eligibility. The GET creates
+no pair or decision.
+
+`200 OK` returns the following JSON shape.
+
+```ts
+{
+  available: boolean;
+  recommendations: { key: string; pairId: string; reasons: string[] }[];
+  nextCursor: string | null;
+}
+```
+
+If the caller fails the matching eligibility checks, the response contains
+`available: false`, `recommendations: []` and `nextCursor: null`. An eligible
+caller can receive an empty list with `available: true`. The server inspects
+at most 48 shortlisted candidates and returns at most 16 recommendations.
+It issues a cursor only after finding another eligible recommendation in that
+window. A `null` cursor can still leave candidates outside the inspected window.
+
+`key` is an opaque per-caller key. `pairId` is the temporary reference for the
+decision route. `reasons` contains the common eligibility explanation and can
+include canonical T12 factual statements with current permission. The response
+contains no peer identity, raw profile or preference values, private review
+evidence, or score. This route uses the common errors and GET cursor validation.
+
+### POST /api/matches/:pairId/decision
+
+Use `pairId` from a recommendation issued to the current account and session.
+The reference expires after 15 minutes. Send no query parameters and submit a
+JSON object containing exactly one field, `choice`, whose value is `ACCEPT` or
+`DECLINE`. The guard requires the configured `Origin` and
+`Content-Type: application/json`. It rejects `Sec-Fetch-Site: cross-site` when
+present.
+
+The transaction rechecks both members' eligibility, blocks in both directions,
+the matching consent generations and block creation audit counts captured when
+the reference was issued. A new outgoing block by either participant can
+invalidate an existing reference even after unblock. Withdrawal for an unrelated
+consent purpose leaves the matching generation valid. See
+[reference and pair lifetime](MATCHING-DESIGN.md#c081-and-c082-member-api).
+
+`200 OK` returns `{ choice: "ACCEPT" | "DECLINE", mutual: boolean }` for both
+the first successful submission and a replay of the same choice with a current
+reference. A new decision and its audit entry commit together. A replay returns
+the stored choice and current mutual status without another decision or audit
+entry. `mutual` is true only if both participants accepted and the pair is still
+eligible. A `DECLINE` response always has `mutual: false`.
+
+| Status | Additional decision errors |
+| --- | --- |
+| `400` | `INVALID_REQUEST` for any query parameter, an invalid or missing `choice`, or a body with extra fields or the wrong shape. Malformed JSON can receive a framework `400` before service validation. |
+| `403` | `ORIGIN_DENIED` for missing or foreign `Origin`, or `Sec-Fetch-Site: cross-site`. |
+| `404` | `MATCH_UNAVAILABLE` for an invalid, expired, foreign or stale reference, or a pair that no longer passes the eligibility checks. The response uses the same code for these cases. |
+| `409` | `MATCH_DECISION_CONFLICT` when a valid request attempts to change the caller's stored choice. |
+| `413` | The framework can reject a request that exceeds the JSON parser's body size limit before service validation. |
+| `415` | `JSON_REQUIRED` for a request that fails the JSON content-type check. |
+
+### GET /api/matches/decisions
+
+History includes only decisions the caller recorded as a participant. A valid
+member can read their own decisions after withdrawing matching consent. Current
+authorization and eligibility determine the status fields on each item.
+
+`200 OK` returns the following JSON shape.
+
+```ts
+{
+  decisions: {
+    id: string;
+    choice: "ACCEPT" | "DECLINE";
+    createdAt: string;
+    available: boolean;
+    mutual: boolean;
+  }[];
+  nextCursor: string | null;
+}
+```
+
+Each page has at most 20 items in descending decision-time order, using the
+stored ID as the internal tie-breaker. The exposed `id` is an opaque per-caller
+key and `createdAt` is an ISO 8601 UTC timestamp. An unavailable current or
+historical pair can still appear with the caller's own choice and flags
+`available: false` and `mutual: false`. Entries whose recorded actor is outside
+the pair are omitted. History contains no peer identifier, peer choice or recommendation
+reason. This route uses the common errors and GET cursor validation. A pair
+becoming unavailable is reported in the `200` response.
+
+### C079 and C080 product decisions still open
+
+The implemented ranking uses the viewer's directional priorities within each
+discovery window. Canonical factual statements can appear as explanations only
+after independent QA, owner confirmation and explicit sharing approval. The
+source observation must still match the approved review. Consent withdrawal,
+claim revocation and applicable disputes exclude a claim. The API leaves
+reciprocal aggregation, global ranking, a
+structured lifestyle criterion, field-specific profile disclosure, and claim
+contributions to ranking open for product review. See
+[matching eligibility and ranking](MATCHING-DESIGN.md#c078-and-c079-eligibility-and-ranking)
+and [live claims](MATCHING-DESIGN.md#c080-live-claims).
 
 ## Contract checks that must be implemented
 
@@ -183,9 +328,11 @@ this transport as an authenticated server client.
 
 Next.js proxies `/api/:path*` to server-only `API_INTERNAL_ORIGIN` (default
 `http://localhost:4000`). Configure it at build time. Shared tests exercise
-simulated transport responses; the separate real-auth suite covers the health
-rewrite and implemented auth flows. Neither suite implements the planned
-profile, consent, media or matching endpoints.
+simulated transport responses. The separate real-auth suite covers the health
+rewrite and implemented auth flows. The member browser suite exercises the
+implemented T14 routes through the real API and same-origin proxy. See the
+[T14 matching API](#implemented-t14-matching-api) and
+[T14 acceptance tests](TEST-PLAN.md#t14-reciprocal-matching-acceptance).
 
 1. Authenticate the cookie and authorize **resource ownership** at the API, never only in the UI or based on a caller-supplied user ID.
 2. `/auth/me` network/`5xx` failures should offer retry, not redirect to login. Only an actual invalid session (`401`) implies reauthentication; `403` means insufficient privileges.
