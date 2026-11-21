@@ -13,6 +13,8 @@ const reads = [
   "consents/me",
   "videos/me",
   "blocks/me",
+  "matches/recommendations",
+  "matches/decisions",
 ];
 describe("C083 cross-feature identity and session regression", () => {
   let h: SecurityHarness;
@@ -133,6 +135,8 @@ describe("C083 cross-feature identity and session regression", () => {
       "questionnaire/me",
       "consents/me",
       "videos/me",
+      "matches/recommendations",
+      "matches/decisions",
     ])
       expect(
         (

@@ -13,6 +13,9 @@ import { AssignmentGrantsService } from "../src/expert-admin/assignment-grants.s
 import { readMatchingClaimsInTransaction } from "../src/expert-admin/review-matching-claims";
 import { ReviewOwnerService } from "../src/expert-admin/review-owner.service";
 import { ReviewQaService } from "../src/expert-admin/review-qa.service";
+import { MatchingHandles } from "../src/matching/matching-handles";
+import { MatchingService } from "../src/matching/matching.service";
+import { BlockAccessService } from "../src/safety/block-access.service";
 import { SafetyAccessService } from "../src/safety/safety-access.service";
 import type { StaffAssuranceSource } from "../src/safety/staff-assurance.source";
 import type { PrivateStorageService } from "../src/video/private-storage.service";
@@ -175,6 +178,42 @@ describe("T12 review claims and disputes / disposable PostgreSQL", () => {
     await patchConsent(owner, Number(generation.version) + 2, ["EXPERT_VIDEO_REVIEW"], false);
     await new AssignmentCancellationWorker(client, new AssignmentCancellationService(client), environment).runOnce();
     await expect(db.client.reviewDispute.findMany(terminalCases)).resolves.toEqual(beforeWithdrawal);
+  });
+
+  it("projects only currently shared canonical statements through T14 recommendations", async () => {
+    const { client, consent, qa, ownerService, moderator, owner, stranger, review, approval, patchConsent } = await setupReview();
+    for (const auth of [owner, stranger]) {
+      await client.user.update({ where: { id: auth.user.id }, data: {
+        declaredAdult: true, profile: { create: { birthDate: new Date("1990-01-01"), visibilityEnabled: true } },
+      } });
+    }
+    const matching = new MatchingService(client, new SafetyAccessService(client), consent, new BlockAccessService(),
+      new MatchingHandles(environment));
+    const reasons = async () => (await matching.recommendations(stranger, {})).recommendations.map(row => row.reasons);
+    const generic = ["Meets both members’ matching settings."];
+    expect(await reasons()).toEqual([generic]);
+    await qa.approve(moderator, review.id, approval);
+    const claim = await client.reviewClaim.findFirstOrThrow({ where: { reviewId: review.id } });
+    await ownerService.updateClaim(owner, claim.id, { action: "CONFIRM", expectedRevision: 0 });
+    expect(await reasons()).toEqual([generic]);
+    await ownerService.updateClaim(owner, claim.id, { action: "SHARE", expectedRevision: 1 });
+    const response = await matching.recommendations(stranger, {});
+    expect(response.recommendations).toEqual([{ key: expect.any(String), pairId: expect.any(String),
+      reasons: [...generic, "The member said they enjoy reading."],
+    }]);
+    expect(JSON.stringify(response)).not.toContain("I enjoy reading.");
+    await client.reviewClaim.update({ where: { id: claim.id }, data: { sourceStartMs: 101 } });
+    expect(await reasons()).toEqual([generic]);
+    await client.reviewClaim.update({ where: { id: claim.id }, data: { sourceStartMs: 100 } });
+    expect(await reasons()).toContainEqual([...generic, "The member said they enjoy reading."]);
+    await patchConsent(owner, 1, ["VIDEO_CLAIM_MATCHING"], false);
+    expect(await reasons()).toEqual([generic]);
+    await patchConsent(owner, 2, ["VIDEO_CLAIM_MATCHING"], true);
+    expect(await reasons()).toEqual([generic]);
+    await ownerService.updateClaim(owner, claim.id, { action: "SHARE", expectedRevision: 2 });
+    expect(await reasons()).toContainEqual([...generic, "The member said they enjoy reading."]);
+    await ownerService.openDispute(owner, review.id, { claimId: claim.id, reason: "Private test dispute." });
+    expect(await reasons()).toEqual([generic]);
   });
 
   const sourceLosses = ["EXPERT_VIDEO_REVIEW", "VIDEO_STORAGE", "VIDEO_DELETED"] as const;

@@ -8,7 +8,7 @@ describe("T12 matching claim eligibility", () => {
 
   function setup() {
     const review = {
-      version: 4, summary: "Synthetic summary.", limitations: "One recording.", qaById: "qa", qaAt: now,
+      id: "review", version: 4, summary: "Synthetic summary.", limitations: "One recording.", qaById: "qa", qaAt: now,
       decisions: [{ version: 4, moderatorId: "qa", decidedAt: now }],
       disputes: [] as Array<{ claimId: string | null; reviewVersion: number }>,
       assignment: { expertId: "expert", cancelledAt: null, reviewConsentSubjectId: "ledger", reviewConsentVersion: 1n,
@@ -17,10 +17,12 @@ describe("T12 matching claim eligibility", () => {
     const claim = {
       id: "claim", reviewVersion: 4, claimType: "INTEREST_READING", claimText: "The member said they enjoy reading.",
       ownerConfirmed: true, shareApproved: true, revokedAt: null as Date | null,
+      sourceObservationId: "speech", sourceStartMs: 1, sourceEndMs: 2,
       shareConsentSubjectId: "ledger", shareConsentVersion: 3n, review, transcript: "Private test transcript.",
     };
     const tx = { $queryRaw: jest.fn(), block: { count: jest.fn(async () => 0) },
-      reviewClaim: { findMany: jest.fn(async () => [claim]) } };
+      reviewClaim: { findMany: jest.fn(async () => [claim]) },
+      expertObservation: { findFirst: jest.fn<Promise<{ id: string } | null>, []>(async () => ({ id: "speech" })) } };
     const consent = { requireInTransaction: jest.fn(async () => ({ subjectId: "ledger", version: 3n })),
       requireGenerationInTransaction: jest.fn(async () => undefined) };
     const read = () => readMatchingClaimsInTransaction(tx as unknown as Prisma.TransactionClient,
@@ -37,6 +39,11 @@ describe("T12 matching claim eligibility", () => {
     }));
     expect(consent.requireInTransaction).toHaveBeenCalledWith(tx, "viewer", ["PROFILE_MATCHING"]);
     expect(consent.requireInTransaction).toHaveBeenCalledWith(tx, "candidate", ["PROFILE_MATCHING", "REPORT_SHARING", "VIDEO_CLAIM_MATCHING"]);
+    expect(tx.expertObservation.findFirst).toHaveBeenCalledWith({ where: {
+      id: "speech", reviewId: "review", category: "SPEECH", startMs: 1, endMs: 2,
+    }, select: { id: true } });
+    tx.expertObservation.findFirst.mockResolvedValueOnce(null);
+    await expect(read()).resolves.toEqual([]);
   });
 
   it("excludes revoked, withdrawn, subjective, stale and disputed claims", async () => {

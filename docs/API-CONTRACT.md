@@ -1,5 +1,9 @@
 # API contract — VERA Match
 
+**T14 implementation:** [Reciprocal matching](MATCHING-DESIGN.md) defines the
+member-only recommendations, decision creation and caller-scoped decision history
+contracts, including temporary references and revocation behavior.
+
 **T10 implementation:** [Expert review](EXPERT-REVIEW-WORKFLOW.md#6-t10-implementation) defines
 versioned submit and independent QA decisions, the submitted QA queue, and the
 current video owner's approved-report response.
@@ -11,8 +15,7 @@ consumer for storage/review withdrawals. It grants no new access or account dele
 **T11 implementation:** Block/report and scoped moderator endpoints are described
 in [Safety and privacy](SAFETY-PRIVACY.md). Moderator access requires MODERATOR
 plus real session-bound staff assurance; its production source is not configured.
-ADMIN does not inherit these permissions. Account closure/deletion and actual
-matching/expert block integration are explicitly deferred.
+ADMIN does not inherit these permissions. Account closure/deletion remains deferred. T14 applies reciprocal blocking to matching.
 
 **C035 / PA2 implementation (partial).** The [assignment queue contract](ASSIGNMENT-QUEUES-API.md)
 requires server-derived identity and session-bound staff assurance. Moderator
@@ -121,8 +124,9 @@ not changes to current auth.
 | GET       | `/qa/reviews/disputes`             | Scoped moderator       | Open and in-review disputes with optional `after` cursor                                                 |
 | GET       | `/qa/reviews/disputes/:id`         | Scoped moderator       | Private dispute status and reason with approved report context or linked claim evidence                   |
 | PATCH     | `/qa/reviews/disputes/:id`         | Scoped moderator       | Revision-checked intake and final response                                                               |
-| GET       | `/matches/recommendations`         | Member                  | Reciprocal constraints; current consents; permitted claims only                                           |
-| POST      | `/matches/:pairId/decision`        | Member                  | `ACCEPT`/`DECLINE`; actor must belong to the pair                                                         |
+| GET | `/matches/recommendations` | Member | Bounded live reciprocal discovery page with private response and optional `after` cursor |
+| POST | `/matches/:pairId/decision` | Member | `{ choice }` with a current session-bound recommendation reference. Returns `{ choice, mutual }`. |
+| GET | `/matches/decisions` | Member | Own choices, current availability and mutual status, with optional `after` cursor |
 | POST      | `/blocks`                          | Member                  | Block another user and immediately exclude both directions                                                |
 | POST      | `/reports`                         | Member                  | Validated reason and target; avoid user enumeration                                                       |
 | GET/PATCH | `/moderation/reports`              | Moderator               | Audited access limited to authorized scope                                                                |
