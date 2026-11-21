@@ -33,6 +33,7 @@ export async function readMatchingClaimsInTransaction(tx: Prisma.TransactionClie
     orderBy: { id: "asc" },
     select: {
       id: true, reviewVersion: true, claimType: true, claimText: true, ownerConfirmed: true, shareApproved: true, revokedAt: true,
+      sourceObservationId: true, sourceStartMs: true, sourceEndMs: true,
       shareConsentSubjectId: true, shareConsentVersion: true,
       review: { select: { ...approvedReviewSelect,
         disputes: { where: { ownerId: candidateId, status: { in: ["OPEN", "IN_REVIEW", "RESOLVED"] } },
@@ -49,6 +50,11 @@ export async function readMatchingClaimsInTransaction(tx: Prisma.TransactionClie
       (dispute.claimId === null || dispute.claimId === row.id))) continue;
     if (!await activeClaimShare(tx, consent, candidateId, row) ||
       !await approvedReviewSource(tx, consent, candidateId, review)) continue;
+    const { sourceObservationId, sourceStartMs, sourceEndMs } = row;
+    if (sourceObservationId === null || sourceStartMs === null || sourceEndMs === null ||
+      !await tx.expertObservation.findFirst({ where: {
+        id: sourceObservationId, reviewId: review.id, category: "SPEECH", startMs: sourceStartMs, endMs: sourceEndMs,
+      }, select: { id: true } })) continue;
     eligible.set(claimType, factualStatements[claimType]);
     if (eligible.size === Object.keys(factualStatements).length) break;
   }

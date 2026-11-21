@@ -24,6 +24,7 @@ export class SafetyAccessService {
     role: UserRole,
     peers: string[],
     action: (tx: Prisma.TransactionClient, now: Date) => Promise<T>,
+    isolationLevel?: Prisma.TransactionIsolationLevel,
   ): Promise<T> {
     try {
       return await this.prisma.$transaction(async (tx) => {
@@ -61,7 +62,7 @@ export class SafetyAccessService {
             message: "A valid session is required.",
           });
         return action(tx, clock.now);
-      });
+      }, { isolationLevel });
     } catch (error) {
       if (error instanceof HttpException) throw error;
       throw new ServiceUnavailableException({

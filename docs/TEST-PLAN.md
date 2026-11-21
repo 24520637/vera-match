@@ -594,3 +594,36 @@ uses real Mailpit and actual Chromium offline networking on desktop/mobile. They
 are discovered by existing integration/auth CI commands, without a bypass handler.
 Existing tests are preserved. Independent QA/Matching/real MFA/deployed TLS and
 account deletion are not claimed by these tests.
+
+## T14 reciprocal matching acceptance
+
+- C078 policy unit checks cover leap-day and UTC boundaries, corrupted legacy
+  records, actor and peer hard limits, self exclusion, and explicit goal rules.
+  Real PostgreSQL/HTTP checks exercise live block, visibility, consent, and
+  eligibility checks after the participant lock is released.
+- C079 unit checks cover independent directional vectors, null and empty
+  priorities, Jaccard overlap, lexicographic order, and opaque ties. API
+  assertions cover actual ordering changes, privacy-safe projection, and a
+  continuation only when another eligible recommendation was found. Reciprocal aggregation, lifestyle
+  scoring, and profile-field sharing policy require product decisions.
+- C080 uses the real approval, claim permissions and dispute services to verify
+  that recommendation output includes only currently shared canonical copy,
+  and suppresses a claim whose source observation no longer matches.
+  Existing T12 coverage verifies source withdrawal and deletion, legacy
+  provenance, dispute state, and audit rollback.
+- C081 HTTP and migration checks use disposable PostgreSQL schemas. Cover
+  canonical identity, participant-only mutation, expiry and cross-session
+  denial, Origin/JSON/validation, quotas, concurrency, same-choice replay,
+  conflicting decisions, block/unblock before the first choice, withdrawal
+  and regrant, independent consent purposes, audit immutability and rollback, and
+  populated upgrade without unsafe backfill. The C083 identity regression
+  also covers both matching GET routes.
+- C082 uses the existing Member desktop/mobile runner to exercise the protected
+  matching UI with real session cookies and API, mutual-state reload and block,
+  stale decisions after real block and consent mutations, malformed legacy
+  profile exclusion, private-field redaction, decision history, and accessibility. Run
+  `node scripts/run-member-e2e.cjs matching.member-e2e.ts` with the documented
+  loopback PostgreSQL fixture. The Member run in CI discovers this suite.
+- Production consent publication, field-level disclosure policy, trusted staff
+  assurance, real deployment transport and account lifecycle acceptance remain
+  separate from synthetic test evidence.

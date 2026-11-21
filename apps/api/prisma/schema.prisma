@@ -639,6 +639,11 @@ model MatchPair {
   // Store sorted user ids to prevent (A,B) vs (B,A) duplicate pairs.
   score Float?
   reasons Json?
+  lowConsentSubjectId String? @db.Uuid
+  lowConsentVersion BigInt?
+  highConsentSubjectId String? @db.Uuid
+  highConsentVersion BigInt?
+  invalidatedAt DateTime?
   createdAt DateTime @default(now())
   decisions MatchDecision[]
   @@unique([userLowId, userHighId])
@@ -651,6 +656,7 @@ model MatchDecision {
   choice MatchChoice
   createdAt DateTime @default(now())
   @@unique([pairId, actorUserId])
+  @@index([actorUserId, createdAt, id])
 }
 model Block {
   id String @id @default(cuid())

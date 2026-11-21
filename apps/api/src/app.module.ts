@@ -11,6 +11,7 @@ import { ConsentModule } from "./consent/consent.module";
 import { VideoModule } from "./video/video.module";
 import { ExpertApprovalModule } from "./expert-admin/expert-approval.module";
 import { AssignmentQueuesModule } from "./expert-admin/assignment-queues.module";
+import { MatchingModule } from "./matching/matching.module";
 
 @Module({
   imports: [
@@ -25,6 +26,7 @@ import { AssignmentQueuesModule } from "./expert-admin/assignment-queues.module"
     SafetyModule,
     ExpertApprovalModule,
     AssignmentQueuesModule,
+    MatchingModule,
   ],
   controllers: [HealthController],
 })
