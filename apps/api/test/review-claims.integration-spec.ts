@@ -180,6 +180,103 @@ describe("T12 review claims and disputes / disposable PostgreSQL", () => {
   const sourceLosses = ["EXPERT_VIDEO_REVIEW", "VIDEO_STORAGE", "VIDEO_DELETED"] as const;
   const pendingStates = ["OPEN", "IN_REVIEW"] as const;
 
+  it("protects T12 audit actors and rolls back approval, owner changes, and moderator decisions on audit failure", async () => {
+    const { qa, ownerService, moderator, owner, stranger, review, assignment, approval, matching } = await setupReview();
+    const rejectAudit = async (action: "REVIEW_CLAIMS_APPROVED" | "REVIEW_CLAIM_FEEDBACK_SAVED" | "REVIEW_CLAIM_CONFIRMED" |
+      "REVIEW_CLAIM_REVOKED" | "REVIEW_DISPUTE_OPENED" | "REVIEW_DISPUTE_RESOLVED", operation: () => Promise<unknown>) => {
+      await db.client.$executeRawUnsafe(`
+        CREATE FUNCTION reject_t12_audit() RETURNS trigger LANGUAGE plpgsql AS $$
+        BEGIN RAISE EXCEPTION 'synthetic T12 audit failure'; END $$`);
+      try {
+        await db.client.$executeRawUnsafe(`
+          CREATE TRIGGER reject_t12_audit BEFORE INSERT ON "AuditLog"
+          FOR EACH ROW WHEN (NEW.action = '${action}') EXECUTE FUNCTION reject_t12_audit()`);
+        await expect(operation()).rejects.toMatchObject({ status: 503 });
+      } finally {
+        await db.client.$executeRawUnsafe('DROP TRIGGER IF EXISTS reject_t12_audit ON "AuditLog"');
+        await db.client.$executeRawUnsafe("DROP FUNCTION reject_t12_audit()");
+      }
+    };
+
+    await rejectAudit("REVIEW_CLAIMS_APPROVED", () => qa.approve(moderator, review.id, approval));
+    await expect(db.client.expertReview.findUnique({ where: { id: review.id } })).resolves.toMatchObject({ status: "SUBMITTED", version: 2 });
+    await expect(db.client.expertAssignment.findUnique({ where: { id: assignment.id } })).resolves.toMatchObject({ status: "SUBMITTED" });
+    await expect(db.client.reviewDecision.count({ where: { reviewId: review.id } })).resolves.toBe(0);
+    await expect(db.client.reviewClaim.count({ where: { reviewId: review.id } })).resolves.toBe(0);
+    await qa.approve(moderator, review.id, approval);
+    const claim = await db.client.reviewClaim.findFirstOrThrow({ where: { reviewId: review.id } });
+    const feedback = { target: "CONTEXT", note: "Private annotation unique to the owner.", expectedRevision: 0 };
+    await rejectAudit("REVIEW_CLAIM_FEEDBACK_SAVED", () => ownerService.saveFeedback(owner, claim.id, feedback));
+    await expect(db.client.reviewClaimFeedback.count({ where: { claimId: claim.id } })).resolves.toBe(0);
+    await ownerService.saveFeedback(owner, claim.id, feedback);
+    await expect(ownerService.saveFeedback(stranger, claim.id, feedback)).rejects.toMatchObject({ status: 404 });
+
+    const confirm = () => ownerService.updateClaim(owner, claim.id, { action: "CONFIRM", expectedRevision: 0 });
+    await rejectAudit("REVIEW_CLAIM_CONFIRMED", confirm);
+    await expect(db.client.reviewClaim.findUnique({ where: { id: claim.id } })).resolves.toMatchObject({ revision: 0, ownerConfirmed: false });
+    await confirm();
+    await ownerService.updateClaim(owner, claim.id, { action: "SHARE", expectedRevision: 1 });
+    const eligible = [{ type: claim.claimType, statement: claim.claimText }];
+    await expect(matching()).resolves.toEqual(eligible);
+    await db.client.reviewClaim.update({ where: { id: claim.id }, data: { reviewVersion: 2 } });
+    await expect(matching()).resolves.toEqual([]);
+    await expect(ownerService.saveFeedback(owner, claim.id, feedback)).rejects.toMatchObject({ status: 404 });
+    await db.client.reviewClaim.update({ where: { id: claim.id }, data: { reviewVersion: claim.reviewVersion } });
+    await expect(matching()).resolves.toEqual(eligible);
+
+    const revoke = () => ownerService.updateClaim(owner, claim.id, { action: "REVOKE", expectedRevision: 2 });
+    await rejectAudit("REVIEW_CLAIM_REVOKED", revoke);
+    await expect(matching()).resolves.toEqual(eligible);
+    await revoke();
+    await expect(matching()).resolves.toEqual([]);
+    await expect(db.client.reviewClaim.findUnique({ where: { id: claim.id } })).resolves.toMatchObject({
+      revision: 3, shareApproved: false, shareConsentSubjectId: null, shareConsentVersion: null, revokedAt: expect.any(Date),
+    });
+
+    const open = () => ownerService.openDispute(owner, review.id, { claimId: claim.id, reason: "Please check this evidence." });
+    await rejectAudit("REVIEW_DISPUTE_OPENED", open);
+    await expect(db.client.reviewDispute.count({ where: { reviewId: review.id } })).resolves.toBe(0);
+    const { dispute } = await open();
+    const detail = await qa.readDispute(moderator, dispute.id);
+    expect(detail.claim).toEqual({
+      statement: claim.claimText,
+      evidence: { startMs: claim.sourceStartMs, endMs: claim.sourceEndMs, transcript: claim.transcript, context: claim.context },
+    });
+    expect(JSON.stringify(detail)).not.toContain(feedback.note);
+    await qa.decideDispute(moderator, dispute.id, { status: "IN_REVIEW", expectedRevision: 0 });
+    const decide = () => qa.decideDispute(moderator, dispute.id, { status: "RESOLVED", expectedRevision: 1, resolution: "Checked." });
+    await rejectAudit("REVIEW_DISPUTE_RESOLVED", decide);
+    await expect(db.client.reviewDispute.findUnique({ where: { id: dispute.id } })).resolves.toMatchObject({
+      status: "IN_REVIEW", revision: 1, resolution: null, resolvedAt: null,
+    });
+    await decide();
+
+    const ownerActor = await db.client.expertActorIdentity.findUniqueOrThrow({ where: { userId: owner.user.id } });
+    const moderatorActor = await db.client.expertActorIdentity.findUniqueOrThrow({ where: { userId: moderator.user.id } });
+    const audit = await db.client.auditLog.findMany({ where: {
+      OR: [
+        { subjectId: claim.id, action: { startsWith: "REVIEW_CLAIM_" } },
+        { subjectId: dispute.id, action: { startsWith: "REVIEW_DISPUTE_" } },
+      ],
+    }, orderBy: { action: "asc" } });
+    expect(audit.map(({ action, actorId }) => [action, actorId])).toEqual([
+      ...["REVIEW_CLAIM_CONFIRMED", "REVIEW_CLAIM_FEEDBACK_SAVED", "REVIEW_CLAIM_REVOKED", "REVIEW_CLAIM_SHARED"]
+        .map(action => [action, ownerActor.subjectId]),
+      ["REVIEW_DISPUTE_IN_REVIEW", moderatorActor.subjectId],
+      ["REVIEW_DISPUTE_OPENED", ownerActor.subjectId],
+      ["REVIEW_DISPUTE_READ", moderatorActor.subjectId],
+      ["REVIEW_DISPUTE_RESOLVED", moderatorActor.subjectId],
+    ]);
+    const approvalAudit = await db.client.auditLog.findMany({ where: { subjectId: review.id, action: "REVIEW_CLAIMS_APPROVED" } });
+    expect(approvalAudit).toEqual([expect.objectContaining({ actorId: moderatorActor.subjectId })]);
+    for (const row of [...audit, ...approvalAudit]) {
+      await expect(db.client.$executeRaw`UPDATE "AuditLog" SET action = 'UNRELATED' WHERE id = ${row.id}`)
+        .rejects.toMatchObject({ meta: { code: "23514" } });
+      await expect(db.client.$executeRaw`DELETE FROM "AuditLog" WHERE id = ${row.id}`)
+        .rejects.toMatchObject({ meta: { code: "23514" } });
+    }
+  });
+
   it.each(sourceLosses.flatMap(loss => pendingStates.map(status => [loss, status] as const)))(
     "closes a dispute after %s source loss from %s without exposing its evidence",
     async (loss, initialStatus) => {
@@ -269,10 +366,13 @@ describe("T12 review claims and disputes / disposable PostgreSQL", () => {
       await expect(db.client.reviewClaim.findUnique({ where: { id: claim.id } })).resolves.toEqual(sharedClaim);
       await worker.runOnce();
       await expect(db.client.reviewDispute.findUnique({ where: { id: dispute.id } })).resolves.toEqual(closed);
-      await expect(db.client.auditLog.findMany({ where: auditWhere })).resolves.toEqual([{
+      const closureAudits = await db.client.auditLog.findMany({ where: auditWhere });
+      expect(closureAudits).toEqual([{
         id: expect.any(String), actorId: null, subjectType: "ReviewDispute", subjectId: dispute.id, createdAt: expect.any(Date),
         action: loss === "VIDEO_DELETED" ? "REVIEW_DISPUTE_CLOSED_VIDEO_DELETED" : "REVIEW_DISPUTE_CLOSED_CONSENT_WITHDRAWN",
       }]);
+      await expect(db.client.$executeRaw`DELETE FROM "AuditLog" WHERE id = ${closureAudits[0].id}`)
+        .rejects.toMatchObject({ meta: { code: "23514" } });
     },
   );
 
@@ -405,16 +505,18 @@ describe("T12 review claims and disputes / disposable PostgreSQL", () => {
           status: first === "moderator" ? "RESOLVED" : "CLOSED_SOURCE_UNAVAILABLE",
           revision: 2, resolution: first === "moderator" ? resolution : null, resolvedAt: expect.any(Date),
         });
+        const { subjectId: ownerSubject } = await db.client.expertActorIdentity.findUniqueOrThrow({ where: { userId: owner.user.id } });
+        const { subjectId: moderatorSubject } = await db.client.expertActorIdentity.findUniqueOrThrow({ where: { userId: moderator.user.id } });
         await expect(db.client.auditLog.findMany({ where: { subjectType: "ReviewDispute", subjectId: dispute.id },
           select: { action: true, actorId: true }, orderBy: { action: "asc" },
         })).resolves.toEqual(first === "moderator" ? [
-          { action: "REVIEW_DISPUTE_IN_REVIEW", actorId: moderator.user.id },
-          { action: "REVIEW_DISPUTE_OPENED", actorId: owner.user.id },
-          { action: "REVIEW_DISPUTE_RESOLVED", actorId: moderator.user.id },
+          { action: "REVIEW_DISPUTE_IN_REVIEW", actorId: moderatorSubject },
+          { action: "REVIEW_DISPUTE_OPENED", actorId: ownerSubject },
+          { action: "REVIEW_DISPUTE_RESOLVED", actorId: moderatorSubject },
         ] : [
           { action: "REVIEW_DISPUTE_CLOSED_CONSENT_WITHDRAWN", actorId: null },
-          { action: "REVIEW_DISPUTE_IN_REVIEW", actorId: moderator.user.id },
-          { action: "REVIEW_DISPUTE_OPENED", actorId: owner.user.id },
+          { action: "REVIEW_DISPUTE_IN_REVIEW", actorId: moderatorSubject },
+          { action: "REVIEW_DISPUTE_OPENED", actorId: ownerSubject },
         ]);
       } finally {
         release();

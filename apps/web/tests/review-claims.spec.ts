@@ -149,7 +149,7 @@ for (const [scenario, status] of [["denied access", 403], ["a missing case", 404
   });
 }
 
-test("QA selects a catalog statement and submits its scoped speech evidence", async ({ page }) => {
+test("QA clears evidence when switching speech observations and submits only the new evidence", async ({ page }) => {
   let approval: unknown;
   await page.route("**/api/**", async route => {
     const request = route.request();
@@ -164,6 +164,7 @@ test("QA selects a catalog statement and submits its scoped speech evidence", as
       id: "review", version: 3, submittedAt: approvalTime, summary: "Reported hobbies.", limitations: "One recording.",
       observations: [
         { id: "speech", category: "SPEECH", startMs: 100, endMs: 900, observation: "Mentions reading.", context: "Hobbies prompt." },
+        { id: "speech-two", category: "SPEECH", startMs: 1000, endMs: 1800, observation: "Mentions a favorite book.", context: "Favorite book prompt." },
         { id: "gesture", category: "BODY", startMs: 0, endMs: 100, observation: "Gestures.", context: "Hobbies prompt." },
       ],
     }, claimTypes: [{ type: "INTEREST_READING", statement }] } });
@@ -175,14 +176,21 @@ test("QA selects a catalog statement and submits its scoped speech evidence", as
   await page.getByRole("button", { name: "Open review review" }).click();
   await page.getByRole("checkbox", { name: statement }).check();
   await expect(page.getByRole("button", { name: "Approve review" })).toBeDisabled();
-  await expect(page.getByLabel("Speech observation").getByRole("option")).toHaveCount(2);
+  await expect(page.getByLabel("Speech observation").getByRole("option")).toHaveCount(3);
   await page.getByLabel("Speech observation").selectOption("speech");
   await page.getByLabel("Context", { exact: true }).fill("Hobbies prompt.");
   await page.getByLabel("Manual transcript (optional)").fill("I enjoy reading.");
+  await page.getByLabel("Speech observation").selectOption("speech-two");
+  await expect(page.getByLabel("Context", { exact: true })).toHaveValue("");
+  await expect(page.getByLabel("Manual transcript (optional)")).toHaveValue("");
+  await expect(page.getByRole("button", { name: "Approve review" })).toBeDisabled();
+  expect(approval).toBeUndefined();
+  await page.getByLabel("Context", { exact: true }).fill("Favorite book prompt.");
+  await page.getByLabel("Manual transcript (optional)").fill("I love reading mysteries.");
   await page.getByRole("button", { name: "Approve review" }).click();
   await page.getByRole("button", { name: "Confirm approval" }).click();
   await expect(page.getByText("Review approved.")).toBeVisible();
   expect(approval).toEqual({ expectedVersion: 3, claims: [
-    { type: "INTEREST_READING", observationId: "speech", context: "Hobbies prompt.", transcript: "I enjoy reading." },
+    { type: "INTEREST_READING", observationId: "speech-two", context: "Favorite book prompt.", transcript: "I love reading mysteries." },
   ] });
 });

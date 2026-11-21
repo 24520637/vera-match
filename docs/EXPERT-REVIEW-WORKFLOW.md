@@ -192,7 +192,9 @@ The closure has no moderator response. A new consent grant does not reopen the c
 restore access to the old source. This transition preserves existing rows and
 does not set a retention period or authorize access to retained evidence.
 The approved review version remains immutable throughout the dispute. General
-audit records contain action and identifiers. Free text stays in the case.
+audit records contain action and identifiers. Claim and dispute audit entries
+are append-only. Human actors use opaque subjects, and system closures have
+a null actor. Free text stays in the case.
 
 ### Matching eligibility
 

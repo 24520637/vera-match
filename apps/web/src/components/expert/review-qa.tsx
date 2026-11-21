@@ -179,7 +179,8 @@ function QueueWorkspace({ openDisputes }: { openDisputes: () => void }) {
             {evidence && <fieldset>
               <legend>Evidence for {statement}</legend>
               <p><label>Speech observation<br />
-                <select value={evidence.observationId} onChange={event => update({ observationId: event.target.value })}>
+                <select value={evidence.observationId} onChange={event =>
+                  update({ observationId: event.target.value, context: "", transcript: "" })}>
                   <option value="">Select an observation</option>
                   {speech.map(note => <option key={note.id} value={note.id}>
                     {note.startMs}–{note.endMs} ms · {note.observation.slice(0, 100)}
