@@ -11,11 +11,14 @@ for (const file of ["apps/api/.env", ".env"]) {
     if (error.code !== "ENOENT") throw error;
   }
 }
+const httpsRun = process.env.VERA_HTTPS_E2E_RUN_ID;
+if (httpsRun && (httpsRun !== process.env.VERA_AUTH_E2E_RUN_ID || !/^[a-f0-9-]{36}$/.test(httpsRun)))
+  throw new Error("Isolated HTTPS runner required");
 Object.assign(process.env, {
-  API_PORT: "4100",
-  APP_BASE_URL: "http://localhost:3100",
-  CORS_ORIGIN: "http://localhost:3100",
-  COOKIE_SECURE: "false",
+  API_PORT: httpsRun ? "4140" : "4100",
+  APP_BASE_URL: httpsRun ? "https://vera.test:3443" : "http://localhost:3100",
+  CORS_ORIGIN: httpsRun ? "https://vera.test:3443" : "http://localhost:3100",
+  COOKIE_SECURE: httpsRun ? "true" : "false",
   COOKIE_SAME_SITE: "lax",
   SESSION_COOKIE_NAME: "vera_e2e_session",
 });
@@ -121,8 +124,8 @@ async function cleanup() {
     app = await NestFactory.create(AppModule, { logger: false });
   }
   configureApplication(app);
-  await app.listen(4100, "127.0.0.1");
-  console.log("Authentication E2E API ready on localhost:4100");
+  await app.listen(httpsRun ? 4140 : 4100, "127.0.0.1");
+  console.log("Isolated authentication E2E API ready");
 })().catch(async () => {
   console.error(
     "Authentication E2E setup failed; check local PostgreSQL/Mailpit and test runtime metadata.",
