@@ -14,7 +14,7 @@ function timecode(field: string): never {
     details: [{ field, messages: ["Check the observation time range."] }] });
 }
 
-function record(value: unknown, keys: readonly string[], field = "_form"): Record<string, unknown> {
+export function record(value: unknown, keys: readonly string[], field = "_form"): Record<string, unknown> {
   if (value === null || typeof value !== "object" || Array.isArray(value)) invalid(field, "Send a JSON object.");
   if (Object.keys(value).some(key => !keys.includes(key))) invalid(field, "Unexpected fields.");
   return value as Record<string, unknown>;
@@ -34,7 +34,7 @@ function text(value: unknown, field: string, required: boolean) {
   return value;
 }
 
-function version(value: unknown) {
+export function version(value: unknown) {
   if (typeof value !== "number" || !Number.isInteger(value) || value < 1 || value > MAX_INT)
     invalid("expectedVersion", "Send the current draft version.");
   return value;

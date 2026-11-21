@@ -183,6 +183,8 @@ export class VideoCleanupService implements OnModuleInit, OnModuleDestroy {
           },
           take: 20,
         });
+        const [clock] = videos.length ? await tx.$queryRaw<{ now: Date }[]>`
+          SELECT (clock_timestamp() AT TIME ZONE 'UTC')::timestamp(3) AS now` : [];
         for (const video of videos) {
           await tx.auditLog.create({
             data: {
@@ -193,7 +195,7 @@ export class VideoCleanupService implements OnModuleInit, OnModuleDestroy {
           });
           await tx.video.update({
             where: { id: video.id },
-            data: { status: "DELETED", deletedAt: new Date() },
+            data: { status: "DELETED", deletedAt: clock.now },
           });
           await tx.videoCleanupTask.upsert({
             where: { videoId: video.id },

@@ -4,7 +4,7 @@ import { execFileSync } from "node:child_process";
 import { resolve } from "node:path";
 
 /** A fresh schema holds only synthetic data. Never migrates or resets the configured public schema. */
-export async function createAuthDatabase() {
+export async function createAuthDatabase(schemaPath = resolve(__dirname, "../prisma/schema.prisma")) {
   const url = new URL(process.env.DATABASE_URL ?? "");
   if (
     process.env.NODE_ENV !== "test" ||
@@ -24,7 +24,7 @@ export async function createAuthDatabase() {
         "migrate",
         "deploy",
         "--schema",
-        resolve(__dirname, "../prisma/schema.prisma"),
+        schemaPath,
       ],
       {
         env: { ...process.env, DATABASE_URL: url.toString() },

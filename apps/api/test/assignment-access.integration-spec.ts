@@ -258,6 +258,7 @@ describe("C034 assignment-bound playback / disposable PostgreSQL", () => {
       id: draft.id, summary: "The speaker paused while answering the opening prompt.", limitations: "One prompted video.",
       approvedAt: expect.any(String), reviewer: null,
       source: { videoId: seed.video.id, uploadedAt: seed.video.createdAt.toISOString() },
+      claims: [], disputes: [],
     }]);
     const stranger = await user("MEMBER");
     expect(await (await reviewRequest(stranger.cookie, "reviews/me")).json()).toEqual({ reports: [], nextCursor: null });

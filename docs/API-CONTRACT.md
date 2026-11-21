@@ -111,12 +111,16 @@ not changes to current auth.
 | PATCH     | `/expert/reviews/:id/draft`        | Assigned expert         | Versioned DRAFT or RETURNED edit with atomic audit. Omitted observations are preserved, and an empty array clears them. Nonempty observation edits require a verified duration. |
 | POST      | `/expert/reviews/:id/submit`       | Assigned expert         | Required summary/limitations; freeze submitted snapshot                                                   |
 | GET       | `/qa/reviews`                      | Scoped moderator       | Submitted queue with session-bound MFA, current assignment grants, and optional `after` cursor            |
-| GET       | `/qa/reviews/:id`                  | Scoped moderator       | Submitted version with private evidence for independent QA                                               |
+| GET       | `/qa/reviews/:id`                  | Scoped moderator       | Submitted version, observation IDs, and factual claim catalog                                            |
 | POST      | `/qa/reviews/:id/return`           | Scoped moderator       | Independent QA, current assignment grant, and actionable reason                                          |
-| POST      | `/qa/reviews/:id/approve`          | Scoped moderator       | Independent QA, current assignment grant, and valid transition                                           |
-| GET       | `/reviews/me`                      | Owner                   | Only QA-approved reports for the caller                                                                   |
-| POST      | `/reviews/:id/disputes`            | Owner                   | Reason, dispute status and audit                                                                          |
-| PATCH     | `/reviews/claims/:id`              | Owner                   | Granular confirmation, share permission, withdrawal                                                       |
+| POST      | `/qa/reviews/:id/approve`          | Scoped moderator       | Independent QA, current assignment grant, and optional evidence-linked claims                            |
+| GET       | `/reviews/me`                      | Owner                   | QA-approved reports, private claim evidence, and recent disputes                                          |
+| POST      | `/reviews/:id/disputes`            | Owner                   | Open a report or claim dispute with a private reason                                                      |
+| PATCH     | `/reviews/claims/:id`              | Owner                   | Revision-checked individual confirmation, share permission, and withdrawal                                |
+| PATCH     | `/reviews/claims/:id/feedback`     | Owner                   | Save a private, revision-checked annotation on approved claim evidence                                    |
+| GET       | `/qa/reviews/disputes`             | Scoped moderator       | Open and in-review disputes with optional `after` cursor                                                 |
+| GET       | `/qa/reviews/disputes/:id`         | Scoped moderator       | Private dispute status and reason with approved report context or linked claim evidence                   |
+| PATCH     | `/qa/reviews/disputes/:id`         | Scoped moderator       | Revision-checked intake and final response                                                               |
 | GET       | `/matches/recommendations`         | Member                  | Reciprocal constraints; current consents; permitted claims only                                           |
 | POST      | `/matches/:pairId/decision`        | Member                  | `ACCEPT`/`DECLINE`; actor must belong to the pair                                                         |
 | POST      | `/blocks`                          | Member                  | Block another user and immediately exclude both directions                                                |

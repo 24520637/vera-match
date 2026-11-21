@@ -20,7 +20,7 @@ export class ReviewDraftRequestGuard implements CanActivate {
     if (request.method !== "GET" && !request.is("application/json"))
       throw new HttpException({ code: "JSON_REQUIRED", message: "Send a JSON request." }, 415);
     const path = request.path.toLowerCase().replace(/\/$/, "");
-    if (Object.keys(request.query).length && !(request.method === "GET" && ["/api/qa/reviews", "/api/reviews/me"].includes(path)))
+    if (Object.keys(request.query).length && !(request.method === "GET" && ["/api/qa/reviews", "/api/qa/reviews/disputes", "/api/reviews/me"].includes(path)))
       throw new HttpException({ code: "INVALID_REQUEST", message: "Query parameters are not supported." }, 400);
     this.limiter.consume("review:ip", request.socket.remoteAddress ?? "unknown", 600, 60000);
     this.limiter.consume("review:" + request.auth!.user.role, request.auth!.user.id, 60, 60000);

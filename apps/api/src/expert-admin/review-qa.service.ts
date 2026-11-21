@@ -8,7 +8,11 @@ import { SafetyAccessService } from "../safety/safety-access.service";
 import { StaffAssuranceSource } from "../safety/staff-assurance.source";
 import { transitionReviewAssignment } from "./review-assignment-transition";
 import { reviewStateConflict } from "./review-draft.service";
-import { requireSubmittableReview, reviewId, reviewReturn, reviewSubmit } from "./review-draft.validation";
+import { requireSubmittableReview, reviewId, reviewReturn } from "./review-draft.validation";
+import { approvedClaimRows, factualStatements, reviewApproval } from "./review-claim.validation";
+import { approvedReviewSelect, approvedReviewSource, approvedReviewWhere } from "./review-approved-source";
+import { claimSelect, ownerClaim } from "./review-claim-projection";
+import { disputeConflict, disputeDecision, disputeSelect } from "./review-dispute";
 import { requireReviewSource } from "./review-source-access";
 
 const queueSize = 10;
@@ -16,9 +20,15 @@ const receipt = { id: true, version: true, submittedAt: true } satisfies Prisma.
 const source = { expertId: true, videoId: true, video: { select: { ownerId: true } } } satisfies Prisma.ExpertAssignmentSelect;
 const detail = { ...receipt, summary: true, limitations: true,
   observations: { orderBy: [{ startMs: "asc" }, { id: "asc" }], select: {
-    category: true, startMs: true, endMs: true, observation: true, context: true,
+    id: true, category: true, startMs: true, endMs: true, observation: true, context: true,
   } },
 } satisfies Prisma.ExpertReviewSelect;
+
+type DisputeContext = {
+  reviewId: string;
+  report: { version: number; summary: string; limitations: string; approvedAt: Date } | null;
+  claim: Pick<NonNullable<ReturnType<typeof ownerClaim>>, "statement" | "evidence"> | null;
+};
 
 // Match the C035 current-grant predicate. The moderator User lock serializes
 // decision checks with PA2 grant/revoke operations.
@@ -151,7 +161,100 @@ export class ReviewQaService {
       const review = await tx.expertReview.findFirst({ where: { id, assignmentId: assignment.id, status: "SUBMITTED", submittedAt: { not: null } }, select: detail });
       if (!review) unavailable();
       await tx.auditLog.create({ data: { actorId: auth.user.id, subjectId: id, subjectType: "ExpertReview", action: "EXPERT_REVIEW_QA_READ" } });
-      return { review };
+      return { review, claimTypes: Object.entries(factualStatements).map(([type, statement]) => ({ type, statement })) };
+    });
+  }
+
+  private async withinDispute<T>(auth: AuthContext, id: string, action: (tx: Prisma.TransactionClient,
+    dispute: Prisma.ReviewDisputeGetPayload<{ select: typeof disputeSelect }>, now: () => Promise<Date>,
+    context: DisputeContext) => Promise<T>) {
+    const locator = await this.prisma.reviewDispute.findUnique({ where: { id }, select: { reviewId: true } })
+      .catch(() => { throw new ServiceUnavailableException({ code: "REVIEW_QA_UNAVAILABLE", message: "The dispute could not be confirmed." }); });
+    if (!locator) {
+      return this.access.run(auth, "MODERATOR", [], async tx => {
+        await this.staff(tx, auth);
+        return unavailable();
+      });
+    }
+    return this.withinReview(auth, locator.reviewId, async (tx, assignment, now) => {
+      const row = await tx.reviewDispute.findFirst({
+        where: { id, reviewId: locator.reviewId, ownerId: assignment.video.ownerId, reviewVersion: { not: null },
+          review: { ...approvedReviewWhere, assignmentId: assignment.id } },
+        select: { ...disputeSelect, reviewVersion: true, review: { select: approvedReviewSelect }, claim: { select: claimSelect } },
+      });
+      if (!row || row.reviewVersion !== row.review.version) unavailable();
+      const { reviewVersion: _version, review, claim, ...dispute } = row;
+      const source = await approvedReviewSource(tx, this.consent, assignment.video.ownerId, review);
+      if (!source) unavailable();
+      if (dispute.claimId === null) {
+        return action(tx, dispute, now, { reviewId: review.id, claim: null, report: {
+          version: review.version, summary: source.summary, limitations: source.limitations, approvedAt: source.decision.decidedAt,
+        } });
+      }
+      const evidence = claim && ownerClaim(claim, assignment.video.ownerId, review.version);
+      if (!evidence) unavailable();
+      return action(tx, dispute, now, { reviewId: review.id, report: null,
+        claim: { statement: evidence.statement, evidence: evidence.evidence } });
+    });
+  }
+
+  async listDisputes(auth: AuthContext, after?: string) {
+    await this.access.run(auth, "MODERATOR", [], async tx => {
+      const validateTime = await this.staff(tx, auth);
+      await tx.auditLog.create({ data: { actorId: auth.user.id, action: "REVIEW_DISPUTE_QUEUE_READ", subjectType: "ReviewDispute" } });
+      await validateTime();
+    });
+    const disputes: Array<{ id: string; reviewId: string; status: "OPEN" | "IN_REVIEW"; createdAt: Date }> = [];
+    let cursor = after;
+    while (disputes.length <= queueSize) {
+      const candidates = await this.prisma.$queryRaw<{ id: string }[]>`
+        SELECT d.id FROM "ReviewDispute" d
+        JOIN "ExpertReview" r ON r.id=d."reviewId" AND r.version=d."reviewVersion"
+        JOIN "ExpertAssignment" a ON a.id=r."assignmentId"
+        JOIN (${activeModeratorGrants(auth.user.id)}) grants ON grants."assignmentId"=a.id
+        JOIN "Video" v ON v.id=a."videoId" AND v."ownerId"=d."ownerId"
+        WHERE d.status IN ('OPEN', 'IN_REVIEW') AND r.status='APPROVED' AND a.status='COMPLETED'
+          AND a."expertId"<>${auth.user.id} AND v."ownerId"<>${auth.user.id}
+          ${cursor ? Prisma.sql`AND d.id>${cursor}` : Prisma.empty}
+        ORDER BY d.id ASC LIMIT ${queueSize + 1}
+      `.catch(() => { throw new ServiceUnavailableException({ code: "REVIEW_QA_UNAVAILABLE", message: "The dispute queue could not be confirmed." }); });
+      for (const { id } of candidates) {
+        try {
+          const entry = await this.withinDispute(auth, id, async (_tx, { status, createdAt }, _now, { reviewId }) =>
+            status === "OPEN" || status === "IN_REVIEW" ? { id, reviewId, status, createdAt } : null);
+          if (entry) disputes.push(entry);
+        } catch (error) {
+          if (!(error instanceof NotFoundException) &&
+            !(error instanceof ForbiddenException && (error.getResponse() as { code?: string }).code === "REVIEW_QA_NOT_INDEPENDENT")) throw error;
+        }
+        if (disputes.length > queueSize) break;
+      }
+      if (candidates.length <= queueSize) break;
+      cursor = candidates[candidates.length - 1].id;
+    }
+    return { disputes: disputes.slice(0, queueSize), nextCursor: disputes.length > queueSize ? disputes[queueSize - 1].id : null };
+  }
+
+  readDispute(auth: AuthContext, value: string) {
+    return this.withinDispute(auth, reviewId(value), async (tx, dispute, _now, context) => {
+      await tx.auditLog.create({ data: { actorId: auth.user.id, subjectType: "ReviewDispute", subjectId: dispute.id, action: "REVIEW_DISPUTE_READ" } });
+      return { dispute, ...context };
+    });
+  }
+
+  decideDispute(auth: AuthContext, value: string, input: unknown) {
+    const { expectedRevision, status, resolution } = disputeDecision(input);
+    return this.withinDispute(auth, reviewId(value), async (tx, dispute, now) => {
+      const from = status === "IN_REVIEW" ? "OPEN" : "IN_REVIEW";
+      if (dispute.status !== from || dispute.revision !== expectedRevision) disputeConflict();
+      const decidedAt = await now();
+      const data = { status, revision: expectedRevision + 1, ...(status === "IN_REVIEW" ? { inReviewAt: decidedAt } :
+        { resolution, resolvedAt: decidedAt }) };
+      const changed = await tx.reviewDispute.updateMany({ where: { id: dispute.id, status: from, revision: expectedRevision }, data });
+      if (changed.count !== 1) disputeConflict();
+      await tx.auditLog.create({ data: { actorId: auth.user.id, subjectType: "ReviewDispute", subjectId: dispute.id,
+        action: "REVIEW_DISPUTE_" + status } });
+      return { dispute: { ...dispute, ...data } };
     });
   }
 
@@ -161,10 +264,12 @@ export class ReviewQaService {
   }
 
   approve(auth: AuthContext, value: string, input: unknown) {
-    return this.decide(auth, value, reviewSubmit(input), "APPROVED", null);
+    const { expectedVersion, claims } = reviewApproval(input);
+    return this.decide(auth, value, expectedVersion, "APPROVED", null, claims);
   }
 
-  private decide(auth: AuthContext, value: string, expectedVersion: number, status: "RETURNED" | "APPROVED", reason: string | null) {
+  private decide(auth: AuthContext, value: string, expectedVersion: number, status: "RETURNED" | "APPROVED", reason: string | null,
+    claims: ReturnType<typeof reviewApproval>["claims"] = []) {
     const id = reviewId(value);
     return this.withinReview(auth, id, async (tx, assignment, validateTime) => {
       const where = { id, assignmentId: assignment.id };
@@ -173,12 +278,14 @@ export class ReviewQaService {
       if (review.version !== expectedVersion || expectedVersion === 2147483647)
         throw new ConflictException({ code: "REVIEW_VERSION_CONFLICT", message: "The review changed. Reload the submitted version." });
       if (review.status !== "SUBMITTED" || assignment.status !== "SUBMITTED" || !review.submittedAt) reviewStateConflict();
+      const version = expectedVersion + 1;
+      let claimRows: ReturnType<typeof approvedClaimRows> = [];
       if (status === "APPROVED") {
         const submitted = await tx.expertReview.findUniqueOrThrow({ where: { id }, select: detail });
-        requireSubmittableReview(submitted, assignment.video.durationMs);
+        requireSubmittableReview({ ...submitted, observations: submitted.observations.map(({ id: _id, ...row }) => row) }, assignment.video.durationMs);
+        claimRows = approvedClaimRows(claims, submitted.observations, assignment.video.ownerId, id, version);
       }
       const decidedAt = await validateTime();
-      const version = expectedVersion + 1;
       const changed = await tx.expertReview.updateMany({
         where: { ...where, version: expectedVersion, status: "SUBMITTED" },
         data: { status, version, qaById: auth.user.id, qaAt: decidedAt, qaFeedback: reason },
@@ -186,6 +293,10 @@ export class ReviewQaService {
       if (changed.count !== 1) reviewStateConflict();
       await transitionReviewAssignment(tx, assignment, status === "APPROVED" ? "COMPLETED" : "IN_PROGRESS", auth.user.id);
       await tx.reviewDecision.create({ data: { reviewId: id, moderatorId: auth.user.id, version, status, reason, decidedAt } });
+      if (claimRows.length) {
+        await tx.reviewClaim.createMany({ data: claimRows });
+        await tx.auditLog.create({ data: { actorId: auth.user.id, subjectId: id, subjectType: "ExpertReview", action: "REVIEW_CLAIMS_APPROVED" } });
+      }
       await tx.auditLog.create({ data: { actorId: auth.user.id, subjectId: id, subjectType: "ExpertReview",
         action: status === "APPROVED" ? "EXPERT_REVIEW_APPROVED" : "EXPERT_REVIEW_RETURNED" } });
       return { id, status, version, decidedAt };

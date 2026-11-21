@@ -6,14 +6,17 @@ import { useAuth } from "../auth/auth-provider";
 import { Button } from "../ui/button";
 import { Modal } from "../ui/modal";
 import { Notice } from "../ui/status";
+import { ReviewDisputes } from "./review-disputes";
 
 type Entry = { id: string; version: number; submittedAt: string };
 type Queue = { reviews: Entry[]; nextCursor: string | null };
 type Review = Entry & {
   summary: string;
   limitations: string;
-  observations: { category: string; startMs: number; endMs: number; observation: string; context: string }[];
+  observations: { id: string; category: string; startMs: number; endMs: number; observation: string; context: string }[];
 };
+type ClaimType = { type: string; statement: string };
+type ClaimEvidence = { observationId: string; context: string; transcript: string };
 
 function message(error: unknown) {
   if (error instanceof ApiError) {
@@ -31,14 +34,21 @@ export function ReviewQa() {
   if (state.status === "checking") return <p role="status">Checking your session…</p>;
   if (state.status !== "authenticated" || state.user.role !== "MODERATOR")
     return <Notice title="Quality review unavailable">Sign in with an authorized moderator session.</Notice>;
-  return <QueueWorkspace key={state.user.id} />;
+  return <ModeratorWorkspace key={state.user.id} />;
 }
 
-function QueueWorkspace() {
+function ModeratorWorkspace() {
+  const [disputes, setDisputes] = useState(false);
+  return disputes ? <ReviewDisputes close={() => setDisputes(false)} /> : <QueueWorkspace openDisputes={() => setDisputes(true)} />;
+}
+
+function QueueWorkspace({ openDisputes }: { openDisputes: () => void }) {
   const [after, setAfter] = useState<string>();
   const [selected, setSelected] = useState<string>();
   const [queue, setQueue] = useState<Queue>();
   const [review, setReview] = useState<Review>();
+  const [claimTypes, setClaimTypes] = useState<ClaimType[]>([]);
+  const [claims, setClaims] = useState<Record<string, ClaimEvidence>>({});
   const [reason, setReason] = useState("");
   const [error, setError] = useState("");
   const [result, setResult] = useState("");
@@ -57,11 +67,15 @@ function QueueWorkspace() {
     setQueue(undefined);
     setReview(undefined);
     setReason("");
+    setClaims({});
     async function load() {
       if (selected) {
-        const data = await apiJson<{ review: Review }>(`/qa/reviews/${selected}`, { signal });
+        const data = await apiJson<{ review: Review; claimTypes: ClaimType[] }>(`/qa/reviews/${selected}`, { signal });
         if (!data) throw new Error("Missing review.");
-        if (!signal.aborted) setReview(data.review);
+        if (!signal.aborted) {
+          setReview(data.review);
+          setClaimTypes(data.claimTypes);
+        }
       } else {
         const query = after ? `?after=${encodeURIComponent(after)}` : "";
         const data = await apiJson<Queue>(`/qa/reviews${query}`, { signal });
@@ -82,7 +96,12 @@ function QueueWorkspace() {
     setError("");
     try {
       await apiJson(`/qa/reviews/${review.id}/${action}`, {
-        method: "POST", signal, json: { expectedVersion: review.version, ...(action === "return" ? { reason } : {}) },
+        method: "POST", signal, json: { expectedVersion: review.version, ...(action === "return" ? { reason } : {
+          claims: Object.entries(claims).map(([type, evidence]) => ({
+            type, observationId: evidence.observationId, context: evidence.context,
+            transcript: evidence.transcript.trim() || undefined,
+          })),
+        }) },
       });
       if (signal.aborted) return;
       setResult(action === "approve" ? "Review approved." : "Review returned to the expert.");
@@ -106,8 +125,12 @@ function QueueWorkspace() {
     setSelected(id);
   }
 
+  const speech = review?.observations.filter(note => note.category === "SPEECH") ?? [];
+  const missingEvidence = Object.values(claims).some(claim => !claim.observationId || !claim.context.trim());
+
   return <main className="container page-heading">
     <h1>Review quality assurance</h1>
+    <Button variant="secondary" disabled={saving} onClick={openDisputes}>Review disputes</Button>
     {loading && <p role="status">Loading reviews…</p>}
     {result && <p role="status">{result}</p>}
     {error && <Notice title="Review request failed" tone="error">{error}</Notice>}
@@ -131,12 +154,50 @@ function QueueWorkspace() {
       <p style={{ whiteSpace: "pre-wrap" }}>{review.limitations}</p>
       <h3>Timeline observations</h3>
       {review.observations.length === 0 && <p>No timecoded observations were submitted.</p>}
-      <ol>{review.observations.map((note, index) => <li key={index}>
+      <ol>{review.observations.map(note => <li key={note.id}>
         <p>{note.category} · {note.startMs}–{note.endMs} ms</p>
         <p style={{ whiteSpace: "pre-wrap" }}>{note.observation}</p>
         <p style={{ whiteSpace: "pre-wrap" }}>Context: {note.context}</p>
       </li>)}</ol>
-      <Button disabled={saving} onClick={() => setConfirming(true)}>Approve review</Button>
+      {speech.length > 0 && <fieldset disabled={saving}>
+        <legend>Factual claims for owner confirmation (optional)</legend>
+        {claimTypes.map(({ type, statement }) => {
+          const evidence = claims[type];
+          function update(change: Partial<ClaimEvidence>) {
+            setClaims(current => ({ ...current, [type]: { ...current[type], ...change } }));
+          }
+          return <div key={type}>
+            <label><input type="checkbox" checked={!!evidence} onChange={event => {
+              const checked = event.target.checked;
+              setClaims(current => {
+                const next = { ...current };
+                if (checked) next[type] = { observationId: "", context: "", transcript: "" };
+                else delete next[type];
+                return next;
+              });
+            }} /> {statement}</label>
+            {evidence && <fieldset>
+              <legend>Evidence for {statement}</legend>
+              <p><label>Speech observation<br />
+                <select value={evidence.observationId} onChange={event =>
+                  update({ observationId: event.target.value, context: "", transcript: "" })}>
+                  <option value="">Select an observation</option>
+                  {speech.map(note => <option key={note.id} value={note.id}>
+                    {note.startMs}–{note.endMs} ms · {note.observation.slice(0, 100)}
+                  </option>)}
+                </select>
+              </label></p>
+              <p><label>Context<br />
+                <textarea value={evidence.context} maxLength={1000} onChange={event => update({ context: event.target.value })} />
+              </label></p>
+              <p><label>Manual transcript (optional)<br />
+                <textarea value={evidence.transcript} maxLength={2000} onChange={event => update({ transcript: event.target.value })} />
+              </label></p>
+            </fieldset>}
+          </div>;
+        })}
+      </fieldset>}
+      <Button disabled={saving || missingEvidence} onClick={() => setConfirming(true)}>Approve review</Button>
       <form onSubmit={event => { event.preventDefault(); void decide("return"); }}>
         <p><label>What should the expert change?<br />
           <textarea value={reason} onChange={event => setReason(event.target.value)} maxLength={2000} required disabled={saving} />
@@ -145,7 +206,7 @@ function QueueWorkspace() {
       </form>
     </>}
     <Modal open={confirming} onOpenChange={setConfirming} title="Approve this review?"
-      description="The member will be able to read the approved summary and limitations while access remains authorized.">
+      description="The review and any selected factual claims will be approved together. Claim sharing requires a separate decision from the member.">
       <Button variant="secondary" onClick={() => setConfirming(false)}>Keep reviewing</Button>
       <Button onClick={() => void decide("approve")}>Confirm approval</Button>
     </Modal>

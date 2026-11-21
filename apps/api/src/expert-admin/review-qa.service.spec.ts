@@ -14,9 +14,15 @@ describe("C057–C058 independent quality review", () => {
 
   function setup(expertId = "expert") {
     const assignment = { id: "assignment", expertId, videoId: "video", status: "SUBMITTED", revision: 2n,
-      cancelledAt: null, expiresAt: null, video: { ownerId: "owner", status: "READY", deletedAt: null } };
+      cancelledAt: null, expiresAt: null, video: { ownerId: "owner", status: "READY", deletedAt: null, durationMs: 8000 } };
     const review = { version: 3, status: "SUBMITTED", submittedAt: now, summary: "A recorded observation.",
-      limitations: "A single recording.", observations: [] };
+      limitations: "A single recording.", observations: [] as Array<{
+        id: string; category: string; startMs: number; endMs: number; observation: string; context: string;
+      }> };
+    const approved = { ...review, id: "review", qaAt: now, qaById: moderator.user.id, assignment,
+      decisions: [{ version: 3, moderatorId: moderator.user.id, decidedAt: now }] };
+    const dispute = { id: "dispute", claimId: null, reviewVersion: 3, review: approved, claim: null, revision: 0,
+      status: "OPEN", reason: "Synthetic owner reason.", resolution: null, createdAt: now, inReviewAt: null, resolvedAt: null };
     const grantLookup = jest.fn(async () => [{ expiresAt }]);
     const tx = {
       $queryRaw: jest.fn(async (query: TemplateStringsArray) =>
@@ -29,9 +35,12 @@ describe("C057–C058 independent quality review", () => {
       expertAssignment: { findUnique: jest.fn(async () => assignment), updateMany: jest.fn(async () => ({ count: 1 })) },
       expertActorIdentity: { upsert: jest.fn(async () => ({ subjectId: "opaque-actor" })) },
       reviewDecision: { create: jest.fn() },
+      reviewClaim: { createMany: jest.fn() },
+      reviewDispute: { findFirst: jest.fn(async () => dispute), updateMany: jest.fn(async () => ({ count: 1 })) },
       auditLog: { create: jest.fn() },
     };
-    const prisma = { expertReview: { findUnique: jest.fn(async () => ({ assignmentId: assignment.id, assignment })) } };
+    const prisma = { expertReview: { findUnique: jest.fn(async () => ({ assignmentId: assignment.id, assignment })) },
+      reviewDispute: { findUnique: jest.fn(async () => ({ reviewId: "review" })) } };
     const access = { run: jest.fn(async (_auth, _role, _peers, action) => action(tx, now)) };
     const assurance = { resolve: jest.fn(async () => ({ userId: moderator.user.id, sessionId: moderator.sessionId, level: "MFA",
       verifiedAt: now, expiresAt, testOnly: true })) };
@@ -39,7 +48,7 @@ describe("C057–C058 independent quality review", () => {
     const environment = { values: { nodeEnv: "test" } };
     const service = new ReviewQaService(prisma as unknown as PrismaService, access as unknown as SafetyAccessService,
       assurance as unknown as StaffAssuranceSource, environment as EnvironmentService, consent as unknown as ConsentAccessService);
-    return { service, tx, assignment, review, assurance, consent, grantLookup };
+    return { service, tx, assignment, review, assurance, consent, grantLookup, dispute };
   }
 
   it("rejects a blank reason and writes no feedback", () => {
@@ -126,5 +135,87 @@ describe("C057–C058 independent quality review", () => {
     });
     expect(tx.expertAssignment.updateMany).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: "COMPLETED" }) }));
     expect(tx.auditLog.create).toHaveBeenCalledWith({ data: { actorId: "moderator", subjectId: "review", subjectType: "ExpertReview", action: "EXPERT_REVIEW_APPROVED" } });
+  });
+
+  it("captures only canonical claims and takes their time ranges from the approved speech snapshot", async () => {
+    const { service, tx, review } = setup();
+    review.observations.push({ id: "speech", category: "SPEECH", startMs: 150, endMs: 2000,
+      observation: "The member mentioned reading.", context: "Hobbies prompt." });
+    await service.approve(moderator, "review", { expectedVersion: 3, claims: [{
+      type: "INTEREST_READING", observationId: "speech", context: " Hobbies prompt. ", transcript: " I enjoy reading. ",
+    }] });
+    expect(tx.reviewClaim.createMany).toHaveBeenCalledWith({ data: [{
+      ownerId: "owner", reviewId: "review", reviewVersion: 4, claimType: "INTEREST_READING",
+      claimText: "The member said they enjoy reading.", sourceObservationId: "speech", sourceCategory: "SPEECH",
+      sourceStartMs: 150, sourceEndMs: 2000, transcript: "I enjoy reading.", context: "Hobbies prompt.",
+      qaApproved: true, ownerConfirmed: false, shareApproved: false,
+    }] });
+  });
+
+  it("rejects foreign or non-speech evidence before any transition", async () => {
+    const { service, tx, review } = setup();
+    review.observations.push({ id: "gesture", category: "BODY", startMs: 150, endMs: 2000,
+      observation: "A gesture.", context: "Hobbies prompt." });
+    for (const observationId of ["gesture", "foreign"]) {
+      await expect(service.approve(moderator, "review", { expectedVersion: 3, claims: [{
+        type: "INTEREST_READING", observationId, context: "Hobbies prompt.",
+      }] })).rejects.toMatchObject({ status: 400 });
+    }
+    expect(tx.expertReview.updateMany).not.toHaveBeenCalled();
+    expect(tx.reviewClaim.createMany).not.toHaveBeenCalled();
+  });
+
+  it("rejects unsupported, duplicate, or client-authored claims before taking the QA lock", () => {
+    const { service, tx } = setup();
+    const claim = { type: "INTEREST_READING", observationId: "speech", context: "Hobbies prompt." };
+    for (const claims of [[{ ...claim, type: "HONESTY" }], [claim, claim], [{ ...claim, claimText: "Free text." }]]) {
+      expect(() => service.approve(moderator, "review", { expectedVersion: 3, claims })).toThrow(expect.objectContaining({ status: 400 }));
+    }
+    expect(tx.$queryRaw).not.toHaveBeenCalled();
+  });
+
+  it("transitions a dispute separately from the immutable review and audits the action without free text", async () => {
+    const { service, tx, dispute } = setup();
+    await expect(service.decideDispute(moderator, "dispute", { expectedRevision: 0, status: "RESOLVED", resolution: "Response" }))
+      .rejects.toMatchObject({ status: 409 });
+    await expect(service.decideDispute(moderator, "dispute", { expectedRevision: 0, status: "IN_REVIEW" }))
+      .resolves.toMatchObject({ dispute: { status: "IN_REVIEW", revision: 1, inReviewAt: now } });
+    dispute.status = "IN_REVIEW";
+    dispute.revision = 1;
+    await expect(service.decideDispute(moderator, "dispute", { expectedRevision: 1, status: "RESOLVED", resolution: "Response" }))
+      .resolves.toMatchObject({ dispute: { status: "RESOLVED", revision: 2, resolution: "Response", resolvedAt: now } });
+    expect(tx.auditLog.create).toHaveBeenLastCalledWith({ data: { actorId: moderator.user.id, subjectType: "ReviewDispute",
+      subjectId: "dispute", action: "REVIEW_DISPUTE_RESOLVED" } });
+    expect(tx.expertReview.updateMany).not.toHaveBeenCalled();
+    expect(tx.reviewClaim.createMany).not.toHaveBeenCalled();
+  });
+
+  it("denies dispute access without a current moderator grant", async () => {
+    const { service, tx, grantLookup } = setup();
+    grantLookup.mockResolvedValueOnce([]);
+    await expect(service.readDispute(moderator, "dispute")).rejects.toMatchObject({ status: 404 });
+    expect(tx.reviewDispute.findFirst).not.toHaveBeenCalled();
+  });
+
+  it("returns only the approved report context for a report-wide dispute", async () => {
+    const { service, dispute } = setup();
+    const { review, reviewVersion: _version, claim: _claim, ...privateCase } = dispute;
+    await expect(service.readDispute(moderator, dispute.id)).resolves.toEqual({
+      dispute: privateCase, reviewId: review.id, claim: null,
+      report: { version: review.version, summary: review.summary, limitations: review.limitations, approvedAt: now },
+    });
+  });
+
+  it.each(["stale version", "missing approved content"])("denies reading or deciding a report-wide dispute with %s", async problem => {
+    const { service, tx, dispute } = setup();
+    if (problem === "stale version") dispute.reviewVersion--;
+    else dispute.review.summary = " ";
+    dispute.status = "IN_REVIEW";
+    dispute.revision = 1;
+    await expect(service.readDispute(moderator, dispute.id)).rejects.toMatchObject({ status: 404 });
+    await expect(service.decideDispute(moderator, dispute.id, { expectedRevision: 1, status: "RESOLVED", resolution: "Response" }))
+      .rejects.toMatchObject({ status: 404 });
+    expect(tx.reviewDispute.updateMany).not.toHaveBeenCalled();
+    expect(tx.auditLog.create).not.toHaveBeenCalled();
   });
 });

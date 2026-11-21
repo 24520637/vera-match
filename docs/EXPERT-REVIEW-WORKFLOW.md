@@ -6,6 +6,10 @@ Server-owned video duration gates timecoded observation edits. When the media
 ingest path cannot verify duration, reviewers can save text-only changes while
 preserving existing observations. See [T08 delivery and verification](T08-DELIVERY.md).
 
+T12 adds factual claims, granular owner permissions, disputes, and a
+matching eligibility reader. These features remain subject to their
+documented authorization, consent, and production-readiness gates.
+
 ## 1. Participants and safeguards
 
 - **MEMBER:** owns the video, grants and revokes permissions, receives a QA-approved report, may respond/dispute, and controls sharing of eligible factual statements.
@@ -98,8 +102,106 @@ decisions provide report approval provenance and hold private return feedback.
 Source deletion removes those decisions and clears the current QA actor and
 feedback fields in the same transaction. Review audit entries use opaque actor
 subjects. These subjects can still be linkable, so the existing purpose and
-retention policy applies to the evidence. Claims, sharing, and disputes remain future work.
+retention policy applies to the evidence. Claims, sharing, and disputes are implemented under T12, subject to
+their documented authorization, consent, and production-readiness
+limitations.
+
+QA action history remains attached to the live review. General audit
+events contain identifiers and action metadata.
 
 Staff assurance and expert qualification retain their fail-closed defaults.
 Production access still requires approved evidence and trusted session-bound
 assurance providers.
+
+## 7. T12 claims and disputes
+
+All paths below are relative to `/api`. The member uses `/account/reviews`.
+The moderator uses `/qa/reviews` for both submitted reviews and disputes.
+Reads and writes require a valid session and responses use private, no-store
+headers. Browser writes require JSON and the configured application origin.
+
+### QA approval
+
+`GET /qa/reviews/:id` includes observation IDs and a `claimTypes` catalog
+of `{ type, statement }`. `POST /qa/reviews/:id/approve` accepts
+`{ expectedVersion, claims? }`. Each optional claim contains `type`,
+`observationId`, `context` (1–1,000 characters), and optional `transcript`
+(1–2,000 characters). A type may appear once per review. The catalog contains
+six self-reported interests. An independent moderator checks that the speech
+supports the selected statement in context. The server supplies the canonical
+statement and copies timecodes from a speech observation on the submitted
+snapshot. QA, claim creation, assignment completion, and audit commit together.
+Claims start unconfirmed and unshared. Approval still accepts an empty claim
+list or a body containing only `expectedVersion`.
+
+### Individual owner decisions
+
+`GET /reviews/me` adds a `claims` array to each approved report. Claim items
+contain `id`, `type`, `statement`, `evidence`, `ownerConfirmed`,
+`shareApproved`, `revokedAt`, and `revision`. Evidence contains `startMs`,
+`endMs`, `context`, and nullable `transcript`. Claim approval provenance must
+match the visible report version. The owner sees only approved claim evidence.
+
+Each claim includes `feedback`, an array of the owner's private annotations.
+`PATCH /reviews/claims/:id/feedback` accepts `{ target, note, expectedRevision }`
+and returns `{ feedback }`. The target is `CONTEXT` or `TRANSCRIPT`. A
+transcript must exist before it can be annotated. A note has 1–2,000 characters.
+Use revision `0` for a new annotation. Each target has its own revision, and
+saving identical text again returns the current annotation. Each item contains
+`target`, `note`, `revision`, and `updatedAt`. Inaccessible claims return `404`
+and an edit against a stale revision returns `409`. Annotations are visible in
+the owner's report and leave the approved evidence, disputes, and sharing state
+unchanged. Matching receives only the permitted canonical statement.
+
+`PATCH /reviews/claims/:id` accepts `{ action, expectedRevision }` and returns
+`{ claim }`. The actions are `CONFIRM`, `SHARE`, and `REVOKE`. Sharing requires
+a confirmed claim and current `PROFILE_MATCHING`, `REPORT_SHARING`, and
+`VIDEO_CLAIM_MATCHING` consent. Withdrawal invalidates the stored consent
+generation. A later grant requires a fresh explicit share. Individual revocation
+is permanent for that claim. An inaccessible claim returns `404`, absent sharing
+consent returns `403`, and stale revisions or invalid transitions return `409`.
+
+### Disputes
+
+`POST /reviews/:id/disputes` accepts `{ reason, claimId? }`. The reason has
+1–2,000 characters. Omitting `claimId` opens a dispute about the entire report.
+Each approved report version supports one active dispute. The call returns
+`201` with `{ dispute }`. The owner sees the ten most recent disputes on the
+report, including moderator responses and timestamps.
+
+Moderators use `GET /qa/reviews/disputes` to list active cases and
+`GET /qa/reviews/disputes/:id` returns `{ dispute, reviewId, report, claim }`.
+For an entire-report dispute, `report` contains `version`, `summary`,
+`limitations`, and `approvedAt`, and `claim` is null. For a claim dispute,
+`claim` contains its statement and evidence, and `report` is null. Reading and
+deciding a case require independent, session-bound MFA, a current grant for
+the assignment, current source consent, and the approved snapshot for that
+dispute version. The case screen enables decisions after the case context is
+loaded. `PATCH /qa/reviews/disputes/:id` accepts
+`{ status, expectedRevision, resolution? }` and returns `{ dispute }`.
+Intake moves `OPEN` to `IN_REVIEW`. Closing moves `IN_REVIEW` to `RESOLVED`
+(upheld) or `REJECTED`, with a response of 1–2,000 characters.
+When the source video is deleted or a withdrawal invalidates its storage or
+expert review consent generation, the existing access checks immediately hide
+the report and dispute and exclude the claims from matching. The privacy worker
+reconciles pending versioned cases to `CLOSED_SOURCE_UNAVAILABLE`, with a closure
+timestamp and metadata-only system audit in the same transaction. The closure
+audit uses the earliest recorded source-loss cause. If the recorded times tie
+or deletion has no timestamp and a withdrawal is recorded, it uses withdrawal.
+The closure has no moderator response. A new consent grant does not reopen the case or
+restore access to the old source. This transition preserves existing rows and
+does not set a retention period or authorize access to retained evidence.
+The approved review version remains immutable throughout the dispute. General
+audit records contain action and identifiers. Claim and dispute audit entries
+are append-only. Human actors use opaque subjects, and system closures have
+a null actor. Free text stays in the case.
+
+### Matching eligibility
+
+`readMatchingClaimsInTransaction` checks participant blocks and current
+consents under sorted user locks. It checks current source authorization,
+independent QA, owner confirmation, consent-generation-bound sharing, and
+individual revocation. Open, in-review, and upheld disputes suppress affected
+claims. It returns only distinct canonical claim types and statements. T14
+owns pair eligibility, scores, explanations, and the recommendations endpoint.
+Use the claim reader in the transaction that consumes the result.

@@ -103,8 +103,15 @@ export class ConsentService {
           oldGranted, newGranted: item.granted, kind, previousVersion: BigInt(current), nextVersion: BigInt(current + 1),
           policyVersion, policyEvidenceId, evidenceGap: !policyEvidenceId && (oldGranted || old?.grantedAt != null || policyVersion !== null),
         } });
-        if (!item.granted) await tx.consentWithdrawalTask.create({ data: { subjectId: ledger.subjectId,
-          eventId: event.id, purpose: item.purpose, version: BigInt(current + 1) } });
+        if (!item.granted) {
+          // For source-loss audit ordering, use a clock reading under the owner
+          // lock. PostgreSQL's default now() is the transaction start time.
+          const sourceWithdrawal = item.purpose === "VIDEO_STORAGE" || item.purpose === "EXPERT_VIDEO_REVIEW";
+          const [clock] = sourceWithdrawal ? await tx.$queryRaw<{ now: Date }[]>`
+            SELECT (clock_timestamp() AT TIME ZONE 'UTC')::timestamp(3) AS now` : [];
+          await tx.consentWithdrawalTask.create({ data: { subjectId: ledger.subjectId, eventId: event.id,
+            purpose: item.purpose, version: BigInt(current + 1), createdAt: clock?.now } });
+        }
       }
       const response = project(await tx.consent.findMany({ where: { userId } }), current + 1);
       await tx.consentIdempotency.upsert({ where: { subjectId_keyHash: { subjectId: ledger.subjectId, keyHash } },

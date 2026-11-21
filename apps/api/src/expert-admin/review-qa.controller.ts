@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, Param, Post, Query, Req, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, HttpCode, Param, Patch, Post, Query, Req, UseGuards } from "@nestjs/common";
 import type { AuthenticatedRequest } from "../auth/auth-context";
 import { Roles, RolesGuard } from "../auth/roles.guard";
 import { SessionAuthGuard } from "../auth/session-auth.guard";
@@ -15,6 +15,21 @@ export class ReviewQaController {
   @Get()
   list(@Req() request: AuthenticatedRequest, @Query() query: unknown) {
     return this.qa.list(request.auth!, reviewCursor(query));
+  }
+
+  @Get("disputes")
+  listDisputes(@Req() request: AuthenticatedRequest, @Query() query: unknown) {
+    return this.qa.listDisputes(request.auth!, reviewCursor(query));
+  }
+
+  @Get("disputes/:id")
+  readDispute(@Req() request: AuthenticatedRequest, @Param("id") id: string) {
+    return this.qa.readDispute(request.auth!, id);
+  }
+
+  @Patch("disputes/:id")
+  decideDispute(@Req() request: AuthenticatedRequest, @Param("id") id: string, @Body() body: unknown) {
+    return this.qa.decideDispute(request.auth!, id, body);
   }
 
   @Get(":id")
