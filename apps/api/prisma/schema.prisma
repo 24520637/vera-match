@@ -300,6 +300,8 @@ model Video {
   mimeType String
   sizeBytes Int?
   durationMs Int?
+  // One retry for READY uploads whose original promoted object is identifiable.
+  durationRetryEtag String?
   status VideoStatus @default(UPLOADING)
   createdAt DateTime @default(now())
   deletedAt DateTime?
@@ -385,6 +387,7 @@ model ExpertAssignmentIdentity {
   assignmentId String @id
   receipts AssignmentIdempotency[]
   moderatorScopes AssignmentModeratorScope[]
+  reviewDecisionEvidence ReviewDecisionEvidence[]
 }
 
 // PA2 persistence only. Live moderator identity resolves through ExpertActorIdentity;
@@ -545,6 +548,18 @@ model ReviewDecision {
   decidedAt DateTime
   @@id([reviewId, version])
 }
+
+model ReviewDecisionEvidence {
+  assignmentId String
+  assignmentIdentity ExpertAssignmentIdentity @relation(fields: [assignmentId], references: [assignmentId], onDelete: Restrict, onUpdate: NoAction)
+  reviewId String
+  version Int
+  status ReviewStatus
+  moderatorSubjectId String? @db.Uuid
+  decidedAt DateTime
+  @@id([assignmentId, reviewId, version])
+}
+
 model ExpertObservation {
   id String @id @default(cuid())
   reviewId String

@@ -1,6 +1,14 @@
 # Expert-led video review — workflow and interface specification
 
-T10 implements draft submission, independent QA, and private owner reports. T12 adds factual claims, granular owner permission, disputes, and a matching eligibility reader. Human reviewers perform and document assessments through the VERA Match application.
+**Implementation status:** T10 implements draft submission, independent QA, and private owner reports. Human reviewers perform and document assessments through the VERA Match application. No pretrained personality model performs the analysis. See [T10 implementation](#6-t10-implementation) for authorization and verification status.
+
+Server-owned video duration gates timecoded observation edits. When the media
+ingest path cannot verify duration, reviewers can save text-only changes while
+preserving existing observations. See [T08 delivery and verification](T08-DELIVERY.md).
+
+T12 adds factual claims, granular owner permissions, disputes, and a
+matching eligibility reader. These features remain subject to their
+documented authorization, consent, and production-readiness gates.
 
 ## 1. Participants and safeguards
 
@@ -57,8 +65,10 @@ Human assessments are **interpretations of observable material**, with explicit 
 
 The reviewer workspace is `/expert/assignments/:assignmentId/review`, the
 moderator queue is `/qa/reviews`, and the owner report page is
-`/account/reviews`. T10 uses the draft API, editor, draft invariants, and
-server-measured video duration from T08 at `5c6c8f4`. The draft API uses
+`/account/reviews`. T10 extends the draft API, editor, draft invariants, and
+server-measured video duration delivered by T08 PR #22. T08 also delivers
+duration recovery for eligible READY videos and C051 migration regression
+coverage. The draft API uses
 `GET/POST /api/expert/assignments/:assignmentId/draft` and
 `PATCH /api/expert/reviews/:id/draft`. Current storage and review consent,
 their bound generations, reviewer qualification, and the existing
@@ -71,7 +81,7 @@ session-bound access rules apply to every expert request.
 | C057 | `POST /api/qa/reviews/:id/return` accepts `{ expectedVersion, reason }`. The actionable reason must contain 1 to 2,000 characters after trimming. The expert can revise the returned version and resubmit. Previous decisions remain in the private review history. |
 | C058 | `GET /api/qa/reviews` and `GET /api/qa/reviews/:id` show submissions to independent moderators with session-bound MFA and a current C035 moderator grant for the assignment. The same grant is required to return or approve the review. `POST /api/qa/reviews/:id/approve` accepts `{ expectedVersion }`, validates the snapshot and completes the assignment. Authors cannot decide on their own submissions, including after a role change. |
 | C059 | `GET /api/reviews/me` returns only the caller's approved reports with matching independent QA evidence. Each report includes summary, limitations, approval time, reviewer display name when available, and source video reference and upload time. Raw timeline notes, QA feedback, moderator identity, and storage locators stay private. |
-| C060 | Focused tests exercise field and version validation, transition guards, authorization, and the owner projection. PostgreSQL integration scenarios cover concurrent submission, concurrent draft edit and submit, return and resubmission, moderator grant revocation, approval, and consent withdrawal. |
+| C060 | PostgreSQL integration scenarios cover submission and stale writes, concurrent return and approval, authorization after grant revocation and consent withdrawal or regrant, failed audit inserts, and history after source deletion. |
 
 QA and owner list endpoints accept an optional `after` cursor and return
 `nextCursor`. Each transition requires the current version. Invalid states and
@@ -82,9 +92,22 @@ stale versions return `409`. The expert-visible submitted receipt carries
 The owner report requires current storage and expert review permissions tied
 to the original source generation. Withdrawal or source deletion stops new
 report reads. Regrant does not restore an old report. Retained report access
-following review-only withdrawal requires separate policy approval. QA action
-history remains attached to the live review. General audit events contain
-identifiers and action metadata.
+following review-only withdrawal requires separate policy approval.
+
+QA decision evidence is append-only and survives edits, resubmission, and source
+deletion. It records the assignment and review identifiers, decision version,
+outcome, timestamp, and opaque moderator subject when known. The evidence excludes
+return text, raw account IDs, report contents, and video data or locators. Live
+decisions provide report approval provenance and hold private return feedback.
+Source deletion removes those decisions and clears the current QA actor and
+feedback fields in the same transaction. Review audit entries use opaque actor
+subjects. These subjects can still be linkable, so the existing purpose and
+retention policy applies to the evidence. Claims, sharing, and disputes are implemented under T12, subject to
+their documented authorization, consent, and production-readiness
+limitations.
+
+QA action history remains attached to the live review. General audit
+events contain identifiers and action metadata.
 
 Staff assurance and expert qualification retain their fail-closed defaults.
 Production access still requires approved evidence and trusted session-bound

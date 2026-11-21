@@ -83,6 +83,7 @@ test("authorized playback uses the assigned endpoint and exposes timeline marker
       calls++;
       expect(new URL(request.url()).pathname).toBe("/api/expert/assignments/synthetic-assignment/playback");
       expect(request.postDataJSON()).toEqual({});
+      if (calls === 1) return route.fulfill({ status: 503, json: { code: "VIDEO_STORAGE_UNAVAILABLE" } });
       return route.fulfill({ json: { url: videoUrl, expiresAt: new Date(Date.now() + 60000).toISOString() } });
     }
     return route.fulfill({ json: { durationMs: 10000, draft: { id: "draft-one", version: 1, summary: null,
@@ -93,5 +94,11 @@ test("authorized playback uses the assigned endpoint and exposes timeline marker
   await expect(page.getByLabel("Category")).toHaveValue("BODY");
   await expect(page.getByRole("button", { name: "Jump to start" })).toBeDisabled();
   await page.getByRole("button", { name: "Load playback" }).click();
-  await expect.poll(() => calls).toBe(1);
+  await expect(page.getByRole("status").filter({ hasText: "Playback is unavailable." })).toBeVisible();
+  await expect(page.getByLabel("Summary")).toBeVisible();
+  await page.getByRole("button", { name: "Load playback" }).click();
+  await expect(page.getByRole("status").filter({ hasText: "The video could not be played." })).toBeVisible();
+  await expect(page.getByLabel("Assigned video")).toHaveCount(0);
+  await page.getByRole("button", { name: "Load playback" }).click();
+  await expect.poll(() => calls).toBe(3);
 });

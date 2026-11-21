@@ -198,8 +198,21 @@ export class VideoService {
             message: "Video not found.",
           });
         await this.requireGeneration(tx, ownerId, video.storageConsentVersion);
-        if (video.status === "READY" && !video.deletedAt)
+        if (video.status === "READY" && !video.deletedAt) {
+          if (video.durationMs === null && video.durationRetryEtag && video.sizeBytes !== null &&
+              video.bucket === this.storage.bucket) {
+            const durationMs = await this.storage.measureDuration(
+              video.objectKey, video.durationRetryEtag, video.sizeBytes, video.mimeType,
+            );
+            if (durationMs !== undefined) {
+              await tx.video.update({ where: { id }, data: { durationMs, durationRetryEtag: null } });
+              if (durationMs !== null) await tx.auditLog.create({
+                data: { actorId: ownerId, action: "VIDEO_DURATION_VERIFIED", subjectType: "Video", subjectId: id },
+              });
+            }
+          }
           return { id, status: "READY" as const };
+        }
         if (
           video.status !== "UPLOADING" ||
           video.deletedAt ||
@@ -231,10 +244,12 @@ export class VideoService {
           object.etag,
           video.mimeType,
         );
-        const durationMs = promotedEtag ? await this.storage.measureDuration(
+        const durationMs = promotedEtag ? (await this.storage.measureDuration(
           video.objectKey, promotedEtag, object.size, video.mimeType,
-        ) : null;
-        await tx.video.update({ where: { id }, data: { status: "READY", durationMs } });
+        )) ?? null : null;
+        await tx.video.update({ where: { id }, data: {
+          status: "READY", durationMs, durationRetryEtag: durationMs === null ? promotedEtag ?? null : null,
+        } });
         await tx.auditLog.create({
           data: {
             actorId: ownerId,

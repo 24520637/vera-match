@@ -20,6 +20,17 @@ return 404 without disclosing whether another member owns them. Storage errors
 are sanitized 503. Container signatures are not antivirus, transcoding, full
 codec validation or personality analysis.
 
+When configured, the API measures a conservative video frame span from the
+promoted object with FFprobe. A READY video can have no verified duration if
+the probe is unavailable or fails. If the original promotion supplied an ETag,
+the owner can repeat the empty confirmation request for one additional probe
+attempt. The storage read uses the original ETag and size. An unavailable or
+busy probe leaves the retry available. The retry uses the original storage
+consent generation and serializes with withdrawal, deletion, and other owner
+confirmations. Only a successful recovery emits `VIDEO_DURATION_VERIFIED`.
+Timecoded review edits require a positive server measurement. Earlier uploads
+without recorded promotion identity have no automatic backfill.
+
 ## Withdrawal and concurrency
 
 Issuance/confirmation hold the same User row lock used by the actual Consent
