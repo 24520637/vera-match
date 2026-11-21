@@ -206,9 +206,10 @@ function Workspace({ assignmentId }: { assignmentId: string }) {
         <legend>Private review draft</legend>
         {data.draft.feedback && <Notice title="Returned for revision"><span style={{ whiteSpace: "pre-wrap" }}>{data.draft.feedback}</span></Notice>}
         <p role="status">{busy ? "Saving…" : dirty ? "Unsaved changes" : `Saved version ${data.draft.version}`}</p>
-        {!validNotes && <p role="status">Correct or remove observations with missing evidence, context or verified time ranges before submitting.</p>}
+        {notesDirty && !validNotes && <p role="status">Enter evidence, context and valid start and end times to save your changes.</p>}
+        {!notesDirty && !validNotes && <p role="status">Correct or remove observations with missing evidence, context or verified time ranges before submitting.</p>}
         {error && dirty && <Button onClick={() => setError("")} disabled={error.startsWith("This draft changed")}>Retry save</Button>}
-        <p>Describe what is observable and explain the context. Use Limitations to record uncertainty and limits of the source.</p>
+        <p>Describe only what is observable, explain the context, and avoid diagnostic or personality labels. Use Limitations to record uncertainty and limits of the source.</p>
         <p><label>Summary<br /><textarea value={form.summary} onChange={e => edit({ ...form, summary: e.target.value })} /></label></p>
         <p><label>Limitations<br /><textarea value={form.limitations} onChange={e => edit({ ...form, limitations: e.target.value })} /></label></p>
         <ol aria-label="Timeline observations">

@@ -1,6 +1,10 @@
 # Expert-led video review — workflow and interface specification
 
-**Implementation status:** T10 implements draft submission, independent QA, and private owner reports. Human reviewers perform and document assessments through the VERA Match application. See [T10 implementation](#6-t10-implementation) for authorization and verification status.
+**Implementation status:** T10 implements draft submission, independent QA, and private owner reports. Human reviewers perform and document assessments through the VERA Match application. No pretrained personality model performs the analysis. See [T10 implementation](#6-t10-implementation) for authorization and verification status.
+
+Server-owned video duration gates timecoded observation edits. When the media
+ingest path cannot verify duration, reviewers can save text-only changes while
+preserving existing observations. See [T08 delivery and verification](T08-DELIVERY.md).
 
 ## 1. Participants and safeguards
 
@@ -57,10 +61,10 @@ Human assessments are **interpretations of observable material**, with explicit 
 
 The reviewer workspace is `/expert/assignments/:assignmentId/review`, the
 moderator queue is `/qa/reviews`, and the owner report page is
-`/account/reviews`. T10 uses the draft API, editor, draft invariants, and
-server-measured video duration from T08 PR #22. T10 includes the original
-draft import from `5c6c8f4` and duration recovery and regression coverage
-through `e48dff9`. The draft API uses
+`/account/reviews`. T10 extends the draft API, editor, draft invariants, and
+server-measured video duration delivered by T08 PR #22. T08 also delivers
+duration recovery for eligible READY videos and C051 migration regression
+coverage. The draft API uses
 `GET/POST /api/expert/assignments/:assignmentId/draft` and
 `PATCH /api/expert/reviews/:id/draft`. Current storage and review consent,
 their bound generations, reviewer qualification, and the existing

@@ -30,6 +30,8 @@ export class ReviewDraftService {
   constructor(private readonly prisma: PrismaService, private readonly access: AssignmentAccessService) {}
 
   private async assignmentFor(auth: AuthContext, id: string) {
+    // Match the assigned expert before the locked authorization check so
+    // foreign and nonexistent review IDs get the same response.
     const locator = await this.prisma.expertReview.findFirst({
       where: { id, assignment: { expertId: auth.user.id } }, select: { assignmentId: true },
     }).catch(() => {
