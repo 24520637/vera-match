@@ -158,6 +158,16 @@ loaded. `PATCH /qa/reviews/disputes/:id` accepts
 `{ status, expectedRevision, resolution? }` and returns `{ dispute }`.
 Intake moves `OPEN` to `IN_REVIEW`. Closing moves `IN_REVIEW` to `RESOLVED`
 (upheld) or `REJECTED`, with a response of 1–2,000 characters.
+When the source video is deleted or a withdrawal invalidates its storage or
+expert review consent generation, the existing access checks immediately hide
+the report and dispute and exclude the claims from matching. The privacy worker
+reconciles pending versioned cases to `CLOSED_SOURCE_UNAVAILABLE`, with a closure
+timestamp and metadata-only system audit in the same transaction. The closure
+audit uses the earliest recorded source-loss cause. If the recorded times tie
+or deletion has no timestamp and a withdrawal is recorded, it uses withdrawal.
+The closure has no moderator response. A new consent grant does not reopen the case or
+restore access to the old source. This transition preserves existing rows and
+does not set a retention period or authorize access to retained evidence.
 The approved review version remains immutable throughout the dispute. General
 audit records contain action and identifiers. Free text stays in the case.
 

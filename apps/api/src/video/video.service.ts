@@ -63,11 +63,13 @@ export class VideoService {
             message: "Video not found.",
           });
         if (video.status !== "DELETED") {
+          const [clock] = await tx.$queryRaw<{ now: Date }[]>`
+            SELECT (clock_timestamp() AT TIME ZONE 'UTC')::timestamp(3) AS now`;
           await tx.video.update({
             where: { id },
             data: {
               status: "DELETED",
-              deletedAt: new Date(),
+              deletedAt: clock.now,
               cleanupCompletedAt: null,
             },
           });

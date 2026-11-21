@@ -64,6 +64,7 @@ enum DisputeStatus {
   IN_REVIEW
   RESOLVED
   REJECTED
+  CLOSED_SOURCE_UNAVAILABLE
 }
 enum MatchChoice {
   ACCEPT

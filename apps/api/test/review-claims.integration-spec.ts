@@ -1,6 +1,9 @@
 import { ConsentPurpose, UserRole } from "@prisma/client";
 import { randomUUID } from "node:crypto";
+import { setTimeout as delay } from "node:timers/promises";
 import type { AuthContext } from "../src/auth/auth-context";
+import { AssignmentCancellationService } from "../src/assignment-cancellation/assignment-cancellation.service";
+import { AssignmentCancellationWorker } from "../src/assignment-cancellation/assignment-cancellation.worker";
 import type { EnvironmentService } from "../src/config/environment.service";
 import { ConsentAccessService } from "../src/consent/consent-access.service";
 import { consentPurposes, type ConsentPolicyRegistry } from "../src/consent/consent.policy";
@@ -12,6 +15,9 @@ import { ReviewOwnerService } from "../src/expert-admin/review-owner.service";
 import { ReviewQaService } from "../src/expert-admin/review-qa.service";
 import { SafetyAccessService } from "../src/safety/safety-access.service";
 import type { StaffAssuranceSource } from "../src/safety/staff-assurance.source";
+import type { PrivateStorageService } from "../src/video/private-storage.service";
+import { VideoCleanupService } from "../src/video/video-cleanup.service";
+import { VideoService } from "../src/video/video.service";
 import { createAuthDatabase } from "./disposable-auth-database";
 import { actor, assignmentEvent, seedExpert, transition } from "./expert-db-fixtures";
 
@@ -41,7 +47,7 @@ describe("T12 review claims and disputes / disposable PostgreSQL", () => {
     return login(row.id);
   }
 
-  it("commits QA evidence, scopes disputes and removes claims at the matching read boundary", async () => {
+  async function setupReview() {
     const client = db.client as unknown as PrismaService;
     const consent = new ConsentAccessService(client, environment);
     const consentService = new ConsentService(client, registry, environment);
@@ -83,6 +89,14 @@ describe("T12 review claims and disputes / disposable PostgreSQL", () => {
       } } }, include: { observations: true } });
     const approval = { expectedVersion: 2, claims: [{ type: "INTEREST_READING", observationId: review.observations[0].id,
       context: "Hobbies prompt.", transcript: "I enjoy reading." }] };
+    const matching = () => db.client.$transaction(tx => readMatchingClaimsInTransaction(tx, consent, stranger.user.id, owner.user.id));
+    return { client, consent, qa, ownerService, grants, moderator, owner, stranger, admin, patchConsent, generation,
+      video, assignment, grant, review, approval, matching };
+  }
+
+  it("commits QA evidence, scopes disputes and removes claims at the matching read boundary", async () => {
+    const { client, qa, ownerService, grants, moderator, owner, stranger, admin, patchConsent, generation,
+      assignment, grant, review, approval, matching } = await setupReview();
     await expect(ownerService.list(owner)).resolves.toEqual({ reports: [], nextCursor: null });
     const decisions = await Promise.allSettled([qa.approve(moderator, review.id, approval), qa.approve(moderator, review.id, approval)]);
     expect(decisions.filter(decision => decision.status === "fulfilled")).toHaveLength(1);
@@ -103,7 +117,6 @@ describe("T12 review claims and disputes / disposable PostgreSQL", () => {
     await expect(ownerService.list(owner)).resolves.toMatchObject({ reports: [{ claims: [{
       feedback: [{ target: "CONTEXT", note: feedbackInput.note, revision: 1 }], ownerConfirmed: false, shareApproved: false,
     }] }] });
-    const matching = () => db.client.$transaction(tx => readMatchingClaimsInTransaction(tx, consent, stranger.user.id, owner.user.id));
     await expect(matching()).resolves.toEqual([]);
     await ownerService.updateClaim(owner, claim.id, { action: "CONFIRM", expectedRevision: 0 });
     await expect(matching()).resolves.toEqual([]);
@@ -157,5 +170,258 @@ describe("T12 review claims and disputes / disposable PostgreSQL", () => {
 
     await ownerService.updateClaim(owner, claim.id, { action: "REVOKE", expectedRevision: 3 });
     await expect(matching()).resolves.toEqual([]);
+    const terminalCases = { where: { reviewId: review.id }, orderBy: { id: "asc" } } as const;
+    const beforeWithdrawal = await db.client.reviewDispute.findMany(terminalCases);
+    await patchConsent(owner, Number(generation.version) + 2, ["EXPERT_VIDEO_REVIEW"], false);
+    await new AssignmentCancellationWorker(client, new AssignmentCancellationService(client), environment).runOnce();
+    await expect(db.client.reviewDispute.findMany(terminalCases)).resolves.toEqual(beforeWithdrawal);
   });
+
+  const sourceLosses = ["EXPERT_VIDEO_REVIEW", "VIDEO_STORAGE", "VIDEO_DELETED"] as const;
+  const pendingStates = ["OPEN", "IN_REVIEW"] as const;
+
+  it.each(sourceLosses.flatMap(loss => pendingStates.map(status => [loss, status] as const)))(
+    "closes a dispute after %s source loss from %s without exposing its evidence",
+    async (loss, initialStatus) => {
+      const { client, consent, qa, ownerService, moderator, owner, stranger, patchConsent, generation,
+        video, review, approval, matching } = await setupReview();
+      const cancellation = new AssignmentCancellationService(client);
+      const worker = new AssignmentCancellationWorker(client, cancellation, environment);
+      const storage = { bucket: video.bucket, playbackUrl: jest.fn() };
+      const videos = new VideoService(client, consent, storage as unknown as PrivateStorageService, cancellation);
+      await qa.approve(moderator, review.id, approval);
+      const claim = await db.client.reviewClaim.findFirstOrThrow({ where: { reviewId: review.id } });
+      await ownerService.updateClaim(owner, claim.id, { action: "CONFIRM", expectedRevision: 0 });
+      await ownerService.updateClaim(owner, claim.id, { action: "SHARE", expectedRevision: 1 });
+      const sharedClaim = await db.client.reviewClaim.findUniqueOrThrow({ where: { id: claim.id } });
+      await expect(matching()).resolves.toHaveLength(1);
+      const { dispute } = await ownerService.openDispute(owner, review.id, {
+        claimId: initialStatus === "OPEN" ? claim.id : undefined, reason: "Private dispute reason.",
+      });
+      if (initialStatus === "IN_REVIEW")
+        await qa.decideDispute(moderator, dispute.id, { status: "IN_REVIEW", expectedRevision: 0 });
+      const before = await db.client.reviewDispute.findUniqueOrThrow({ where: { id: dispute.id } });
+      await expect(qa.readDispute(moderator, dispute.id)).resolves.toMatchObject({ dispute: { status: initialStatus } });
+      await expect(qa.listDisputes(moderator)).resolves.toMatchObject({ disputes: [{ id: dispute.id }] });
+      await worker.runOnce();
+      await expect(db.client.reviewDispute.findUnique({ where: { id: dispute.id } })).resolves.toEqual(before);
+
+      if (loss === "VIDEO_DELETED") {
+        await videos.remove(owner.user.id, video.id);
+      } else {
+        await patchConsent(owner, Number(generation.version), [loss], false);
+      }
+      const expectInaccessible = async (consentRestored: boolean) => {
+        await expect(ownerService.list(owner)).resolves.toEqual({ reports: [], nextCursor: null });
+        await expect(qa.listDisputes(moderator)).resolves.toEqual({ disputes: [], nextCursor: null });
+        await expect(qa.readDispute(moderator, dispute.id)).rejects.toMatchObject({ status: 404 });
+        await expect(qa.readDispute(stranger, dispute.id)).rejects.toMatchObject({ status: 403 });
+        await expect(qa.decideDispute(moderator, dispute.id, initialStatus === "OPEN"
+          ? { status: "IN_REVIEW", expectedRevision: 0 }
+          : { status: "RESOLVED", expectedRevision: 1, resolution: "Private resolution." }))
+          .rejects.toMatchObject({ status: 404 });
+        await expect(matching()).resolves.toEqual([]);
+        if (loss !== "EXPERT_VIDEO_REVIEW") {
+          const status = loss === "VIDEO_DELETED" ? 404 : consentRestored ? 409 : 403;
+          await expect(videos.playback(owner.user.id, video.id)).rejects.toMatchObject({
+            status,
+          });
+          expect(storage.playbackUrl).not.toHaveBeenCalled();
+        }
+      };
+      await expectInaccessible(false);
+      if (loss !== "VIDEO_DELETED") {
+        // The worker may first see the durable withdrawal after a fresh grant.
+        await patchConsent(owner, Number(generation.version) + 1, [loss], true);
+        await expectInaccessible(true);
+      }
+
+      const auditWhere = { subjectType: "ReviewDispute", subjectId: dispute.id,
+        action: { startsWith: "REVIEW_DISPUTE_CLOSED_" } };
+      if (loss === "EXPERT_VIDEO_REVIEW" && initialStatus === "IN_REVIEW") {
+        await db.client.$executeRawUnsafe(`
+          CREATE FUNCTION reject_source_closure_audit() RETURNS trigger LANGUAGE plpgsql AS $$
+          BEGIN
+            IF NEW.action = 'REVIEW_DISPUTE_CLOSED_CONSENT_WITHDRAWN' THEN
+              RAISE EXCEPTION 'synthetic closure audit failure';
+            END IF;
+            RETURN NEW;
+          END $$`);
+        await db.client.$executeRawUnsafe(`
+          CREATE TRIGGER reject_source_closure_audit BEFORE INSERT ON "AuditLog"
+          FOR EACH ROW EXECUTE FUNCTION reject_source_closure_audit()`);
+        try {
+          await worker.runOnce();
+          await expect(db.client.reviewDispute.findUnique({ where: { id: dispute.id } })).resolves.toEqual(before);
+          await expect(db.client.auditLog.count({ where: auditWhere })).resolves.toBe(0);
+          await expectInaccessible(true);
+        } finally {
+          await db.client.$executeRawUnsafe('DROP TRIGGER reject_source_closure_audit ON "AuditLog"');
+          await db.client.$executeRawUnsafe("DROP FUNCTION reject_source_closure_audit()");
+        }
+      }
+
+      await worker.runOnce();
+      const closed = await db.client.reviewDispute.findUniqueOrThrow({ where: { id: dispute.id } });
+      expect(closed).toEqual({ ...before, status: "CLOSED_SOURCE_UNAVAILABLE",
+        revision: before.revision + 1, resolvedAt: expect.any(Date) });
+      await expectInaccessible(loss !== "VIDEO_DELETED");
+      await expect(db.client.reviewClaim.findUnique({ where: { id: claim.id } })).resolves.toEqual(sharedClaim);
+      await worker.runOnce();
+      await expect(db.client.reviewDispute.findUnique({ where: { id: dispute.id } })).resolves.toEqual(closed);
+      await expect(db.client.auditLog.findMany({ where: auditWhere })).resolves.toEqual([{
+        id: expect.any(String), actorId: null, subjectType: "ReviewDispute", subjectId: dispute.id, createdAt: expect.any(Date),
+        action: loss === "VIDEO_DELETED" ? "REVIEW_DISPUTE_CLOSED_VIDEO_DELETED" : "REVIEW_DISPUTE_CLOSED_CONSENT_WITHDRAWN",
+      }]);
+    },
+  );
+
+  it.each(["withdrawal then deletion", "withdrawal then cleanup", "deletion then withdrawal"] as const)(
+    "audits the first recorded cause for %s",
+    async order => {
+      const { client, consent, qa, ownerService, moderator, owner, patchConsent, generation, video, review, approval } = await setupReview();
+      const cancellation = new AssignmentCancellationService(client);
+      const worker = new AssignmentCancellationWorker(client, cancellation, environment);
+      const storage = { bucket: video.bucket, remove: jest.fn().mockResolvedValue(undefined) } as unknown as PrivateStorageService;
+      const videos = new VideoService(client, consent, storage, cancellation);
+      const withdraw = () => patchConsent(owner, Number(generation.version), ["VIDEO_STORAGE"], false);
+      await qa.approve(moderator, review.id, approval);
+      const { dispute } = await ownerService.openDispute(owner, review.id, { reason: "Private dispute reason." });
+
+      if (order === "deletion then withdrawal") {
+        await videos.remove(owner.user.id, video.id);
+        // Keep the stored millisecond timestamps distinct in the reverse-order case.
+        await db.client.$queryRaw`SELECT true AS elapsed FROM pg_sleep(0.01)`;
+        await withdraw();
+      } else {
+        await withdraw();
+        if (order === "withdrawal then cleanup")
+          await new VideoCleanupService(client, storage, environment).runOnce();
+        else
+          await videos.remove(owner.user.id, video.id);
+      }
+      await expect(db.client.video.findUnique({ where: { id: video.id } })).resolves.toMatchObject({ status: "DELETED" });
+      await worker.runOnce();
+      await worker.runOnce();
+      await expect(db.client.reviewDispute.findUnique({ where: { id: dispute.id } })).resolves.toMatchObject({
+        status: "CLOSED_SOURCE_UNAVAILABLE", revision: 1, resolution: null,
+      });
+      await expect(db.client.auditLog.findMany({
+        where: { subjectType: "ReviewDispute", subjectId: dispute.id, action: { startsWith: "REVIEW_DISPUTE_CLOSED_" } },
+        select: { action: true, actorId: true, subjectType: true, subjectId: true },
+      })).resolves.toEqual([{
+        action: order === "deletion then withdrawal"
+          ? "REVIEW_DISPUTE_CLOSED_VIDEO_DELETED" : "REVIEW_DISPUTE_CLOSED_CONSENT_WITHDRAWN",
+        actorId: null, subjectType: "ReviewDispute", subjectId: dispute.id,
+      }]);
+    },
+  );
+
+  async function blockedBackend(blocker: number, queryMarker: string) {
+    const deadline = Date.now() + 2500;
+    while (Date.now() < deadline) {
+      const [waiting] = await db.client.$queryRaw<{ pid: number }[]>`
+        SELECT pid FROM pg_stat_activity
+        WHERE datname = current_database() AND wait_event_type = 'Lock'
+          AND ${blocker} = ANY(pg_blocking_pids(pid)) AND position(${queryMarker} IN query) > 0`;
+      if (waiting) return waiting.pid;
+      await delay(10);
+    }
+    throw new Error(`Expected PostgreSQL lock contention for ${queryMarker}`);
+  }
+
+  it.each(["moderator", "closure"] as const)(
+    "serializes a moderator decision and source-loss closure when %s holds the owner lock first",
+    async first => {
+      const { client, qa, ownerService, moderator, owner, patchConsent, generation, review, approval } = await setupReview();
+      const cancellation = new AssignmentCancellationService(client);
+      const withdraw = () => patchConsent(owner, Number(generation.version), ["EXPERT_VIDEO_REVIEW"], false);
+      await qa.approve(moderator, review.id, approval);
+      const { dispute } = await ownerService.openDispute(owner, review.id, { reason: "Private dispute reason." });
+      await qa.decideDispute(moderator, dispute.id, { status: "IN_REVIEW", expectedRevision: 0 });
+      const resolution = "Private moderator response.";
+      const decide = () => qa.decideDispute(moderator, dispute.id, { status: "RESOLVED", expectedRevision: 1, resolution });
+      const close = () => cancellation.processSourceUnavailableDispute(dispute.id);
+
+      // Pause the first transaction at its real audit insert, while it still
+      // holds the owner row lock. Observe PostgreSQL's wait graph before release.
+      await db.client.$executeRawUnsafe(`
+        CREATE FUNCTION hold_dispute_race_audit() RETURNS trigger LANGUAGE plpgsql AS $$
+        BEGIN
+          IF NEW.action IN ('REVIEW_DISPUTE_RESOLVED', 'REVIEW_DISPUTE_CLOSED_CONSENT_WITHDRAWN') THEN
+            PERFORM pg_advisory_xact_lock(hashtextextended(NEW."subjectId", 0));
+          END IF;
+          RETURN NEW;
+        END $$`);
+      let release!: () => void;
+      const hold = new Promise<void>(resolve => { release = resolve; });
+      const running: Promise<unknown>[] = [];
+      function track<T>(operation: Promise<T>) {
+        void operation.catch(() => undefined);
+        running.push(operation);
+        return operation;
+      }
+
+      try {
+        await db.client.$executeRawUnsafe(`
+          CREATE TRIGGER hold_dispute_race_audit BEFORE INSERT ON "AuditLog"
+          FOR EACH ROW EXECUTE FUNCTION hold_dispute_race_audit()`);
+        if (first === "closure") await withdraw();
+        let acquired!: (pid: number) => void;
+        const ready = new Promise<number>(resolve => { acquired = resolve; });
+        const gate = track(db.client.$transaction(async tx => {
+          const [lock] = await tx.$queryRaw<{ pid: number }[]>`
+            SELECT pg_backend_pid() AS pid FROM pg_advisory_xact_lock(hashtextextended(${dispute.id}, 0))`;
+          acquired(lock.pid);
+          await hold;
+        }, { timeout: 10000 }));
+        const gatePid = await Promise.race([ready, gate.then(() => { throw new Error("Audit gate exited early"); })]);
+
+        if (first === "moderator") {
+          const decision = track(decide());
+          const moderatorPid = await blockedBackend(gatePid, '"AuditLog"');
+          const withdrawal = track(withdraw());
+          const withdrawalPid = await blockedBackend(moderatorPid, 'FROM "User"');
+          const closure = track(close());
+          await blockedBackend(withdrawalPid, 'FROM "User"');
+          release();
+          await expect(decision).resolves.toMatchObject({ dispute: { status: "RESOLVED", revision: 2 } });
+          await withdrawal;
+          await closure;
+        } else {
+          const closure = track(close());
+          const closurePid = await blockedBackend(gatePid, '"AuditLog"');
+          const decision = track(decide());
+          await blockedBackend(closurePid, 'FROM "User"');
+          release();
+          await closure;
+          await expect(decision).rejects.toMatchObject({ status: 404 });
+        }
+        await gate;
+        await close();
+        await expect(decide()).rejects.toMatchObject({ status: 404 });
+        await expect(qa.readDispute(moderator, dispute.id)).rejects.toMatchObject({ status: 404 });
+        await expect(db.client.reviewDispute.findUnique({ where: { id: dispute.id } })).resolves.toMatchObject({
+          status: first === "moderator" ? "RESOLVED" : "CLOSED_SOURCE_UNAVAILABLE",
+          revision: 2, resolution: first === "moderator" ? resolution : null, resolvedAt: expect.any(Date),
+        });
+        await expect(db.client.auditLog.findMany({ where: { subjectType: "ReviewDispute", subjectId: dispute.id },
+          select: { action: true, actorId: true }, orderBy: { action: "asc" },
+        })).resolves.toEqual(first === "moderator" ? [
+          { action: "REVIEW_DISPUTE_IN_REVIEW", actorId: moderator.user.id },
+          { action: "REVIEW_DISPUTE_OPENED", actorId: owner.user.id },
+          { action: "REVIEW_DISPUTE_RESOLVED", actorId: moderator.user.id },
+        ] : [
+          { action: "REVIEW_DISPUTE_CLOSED_CONSENT_WITHDRAWN", actorId: null },
+          { action: "REVIEW_DISPUTE_IN_REVIEW", actorId: moderator.user.id },
+          { action: "REVIEW_DISPUTE_OPENED", actorId: owner.user.id },
+        ]);
+      } finally {
+        release();
+        await Promise.allSettled(running);
+        await db.client.$executeRawUnsafe('DROP TRIGGER IF EXISTS hold_dispute_race_audit ON "AuditLog"');
+        await db.client.$executeRawUnsafe("DROP FUNCTION hold_dispute_race_audit()");
+      }
+    },
+  );
 });
