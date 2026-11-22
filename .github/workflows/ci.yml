@@ -85,6 +85,11 @@ jobs:
         run: npx prisma migrate deploy --schema apps/api/prisma/schema.prisma
         env:
           DATABASE_URL: postgresql://vera_ci:synthetic-ci-only@127.0.0.1:5433/vera_t01_test?schema=public
+      - name: Verify synthetic PostgreSQL backup and isolated restore
+        run: npm run test:ops
+        env:
+          DATABASE_URL: postgresql://vera_ci:synthetic-ci-only@127.0.0.1:5433/vera_t01_test?schema=public
+          C095_EVIDENCE_DIR: ${{ runner.temp }}
       - name: Verify authentication and PostgreSQL foundation
         run: npm run test:integration --workspace apps/api
         env:
