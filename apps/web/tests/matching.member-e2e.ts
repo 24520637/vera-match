@@ -67,12 +67,16 @@ test("members accept, reload history and lose the mutual state after a real bloc
 
     const nativeBackground = process.env.VERA_NATIVE_BACKGROUND_E2E === "1";
     if (nativeBackground) {
+      // Playwright forces active-page focus by default, including headed mode.
+      // Disable that driver override; do not replace visibility properties/events.
+      await (await context.newCDPSession(page)).send("Emulation.setFocusEmulationEnabled", { enabled: false });
       await page.bringToFront();
       await expect.poll(() => page.evaluate(() => document.visibilityState)).toBe("visible");
       await expect(page.getByText("Accepted ·", { exact: false })).toContainText("Mutual match");
     }
     const backgroundTab = nativeBackground ? await context.newPage() : undefined;
     if (backgroundTab) {
+      await (await context.newCDPSession(backgroundTab)).send("Emulation.setFocusEmulationEnabled", { enabled: false });
       await backgroundTab.bringToFront();
       await expect.poll(() => page.evaluate(() => document.visibilityState)).toBe("hidden");
       await expect(page.getByText("Mutual match")).toHaveCount(0);
