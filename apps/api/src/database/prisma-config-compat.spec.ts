@@ -34,4 +34,13 @@ describe("Prisma config merge compatibility", () => {
       }) ? 0 : 1);
     `)).toBe(0);
   });
+  it("rejects adversarial template input without blocking Prisma's config dependency", () => {
+    expect(probe(`
+      const Schema = fromConfig('effect/Schema');
+      const accepts = Schema.is(Schema.TemplateLiteral(
+        Schema.String, ':', Schema.String, ':', Schema.String, 'X'));
+      if (!accepts('alpha:beta:gammaX') || accepts('alpha:beta:gammaY')) process.exit(2);
+      process.exit(accepts(':'.repeat(5000)) ? 1 : 0);
+    `)).toBe(0);
+  });
 });
