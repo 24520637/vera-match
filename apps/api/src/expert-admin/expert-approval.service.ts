@@ -43,14 +43,18 @@ export class ExpertApprovalService {
   constructor(private readonly prisma: PrismaService, private readonly registry: ExpertApprovalRegistry,
     private readonly evidence: ExpertEvidenceSource) {}
 
+  private async trusted<T>(load: () => T | Promise<T>): Promise<T> {
+    try { return await load(); } catch { unavailable(); }
+  }
+
   async approve(auth: AuthContext, targetId: string, body: unknown) {
     const input = parseExpertApproval(body);
     try {
-      const training = version(this.registry.training(input.trainingVersion), input.trainingVersion, "trainingVersion");
-      const policy = version(this.registry.confidentiality(input.policyVersion), input.policyVersion, "policyVersion");
+      const training = version(await this.trusted(() => this.registry.training(input.trainingVersion)), input.trainingVersion, "trainingVersion");
+      const policy = version(await this.trusted(() => this.registry.confidentiality(input.policyVersion)), input.policyVersion, "policyVersion");
       // Trusted source records are immutable snapshots, not client-supplied assertions.
       const [trainingRecord, confidentialityRecord] = await Promise.all([
-        this.evidence.find(input.trainingEvidenceId), this.evidence.find(input.confidentialityEvidenceId),
+        this.trusted(() => this.evidence.find(input.trainingEvidenceId)), this.trusted(() => this.evidence.find(input.confidentialityEvidenceId)),
       ]);
       return await this.prisma.$transaction(async tx => {
         // Stable lock ordering protects initialization/reapproval and concurrent eligibility changes.
