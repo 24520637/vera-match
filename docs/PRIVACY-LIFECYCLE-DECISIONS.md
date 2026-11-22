@@ -1,4 +1,4 @@
-# Privacy and lifecycle owner decisions — version 1
+# Privacy and lifecycle owner decisions — version 1.1
 
 Status: **OWNER TECHNICAL DECISION FINALIZED**, 2026-11-22, Huong / T11.
 Baseline: develop 20aaea8 (T08/T10/T12/T14 and C051 merged). This record supersedes the unresolved product proposals in C065-ACCOUNT-LIFECYCLE-CONTRACT.md. It authorizes engineering implementation, not publication of policies, legal retention, production provisioning or a final-erasure claim. Code and test PRs must report their own implemented scope.
@@ -125,3 +125,25 @@ Privacy audit decision: successful sensitive domain authorizations and mutations
 - NOT RUN: any unexecuted deployment, provider or consumer test must stay explicitly labelled.
 
 No real consent policy, legal hold, MFA provider, final purge or independent journal is created by this document. C065/C066 may be developed and tested with synthetic fixtures; production exposure requires explicit release approval and the missing recovery/privacy controls.
+
+## Version 1.1 — concrete foundation consumer mapping
+
+DECIDED BY HUONG / OWNER DIRECTIVE. Clarifies the version-1 decisions against the implemented C065 foundation in [PR #35](https://github.com/24520637/vera-match/pull/35), commit 3b03632; it does not publish consent policies or authorize purge. The proposed application tree now measures 24 migrations / 54 FKs / 76 non-internal triggers; the develop 20aaea8 baseline remains 23/50/65. C066 UI is PR #36 and the recovery negative control is PR #37, both stacked on C065.
+
+The actual AccountClosureConsumer names are deliberately grouped contracts, not acknowledgements. ClosureReconciliationV1 identifies contractVersion 1, closureId, expectedClosureRevision and consumer; each domain must preserve its own genuine minimal receipt before an aggregate ACK. No public ACK API or implemented aggregate completion method exists. Current rows remain PENDING.
+
+| Actual consumer name | Mandatory scope before a future genuine aggregate acknowledgement |
+| --- | --- |
+| MEDIA | Huong: C051 owner-assignment reconciliation/receipts plus video tombstones, outstanding upload capability reconciliation and provider-verified final/staging absence. A cancellation receipt alone is insufficient. |
+| REVIEW_CLAIMS | Phuc: Assignment/Queue access and historical grant disposition, mutable review minimization, QA evidence, claims/annotations/disputes and their approved retained evidence. Every relevant subdomain needs a genuine closure-bound receipt; missing one keeps this aggregate PENDING. |
+| MATCHING | Phuc: **both T04 member data (Profile, Preferences, Questionnaire) and T14 pairs/decisions/handles**. Reconcile authorized minimization with resource revisions and retained evidence; matching pair invalidation alone cannot acknowledge member-data cleanup. Preserve no-resurrection rules and actual domain CAS/history. |
+| SAFETY | Huong: blocks, private reports/moderation and approved retained case evidence/minimization, with actual owner-authorized retention review. |
+| RECOVERY | Operations: independent restriction journal/checkpoint/fence, backup/replica reconciliation and approved expiry evidence. Currently BLOCKED; an isolated successful SQL restore is not this receipt. |
+
+C065 currently adds the global CLOSED/OFF barrier, explicit restrictive ledger and real C051/media handoff, and filters closed-owner queue metadata. It does **not** implement the aggregate consumers above. Phuc must not call a non-existent ACK endpoint or mark a group complete from one subdomain. The expected revision and receipt ownership must be rechecked under the existing lock order; no fabricated historical event.
+
+Grant history is not rewritten to mimic a staff revocation: an owner closure does not manufacture ADMIN/MODERATOR/MFA identity. Existing CLOSED/source-loss checks must deny ordinary access immediately. Retained grant/event history may be recorded as restricted by the closure barrier in a genuine domain receipt. If an actual grant REVOKED transition requires a new system-actor contract, implement/review that contract explicitly before emitting it; never call the public staff flow with forged assurance.
+
+The previously verified delivery address is retained solely as the restricted status channel during the 30-day renewal window; no normal session or email-rebinding API follows. After that window, queue identity minimization for the approved lifecycle procedure; **no automatic purge is implemented/authorized**. Current CLOSED identity guards intentionally reject silent email/verification/password/role rebinding, so a future approved minimization/support procedure must preserve the durable barrier and historical evidence explicitly. Retaining a live FK is not permission to retain identifying email indefinitely.
+
+Native background-tab visibility acceptance for C062 remains PARTIAL in the current headless runner (both tabs stay visible); real HTTP history/refocus cases pass. Huong owns that platform acceptance, not a missing Phuc Matching API. Production MFA/provisioning, published policies, legal retention authority and the independent journal remain external release gates.
