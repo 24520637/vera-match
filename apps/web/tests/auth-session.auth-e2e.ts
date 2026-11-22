@@ -211,6 +211,9 @@ test("registers, verifies a real email link and signs in through accessible form
     await login.getByRole("button", { name: "Sign in", exact: true }).click();
     await expect(page).toHaveURL("/account");
     await expect(page.getByText(email, { exact: true })).toBeVisible();
+    await page.reload();
+    await expect(page).toHaveURL("/account");
+    await expect(page.getByText(email, { exact: true })).toBeVisible();
     expect(
       await page.evaluate(() => localStorage.length + sessionStorage.length),
     ).toBe(0);

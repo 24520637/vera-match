@@ -74,7 +74,7 @@ function Reports() {
 
   return <>
     <MemberSettingsNav />
-    <main className="container page-heading">
+    <div className="container page-heading">
       <h1>Your review reports</h1>
       {!page && !error && <p role="status">Loading your reports…</p>}
       {error && <>
@@ -105,7 +105,7 @@ function Reports() {
         {after && <Button variant="secondary" onClick={() => changePage()}>First page</Button>}
         {page.nextCursor && <Button variant="secondary" onClick={() => changePage(page.nextCursor ?? undefined)}>Next page</Button>}
       </>}
-    </main>
+    </div>
   </>;
 }
 
