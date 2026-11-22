@@ -1,11 +1,15 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type BrowserContext, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 import { PrismaClient } from "@prisma/client";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
-test("members accept, reload history and lose the mutual state after a real block", async ({ page, context, browser }) => {
+const { createNativeVisibilityRuntime } = require("./native-visibility-runtime.cjs") as {
+  createNativeVisibilityRuntime(options:{headless:boolean;viewport:{width:number;height:number}}):Promise<{context:BrowserContext;page:Page;close:()=>Promise<void>}>;
+};
+
+test("members accept, reload history and lose the mutual state after a real block", async ({ page: fixturePage, context: fixtureContext, browser }, testInfo) => {
   const runtime = JSON.parse(await readFile(resolve(__dirname, "../.auth-e2e-runtime.json"), "utf8"));
   if (runtime.kind !== "vera-auth-e2e-v1" || runtime.runId !== process.env.VERA_AUTH_E2E_RUN_ID ||
     !/^vera_auth_test_[a-f0-9]{32}$/.test(runtime.schema)) throw new Error("Verified disposable runtime required");
@@ -15,6 +19,10 @@ test("members accept, reload history and lose the mutual state after a real bloc
   url.searchParams.set("schema", runtime.schema);
   const db = new PrismaClient({ datasources: { db: { url: url.toString() } }, log: [] });
   const peerContext = await browser.newContext({ baseURL: "http://localhost:3100" });
+  const nativeRuntime = process.env.VERA_NATIVE_BACKGROUND_E2E === "1" ? await createNativeVisibilityRuntime({
+    headless: process.env.VERA_NATIVE_BACKGROUND_HEADLESS === "1", viewport: testInfo.project.use.viewport ?? {width:1440,height:1000},
+  }) : undefined;
+  const page = nativeRuntime?.page ?? fixturePage, context = nativeRuntime?.context ?? fixtureContext;
   const memberIds: string[] = [];
   const content = "Synthetic matching browser test only.";
   const policyVersion = "browser-fixture-v1";
@@ -49,7 +57,7 @@ test("members accept, reload history and lose the mutual state after a real bloc
     await context.addCookies([cookie(a.token)]);
     await peerContext.addCookies([cookie(b.token)]);
     const peer = await peerContext.newPage();
-    await page.goto("/account");
+    await page.goto("http://localhost:3100/account");
     await page.getByRole("link", { name: "Your matches" }).click();
     await expect(page.getByRole("heading", { name: "Your matches" })).toBeVisible();
     await expect(page.getByText("Private Fixture Name")).toHaveCount(0);
@@ -67,16 +75,12 @@ test("members accept, reload history and lose the mutual state after a real bloc
 
     const nativeBackground = process.env.VERA_NATIVE_BACKGROUND_E2E === "1";
     if (nativeBackground) {
-      // Playwright forces active-page focus by default, including headed mode.
-      // Disable that driver override; do not replace visibility properties/events.
-      await (await context.newCDPSession(page)).send("Emulation.setFocusEmulationEnabled", { enabled: false });
       await page.bringToFront();
       await expect.poll(() => page.evaluate(() => document.visibilityState)).toBe("visible");
       await expect(page.getByText("Accepted ·", { exact: false })).toContainText("Mutual match");
     }
     const backgroundTab = nativeBackground ? await context.newPage() : undefined;
     if (backgroundTab) {
-      await (await context.newCDPSession(backgroundTab)).send("Emulation.setFocusEmulationEnabled", { enabled: false });
       await backgroundTab.bringToFront();
       await expect.poll(() => page.evaluate(() => document.visibilityState)).toBe("hidden");
       await expect(page.getByText("Mutual match")).toHaveCount(0);
@@ -97,7 +101,7 @@ test("members accept, reload history and lose the mutual state after a real bloc
     await expect(page.getByRole("button", { name: "Accept", exact: true })).toHaveCount(0);
 
     // A fresh history navigation must reauthorize; cached mutual state is not authority.
-    await page.goto("/account/profile");
+    await page.goto("http://localhost:3100/account/profile");
     await page.goBack();
     await expect(page.getByText("Accepted ·", { exact: false })).toContainText("Unavailable");
     expect((await peer.request.delete("/api/blocks/" + a.id, {
@@ -157,5 +161,6 @@ test("members accept, reload history and lose the mutual state after a real bloc
     await peerContext.close();
     await db.user.deleteMany({ where: { id: { in: memberIds } } });
     await db.$disconnect();
+    await nativeRuntime?.close();
   }
 });
