@@ -66,6 +66,11 @@ test("members accept, reload history and lose the mutual state after a real bloc
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 
     const nativeBackground = process.env.VERA_NATIVE_BACKGROUND_E2E === "1";
+    if (nativeBackground) {
+      await page.bringToFront();
+      await expect.poll(() => page.evaluate(() => document.visibilityState)).toBe("visible");
+      await expect(page.getByText("Accepted ·", { exact: false })).toContainText("Mutual match");
+    }
     const backgroundTab = nativeBackground ? await context.newPage() : undefined;
     if (backgroundTab) {
       await backgroundTab.bringToFront();
