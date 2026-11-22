@@ -131,6 +131,20 @@ jobs:
           MINIO_ROOT_USER: synthetic-ci
           MINIO_ROOT_PASSWORD: synthetic-ci-only-not-a-secret
           PLAYWRIGHT_HTML_OUTPUT_DIR: playwright-report/member
+      - name: Verify native background-tab matching revocation
+        shell: bash
+        run: |
+          if ! command -v xvfb-run; then
+            sudo apt-get update
+            sudo apt-get install -y xvfb
+          fi
+          xvfb-run -a node scripts/run-member-e2e.cjs --headed --grep="members accept"
+        env:
+          VERA_NATIVE_BACKGROUND_E2E: "1"
+          DATABASE_URL: postgresql://vera_ci:synthetic-ci-only@127.0.0.1:5433/vera_t01_test?schema=public
+          MINIO_ROOT_USER: synthetic-ci
+          MINIO_ROOT_PASSWORD: synthetic-ci-only-not-a-secret
+          PLAYWRIGHT_HTML_OUTPUT_DIR: playwright-report/native-background
       - name: Verify safety flows against real API on desktop and mobile
         run: node scripts/run-safety-e2e.cjs
         env:

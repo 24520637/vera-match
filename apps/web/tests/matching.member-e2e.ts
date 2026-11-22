@@ -65,11 +65,24 @@ test("members accept, reload history and lose the mutual state after a real bloc
     expect((await new AxeBuilder({ page }).include(".member-settings").analyze()).violations).toEqual([]);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 
+    const nativeBackground = process.env.VERA_NATIVE_BACKGROUND_E2E === "1";
+    const backgroundTab = nativeBackground ? await context.newPage() : undefined;
+    if (backgroundTab) {
+      await backgroundTab.bringToFront();
+      await expect.poll(() => page.evaluate(() => document.visibilityState)).toBe("hidden");
+      await expect(page.getByText("Mutual match")).toHaveCount(0);
+    }
     const blocked = await peer.request.post("/api/blocks", {
       headers: { origin: "http://localhost:3100" }, data: { targetUserId: a.id },
     });
     expect(blocked.status()).toBe(204);
-    await page.reload();
+    if (backgroundTab) {
+      const reauthorized = page.waitForResponse(response => response.url().endsWith("/api/matches/recommendations") && response.ok());
+      await page.bringToFront();
+      await expect.poll(() => page.evaluate(() => document.visibilityState)).toBe("visible");
+      await reauthorized;
+      await backgroundTab.close();
+    } else await page.reload();
     await expect(page.getByText("Accepted ·", { exact: false })).toContainText("Unavailable");
     await expect(page.getByText("Mutual match")).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Accept", exact: true })).toHaveCount(0);
