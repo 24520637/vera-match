@@ -1,7 +1,8 @@
 name: CI
 on:
   pull_request:
-    branches: [develop, main]
+    # Apply the same gates to the explicitly stacked C065 follow-up reviews.
+    branches: [develop, main, huong/feat/c065-account-closure]
   push:
     branches: [main, develop]
 jobs:
