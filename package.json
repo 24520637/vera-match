@@ -32,6 +32,10 @@
     "webpack@5": "5.104.1",
     "glob@10": "10.5.0",
     "inquirer@8": "8.2.7",
-    "inquirer@9": "9.3.8"
+    "inquirer@9": "9.3.8",
+    "@prisma/config@6.19.3": {
+      "deepmerge-ts": "8.0.2",
+      "effect": "3.22.1"
+    }
   }
 }
