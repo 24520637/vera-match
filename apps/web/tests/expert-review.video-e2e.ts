@@ -7,6 +7,7 @@ import { readFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { Readable } from "node:stream";
 import { inspectVideoProbe, VIDEO_PROBE_TIMEOUT_MS } from "../../api/src/video/video-duration";
+import { clearTestEmails, findTestEmails, readActivationEmail } from "../../api/test/mailpit-fixtures";
 
 const origin = "http://localhost:3100";
 const policyVersion = "synthetic-video-e2e-v1";
@@ -369,8 +370,11 @@ for (const container of ["mp4", "webm"] as const) test(`reviewer plays synthetic
   }
 });
 
-test("T16 connects private review, independent QA, owner claims and reciprocal matching", async ({ db, browser, page, context }, testInfo) => {
+test("T18 demo connects registration, private review, independent QA, owner claims and reciprocal matching", async ({ db, browser, page, context }, testInfo) => {
   test.setTimeout(120000);
+  const email = `t18-${randomUUID()}@example.invalid`;
+  const password = "synthetic-t18-demo-password";
+  expect(await findTestEmails(email)).toEqual([]);
   const ownerContext = await browser.newContext({ baseURL: origin });
   const peerContext = await browser.newContext({ baseURL: origin });
   const qaContext = await browser.newContext({ baseURL: origin });
@@ -396,13 +400,42 @@ test("T16 connects private review, independent QA, owner claims and reciprocal m
   };
 
   try {
-    const owner = await identity(db, "MEMBER", ownerContext);
+    const ownerPage = await ownerContext.newPage();
+    await test.step("Register, verify with Mailpit, and sign in as the video owner", async () => {
+      await ownerPage.goto("/register");
+      const registration = ownerPage.getByRole("form", { name: "Create account", exact: true });
+      await registration.getByLabel("Email address").fill(email);
+      await registration.getByLabel(/^Password \(required\)$/).fill(password);
+      await registration.getByLabel(/^Confirm password \(required\)$/).fill(password);
+      await registration.getByLabel("I declare that I am 18 or older").check();
+      await registration.getByRole("button", { name: "Create account", exact: true }).click();
+      await expect(ownerPage.getByRole("heading", { name: "Check your inbox." })).toBeVisible();
+      expect((await ownerContext.request.get("/api/auth/me")).status()).toBe(401);
+      const activation = new URL((await readActivationEmail(email)).link);
+      expect(activation.origin).toBe(origin);
+      await ownerPage.goto(activation.href);
+      await expect(ownerPage).toHaveURL("/verify-email");
+      await ownerPage.getByRole("button", { name: "Verify email", exact: true }).click();
+      await expect(ownerPage.getByRole("heading", { name: "Email verified." })).toBeVisible();
+      await ownerPage.getByRole("main").getByRole("link", { name: "Sign in", exact: true }).click();
+      const login = ownerPage.getByRole("form", { name: "Sign in", exact: true });
+      await login.getByLabel("Email address").fill(email);
+      await login.getByLabel(/^Password \(required\)$/).fill(password);
+      await login.getByRole("button", { name: "Sign in", exact: true }).click();
+      await expect(ownerPage).toHaveURL("/account");
+      await ownerPage.reload();
+      await expect(ownerPage.getByText(email, { exact: true })).toBeVisible();
+    });
+    const owner = await db.user.findUniqueOrThrow({ where: { email } });
+    expect(owner).toMatchObject({ role: "MEMBER", declaredAdult: true, status: "ACTIVE" });
     const peer = await identity(db, "MEMBER", peerContext);
     members.push(owner.id, peer.id);
-    for (const id of members) {
-      await db.user.update({ where: { id }, data: {
-        declaredAdult: true, profile: { create: { birthDate: new Date("1990-01-01"), visibilityEnabled: true } },
+    await db.user.update({ where: { id: peer.id }, data: { declaredAdult: true } });
+    for (const member of [ownerContext, peerContext]) {
+      const profile = await member.request.patch("/api/profile/me", { headers: mutation, data: {
+        expectedRevision: 0, birthDate: "1990-01-01", visibilityEnabled: true,
       } });
+      expect(profile.status()).toBe(200);
     }
     await setConsent(ownerContext, 0, [
       "VIDEO_STORAGE", "EXPERT_VIDEO_REVIEW", "REPORT_SHARING", "PROFILE_MATCHING", "VIDEO_CLAIM_MATCHING",
@@ -414,7 +447,6 @@ test("T16 connects private review, independent QA, owner claims and reciprocal m
     const moderator = await identity(db, "MODERATOR", qaContext, "t16-qa.example.invalid");
     const assignmentId = await assignSample(assigningStaff, expert.id, videoId);
 
-    const ownerPage = await ownerContext.newPage();
     await ownerPage.goto("/account/reviews");
     await expect(ownerPage.getByText("No approved review reports are available.")).toBeVisible();
     await page.goto(`/expert/assignments/${assignmentId}/review`);
@@ -545,7 +577,27 @@ test("T16 connects private review, independent QA, owner claims and reciprocal m
     const share = ownerPage.getByRole("button", { name: "Share this claim for matching" });
     await share.press("Enter");
     await expect(ownerPage.getByText("Sharing approved for matching")).toBeVisible();
-    await readReasons(true);
+    const beforeBlock = await readReasons(true);
+    await test.step("Block an eligible peer and verify that the shared claim disappears", async () => {
+      const block = await ownerContext.request.post("/api/blocks", {
+        headers: mutation, data: { targetUserId: peer.id },
+      });
+      expect(block.status()).toBe(204);
+      const recommendations = await peerContext.request.get("/api/matches/recommendations");
+      expect(recommendations.status()).toBe(200);
+      expect(await recommendations.json()).toEqual({ available: true, nextCursor: null, recommendations: [] });
+      await matches.reload();
+      await expect(matches.getByRole("heading", { name: "No recommendations on this page" })).toBeVisible();
+      await expect(matches.getByText(claimText, { exact: true })).toHaveCount(0);
+      const unblock = await ownerContext.request.delete(`/api/blocks/${peer.id}`, { headers: mutation, data: {} });
+      expect(unblock.status()).toBe(204);
+      const stale = await peerContext.request.post(`/api/matches/${beforeBlock}/decision`, {
+        headers: mutation, data: { choice: "ACCEPT" },
+      });
+      expect(stale.status()).toBe(404);
+      expect(await stale.json()).toMatchObject({ code: "MATCH_UNAVAILABLE" });
+      await readReasons(true);
+    });
     await setConsent(ownerContext, 1, ["VIDEO_CLAIM_MATCHING"], false);
     await readReasons(false);
     await ownerPage.reload();
@@ -595,7 +647,12 @@ test("T16 connects private review, independent QA, owner claims and reciprocal m
       await Promise.all([ownerContext.close(), peerContext.close(), qaContext.close(), assigningStaff.close()]);
     } finally {
       // Keep later browser cases isolated even if a browser context failed during teardown.
-      await db.profile.updateMany({ where: { userId: { in: members } }, data: { visibilityEnabled: false } });
+      try {
+        await db.profile.updateMany({ where: { userId: { in: members } }, data: { visibilityEnabled: false } });
+      } finally {
+        await clearTestEmails(email);
+        expect(await findTestEmails(email)).toEqual([]);
+      }
     }
   }
 });

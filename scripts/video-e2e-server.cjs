@@ -19,6 +19,12 @@ Object.assign(process.env, {
   COOKIE_SECURE: "false",
   COOKIE_SAME_SITE: "lax",
   SESSION_COOKIE_NAME: "vera_e2e_session",
+  SMTP_HOST: "127.0.0.1",
+  SMTP_PORT: "1025",
+  SMTP_SECURE: "false",
+  SMTP_REQUIRE_TLS: "false",
+  SMTP_USER: "",
+  SMTP_PASSWORD: "",
 });
 const { PrismaClient } = require("@prisma/client");
 const {
