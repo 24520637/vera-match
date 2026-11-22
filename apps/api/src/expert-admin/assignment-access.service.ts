@@ -1,5 +1,5 @@
 import { ForbiddenException, HttpException, Injectable, NotFoundException, ServiceUnavailableException, UnauthorizedException } from "@nestjs/common";
-import { Prisma } from "@prisma/client";
+import { ExpertAssignment, Prisma } from "@prisma/client";
 import type { AuthContext } from "../auth/auth-context";
 import { EnvironmentService } from "../config/environment.service";
 import { ConsentAccessService } from "../consent/consent-access.service";
@@ -35,8 +35,9 @@ export class AssignmentAccessService {
   }
 
   async withAuthorizedAssignment<T>(auth: AuthContext, assignmentId: string,
-    action: (tx: Prisma.TransactionClient, access: Readonly<{ assignmentId: string; videoId: string;
-      video: { bucket: string; objectKey: string; mimeType: string; durationMs: number | null }; validateTime: () => Promise<{ now: Date; expiresAt: Date }> }>) => Promise<T>): Promise<T> {
+    action: (tx: Prisma.TransactionClient, access: Readonly<{ assignmentId: string; assignment: ExpertAssignment; videoId: string;
+      video: { bucket: string; objectKey: string; mimeType: string; durationMs: number | null }; validateTime: () => Promise<{ now: Date; expiresAt: Date }> }>) => Promise<T>,
+    scope: "playback" | "review" = "playback"): Promise<T> {
     this.requireRuntimeExpert(auth);
     // Match C033 resource identifiers; validate before any assignment DB lookup.
     if (typeof assignmentId !== "string" || !/^[A-Za-z0-9_-]{1,200}$/.test(assignmentId))
@@ -67,9 +68,10 @@ export class AssignmentAccessService {
         if (!credential || credential.status !== "APPROVED" || !credential.approval || credential.approval.subjectId !== credential.subjectId) denied();
         await tx.$queryRaw`SELECT id FROM "ExpertAssignment" WHERE id=${assignmentId} ORDER BY id FOR UPDATE`;
         const assignment = await tx.expertAssignment.findUnique({ where: { id: assignmentId } });
+        const statuses = scope === "review" ? ["ASSIGNED", "IN_PROGRESS", "SUBMITTED", "COMPLETED"] : ["ASSIGNED", "IN_PROGRESS"];
         if (!assignment || assignment.expertId !== expert.id || assignment.videoId !== video.id ||
           assignment.credentialApprovalId !== credential.approval.id ||
-          !["ASSIGNED", "IN_PROGRESS"].includes(assignment.status) || assignment.cancelledAt) denied();
+          !statuses.includes(assignment.status) || assignment.cancelledAt) denied();
         await this.consent.requireGenerationInTransaction(tx, ownerId, assignment.reviewConsentSubjectId, assignment.reviewConsentVersion, "EXPERT_VIDEO_REVIEW");
         const boundApproval = credential.approval;
         if (!boundApproval || boundApproval.subjectId !== credential.subjectId) denied();
@@ -86,7 +88,7 @@ export class AssignmentAccessService {
           return { now: clock.now, expiresAt };
         };
         await validateTime();
-        return action(tx, Object.freeze({ assignmentId, videoId: video.id,
+        return action(tx, Object.freeze({ assignmentId, assignment, videoId: video.id,
           video: { bucket: video.bucket, objectKey: video.objectKey, mimeType: video.mimeType, durationMs: video.durationMs }, validateTime }));
       }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted, timeout: 10000 });
     } catch (error) {
