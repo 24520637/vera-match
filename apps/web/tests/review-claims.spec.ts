@@ -93,6 +93,8 @@ test("a moderator loads the approved report before recording dispute intake and 
     return route.fulfill({ json: { dispute } });
   });
   await page.goto(fixture + "/review-qa");
+  await expect(page.getByRole("heading", { name: "Review quality assurance" })).toBeVisible();
+  await expect(page.getByRole("main")).toHaveCount(1);
   await page.getByRole("button", { name: "Review disputes" }).click();
   await page.getByRole("button", { name: "Open dispute case" }).click();
   try {
@@ -103,6 +105,7 @@ test("a moderator loads the approved report before recording dispute intake and 
     releaseReport();
   }
   await expect(page.getByRole("heading", { name: "Approved report" })).toBeVisible();
+  await expect(page.getByRole("main")).toHaveCount(1);
   await expect(page.getByText(report.summary)).toBeVisible();
   await expect(page.getByText(report.limitations)).toBeVisible();
   await expect(page.getByText("Version 3, approved")).toBeVisible();

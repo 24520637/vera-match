@@ -1,5 +1,6 @@
 import { expect, test as base, type BrowserContext } from "@playwright/test";
-import { PrismaClient, type UserRole } from "@prisma/client";
+import AxeBuilder from "@axe-core/playwright";
+import { PrismaClient, type ConsentPurpose, type UserRole } from "@prisma/client";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { readFile } from "node:fs/promises";
@@ -26,10 +27,10 @@ const test = base.extend<{ db: PrismaClient }>({
   },
 });
 
-async function identity(db: PrismaClient, role: UserRole, target: BrowserContext) {
+async function identity(db: PrismaClient, role: UserRole, target: BrowserContext, domain = "t08.example.invalid") {
   const token = randomBytes(32).toString("base64url");
   const user = await db.user.create({ data: {
-    email: `${randomUUID()}@t08.example.invalid`, passwordHash: "synthetic-only-not-for-login",
+    email: `${randomUUID()}@${domain}`, passwordHash: "synthetic-only-not-for-login",
     role, status: "ACTIVE", emailVerifiedAt: new Date(), sessions: {
       create: { tokenHash: createHash("sha256").update(token).digest("hex"), expiresAt: new Date(Date.now() + 600000) },
     },
@@ -79,6 +80,49 @@ function nativeProbePath() {
   const ffprobe = process.env.VIDEO_DURATION_FFPROBE;
   if (!ffprobe) throw new Error("Native ffprobe is required for the video tests.");
   return ffprobe;
+}
+
+function sampleVideo(container: "mp4" | "webm") {
+  const ffmpeg = join(dirname(nativeProbePath()), process.platform === "win32" ? "ffmpeg.exe" : "ffmpeg");
+  // Ten frames at 10 fps. Disable B-frames so the fragmented MP4 is seekable from zero.
+  return execFileSync(ffmpeg, [
+    "-v", "error", "-f", "lavfi", "-i", "color=black:s=64x64:r=10",
+    "-frames:v", "10", "-an", "-pix_fmt", "yuv420p", "-threads", "1",
+    ...(container === "mp4" ? ["-c:v", "libx264", "-bf", "0", "-movflags", "frag_keyframe+empty_moov"] : ["-c:v", "libvpx"]),
+    "-f", container, "pipe:1",
+  ], { timeout: 10000, maxBuffer: 1048576, windowsHide: true, stdio: ["ignore", "pipe", "ignore"] });
+}
+
+async function uploadSample(owner: BrowserContext, container: "mp4" | "webm") {
+  const mimeType = `video/${container}`;
+  const bytes = sampleVideo(container);
+  const intent = await owner.request.post("/api/videos/upload-intent", { headers: mutation, data: {
+    mimeType, sizeBytes: bytes.length,
+  } });
+  expect(intent.status()).toBe(201);
+  const { id, uploadUrl } = await intent.json() as { id: string; uploadUrl: string };
+  const put = await fetch(uploadUrl, {
+    method: "PUT", headers: { "Content-Type": mimeType }, body: new Uint8Array(bytes),
+    signal: AbortSignal.timeout(10000),
+  }).catch(() => { throw new Error("Synthetic video PUT failed."); });
+  expect(put.ok).toBe(true);
+  const confirmed = await owner.request.post(`/api/videos/${id}/confirm`, { headers: mutation, data: {} });
+  expect(confirmed.status()).toBe(201);
+  return id;
+}
+
+async function assignSample(staff: BrowserContext, expertId: string, videoId: string) {
+  const approved = await staff.request.post(`/api/expert-admin/experts/${expertId}/approvals`, { headers: mutation, data: {
+    expectedRevision: 0, trainingVersion: "t08-fixture-training", policyVersion: "t08-fixture-confidentiality",
+    trainingEvidenceId: `t08-training-${expertId}`, confidentialityEvidenceId: `t08-confidentiality-${expertId}`, expiresAt: null,
+  } });
+  expect(approved.status()).toBe(201);
+  const assigned = await staff.request.post("/api/expert-admin/assignments", { headers: idempotent(), data: {
+    videoId, expertId, expectedCredentialRevision: 1, dueAt: null, expiresAt: null,
+  } });
+  expect(assigned.status()).toBe(201);
+  const { assignment } = await assigned.json() as { assignment: { id: string } };
+  return assignment.id;
 }
 
 type RecorderCapture = {
@@ -197,46 +241,16 @@ for (const container of ["mp4", "webm"] as const) test(`reviewer plays synthetic
     } });
     expect(forgedDuration.status()).toBe(400);
     expect(await db.video.count({ where: { ownerId: owner.id } })).toBe(0);
-    // Ten frames at 10 fps span 900 ms between first and last frame starts.
-    const mimeType = `video/${container}`;
-    const ffmpeg = join(dirname(nativeProbePath()), process.platform === "win32" ? "ffmpeg.exe" : "ffmpeg");
-    const bytes = execFileSync(ffmpeg, [
-      "-v", "error", "-f", "lavfi", "-i", "color=black:s=64x64:r=10",
-      "-frames:v", "10", "-an", "-pix_fmt", "yuv420p", "-threads", "1",
-      // Disable B-frames so the fragmented MP4 starts at 0 and 100 ms is seekable.
-      ...(container === "mp4" ? ["-c:v", "libx264", "-bf", "0", "-movflags", "frag_keyframe+empty_moov"] : ["-c:v", "libvpx"]),
-      "-f", container, "pipe:1",
-    ], { timeout: 10000, maxBuffer: 1048576, windowsHide: true, stdio: ["ignore", "pipe", "ignore"] });
-    const intent = await ownerContext.request.post("/api/videos/upload-intent", { headers: mutation, data: {
-      mimeType, sizeBytes: bytes.length,
-    } });
-    expect(intent.status()).toBe(201);
-    const upload = await intent.json() as { id: string; uploadUrl: string };
-    const put = await fetch(upload.uploadUrl, {
-      method: "PUT", headers: { "Content-Type": mimeType }, body: new Uint8Array(bytes),
-      signal: AbortSignal.timeout(10000),
-    }).catch(() => { throw new Error("Synthetic video PUT failed."); });
-    expect(put.ok).toBe(true);
-    const confirmed = await ownerContext.request.post(`/api/videos/${upload.id}/confirm`, { headers: mutation, data: {} });
-    expect(confirmed.status()).toBe(201);
-    const video = await db.video.findUniqueOrThrow({ where: { id: upload.id } });
+    const videoId = await uploadSample(ownerContext, container);
+    const video = await db.video.findUniqueOrThrow({ where: { id: videoId } });
     expect(video.status).toBe("READY");
     expect(video.durationMs, "Confirmation must store the decoded frame span").toBe(900);
 
     await identity(db, "MODERATOR", staff);
     const expert = await identity(db, "EXPERT", context);
-    const approved = await staff.request.post(`/api/expert-admin/experts/${expert.id}/approvals`, { headers: mutation, data: {
-      expectedRevision: 0, trainingVersion: "t08-fixture-training", policyVersion: "t08-fixture-confidentiality",
-      trainingEvidenceId: `t08-training-${expert.id}`, confidentialityEvidenceId: `t08-confidentiality-${expert.id}`, expiresAt: null,
-    } });
-    expect(approved.status()).toBe(201);
-    const assigned = await staff.request.post("/api/expert-admin/assignments", { headers: idempotent(), data: {
-      videoId: video.id, expertId: expert.id, expectedCredentialRevision: 1, dueAt: null, expiresAt: null,
-    } });
-    expect(assigned.status()).toBe(201);
-    const { assignment } = await assigned.json() as { assignment: { id: string } };
-    const api = `/api/expert/assignments/${assignment.id}`;
-    const workspace = `/expert/assignments/${assignment.id}/review`;
+    const assignmentId = await assignSample(staff, expert.id, video.id);
+    const api = `/api/expert/assignments/${assignmentId}`;
+    const workspace = `/expert/assignments/${assignmentId}/review`;
     expect((await others.request.get(api + "/draft")).status()).toBe(401);
     expect((await others.request.post(api + "/playback", { headers: mutation, data: {} })).status()).toBe(401);
     expect((await ownerContext.request.get(api + "/draft")).status()).toBe(403);
@@ -247,7 +261,7 @@ for (const container of ["mp4", "webm"] as const) test(`reviewer plays synthetic
     await page.getByLabel("Summary").fill("Synthetic recording reviewed.");
     await expect(page.getByText("Saved version 2")).toBeVisible();
 
-    const draftRow = await db.expertReview.findUniqueOrThrow({ where: { assignmentId: assignment.id } });
+    const draftRow = await db.expertReview.findUniqueOrThrow({ where: { assignmentId } });
     const outside = await page.request.patch(`/api/expert/reviews/${draftRow.id}/draft`, {
       headers: mutation, data: { expectedVersion: 2, observations: [{
         category: "EYE", startMs: 0, endMs: video.durationMs! + 1,
@@ -270,7 +284,7 @@ for (const container of ["mp4", "webm"] as const) test(`reviewer plays synthetic
     await expect.poll(() => player.evaluate((element: HTMLVideoElement) => element.currentTime)).toBeGreaterThan(0);
     await player.evaluate((element: HTMLVideoElement) => { element.pause(); element.currentTime = 0; });
     await expect.poll(() => db.auditLog.count({
-      where: { actorId: expert.id, action: "EXPERT_PLAYBACK_ISSUED", subjectId: assignment.id },
+      where: { actorId: expert.id, action: "EXPERT_PLAYBACK_ISSUED", subjectId: assignmentId },
     })).toBe(1);
     const unsignedObject = await player.evaluate((element: HTMLVideoElement) => {
       const unsigned = new URL(element.currentSrc);
@@ -301,7 +315,7 @@ for (const container of ["mp4", "webm"] as const) test(`reviewer plays synthetic
       await expect(note.getByLabel("Context")).toHaveValue("Opening frame.");
     }
     const observationsById = { observations: { orderBy: { id: "asc" as const } } };
-    const saved = await db.expertReview.findUniqueOrThrow({ where: { assignmentId: assignment.id },
+    const saved = await db.expertReview.findUniqueOrThrow({ where: { assignmentId },
       include: observationsById });
     expect(saved.version).toBe(categories.length + 2);
     expect(saved.observations).toHaveLength(categories.length);
@@ -342,7 +356,7 @@ for (const container of ["mp4", "webm"] as const) test(`reviewer plays synthetic
     expect((await page.request.patch(draftApi, change)).status()).toBe(403);
     expect(await db.expertReview.findUnique({ where: { id: saved.id }, include: observationsById })).toEqual(saved);
     expect(await db.auditLog.count({ where: { action: "EXPERT_DRAFT_SAVED", subjectId: saved.id } })).toBe(categories.length + 1);
-    expect(await db.auditLog.count({ where: { action: "EXPERT_PLAYBACK_ISSUED", subjectId: assignment.id } }))
+    expect(await db.auditLog.count({ where: { action: "EXPERT_PLAYBACK_ISSUED", subjectId: assignmentId } }))
       .toBe(container === "mp4" ? 3 : 2);
     await page.reload();
     await expect(page.getByText("Review access could not be confirmed.", { exact: false })).toBeVisible();
@@ -352,5 +366,236 @@ for (const container of ["mp4", "webm"] as const) test(`reviewer plays synthetic
     await staff.close();
     await others.close();
     await ownerContext.close();
+  }
+});
+
+test("T16 connects private review, independent QA, owner claims and reciprocal matching", async ({ db, browser, page, context }, testInfo) => {
+  test.setTimeout(120000);
+  const ownerContext = await browser.newContext({ baseURL: origin });
+  const peerContext = await browser.newContext({ baseURL: origin });
+  const qaContext = await browser.newContext({ baseURL: origin });
+  const assigningStaff = await browser.newContext({ baseURL: origin });
+  const members: string[] = [];
+  const claimText = "The member said they enjoy reading.";
+  const summary = "T16 private review summary";
+  const evidence = "T16 private source observation";
+  const transcript = "T16 private transcript";
+  const consentContext = "T16 private evidence context";
+  const auditForm = async (screen: typeof page) => {
+    if (testInfo.project.name === "video-mobile") await screen.setViewportSize({ width: 320, height: 844 });
+    await expect(screen.getByRole("main")).toHaveCount(1);
+    expect(await screen.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    const { violations } = await new AxeBuilder({ page: screen }).include("main").analyze();
+    expect(violations.map(({ id, nodes }) => ({ id, targets: nodes.map(node => node.target) }))).toEqual([]);
+  };
+  const setConsent = async (actor: BrowserContext, expectedVersion: number, purposes: ConsentPurpose[], granted: boolean) => {
+    const response = await actor.request.patch("/api/consents/me", { headers: idempotent(), data: {
+      expectedVersion, consents: purposes.map(purpose => ({ purpose, granted, ...(granted ? { policyVersion } : {}) })),
+    } });
+    expect(response.status()).toBe(200);
+  };
+
+  try {
+    const owner = await identity(db, "MEMBER", ownerContext);
+    const peer = await identity(db, "MEMBER", peerContext);
+    members.push(owner.id, peer.id);
+    for (const id of members) {
+      await db.user.update({ where: { id }, data: {
+        declaredAdult: true, profile: { create: { birthDate: new Date("1990-01-01"), visibilityEnabled: true } },
+      } });
+    }
+    await setConsent(ownerContext, 0, [
+      "VIDEO_STORAGE", "EXPERT_VIDEO_REVIEW", "REPORT_SHARING", "PROFILE_MATCHING", "VIDEO_CLAIM_MATCHING",
+    ], true);
+    await setConsent(peerContext, 0, ["PROFILE_MATCHING"], true);
+    const videoId = await uploadSample(ownerContext, "webm");
+    await identity(db, "MODERATOR", assigningStaff);
+    const expert = await identity(db, "EXPERT", context);
+    const moderator = await identity(db, "MODERATOR", qaContext, "t16-qa.example.invalid");
+    const assignmentId = await assignSample(assigningStaff, expert.id, videoId);
+
+    const ownerPage = await ownerContext.newPage();
+    await ownerPage.goto("/account/reviews");
+    await expect(ownerPage.getByText("No approved review reports are available.")).toBeVisible();
+    await page.goto(`/expert/assignments/${assignmentId}/review`);
+    await page.getByRole("button", { name: "Start draft" }).press("Enter");
+    const expertSummary = page.getByLabel("Summary");
+    await expertSummary.focus();
+    await page.keyboard.press("Tab");
+    await expect(page.getByLabel("Limitations")).toBeFocused();
+    const submit = page.getByRole("button", { name: "Submit for quality review" });
+    await expect(submit).toBeDisabled();
+    await expertSummary.fill(summary);
+    await page.getByLabel("Limitations").fill("One synthetic recording.");
+    await page.getByRole("button", { name: "Add observation" }).press("Enter");
+    await expect(page.getByText("Enter evidence, context and valid start and end times to save your changes.")).toBeVisible();
+    await auditForm(page);
+    const note = page.getByRole("group", { name: "Observation 1", exact: true });
+    await note.getByLabel("Category").selectOption("SPEECH");
+    await note.getByLabel("Start (ms)").fill("100");
+    await note.getByLabel("End (ms)").fill("800");
+    await note.getByLabel("Observable evidence").fill(evidence);
+    await note.getByLabel("Context").fill(consentContext);
+    await expect(submit).toBeEnabled();
+    await submit.press("Enter");
+    const submission = page.getByRole("dialog");
+    await expect(submission.getByRole("heading")).toBeFocused();
+    await page.keyboard.press("Escape");
+    await expect(submit).toBeFocused();
+    await submit.press("Enter");
+    await submission.getByRole("button", { name: "Confirm submission" }).press("Enter");
+    await expect(page.getByText("Submitted for quality review", { exact: true })).toBeVisible();
+    const review = await db.expertReview.findUniqueOrThrow({ where: { assignmentId } });
+    expect(review.status).toBe("SUBMITTED");
+    const qaPath = `/api/qa/reviews/${review.id}`;
+    const approveWithoutAccess = (actor: BrowserContext) => actor.request.post(qaPath + "/approve", {
+      headers: mutation, data: { expectedVersion: review.version },
+    });
+    expect((await approveWithoutAccess(context)).status()).toBe(403);
+    expect((await approveWithoutAccess(assigningStaff)).status()).toBe(403);
+    expect((await approveWithoutAccess(qaContext)).status()).toBe(404);
+    await ownerPage.reload();
+    await expect(ownerPage.getByText("No approved review reports are available.")).toBeVisible();
+
+    // PA2 is an internal service. Use its real transaction with synthetic, actor-bound providers.
+    const { AssignmentGrantsService } = require("../../api/dist/expert-admin/assignment-grants.service") as
+      typeof import("../../api/src/expert-admin/assignment-grants.service");
+    const admin = await db.user.create({ data: {
+      email: `${randomUUID()}@t16-admin.example.invalid`, passwordHash: "synthetic-only",
+      role: "ADMIN", status: "ACTIVE", emailVerifiedAt: new Date(),
+    } });
+    const session = await db.session.create({ data: {
+      userId: admin.id, tokenHash: createHash("sha256").update(randomBytes(32)).digest("hex"),
+      expiresAt: new Date(Date.now() + 600000),
+    } });
+    const grants = new AssignmentGrantsService(db as unknown as import("../../api/src/database/prisma.service").PrismaService,
+      { values: { nodeEnv: "test" } } as import("../../api/src/config/environment.service").EnvironmentService,
+      { resolve: async (_tx, auth) => auth.user.id === admin.id ? {
+        userId: admin.id, role: "ADMIN", active: true, reference: "synthetic-t16", testOnly: true,
+      } : undefined },
+      { resolve: async (_tx, auth) => auth.sessionId === session.id ? {
+        userId: admin.id, sessionId: session.id, level: "MFA", verifiedAt: session.createdAt,
+        expiresAt: session.expiresAt, testOnly: true,
+      } : undefined });
+    await grants.grant({ user: admin, sessionId: session.id }, {
+      assignmentId, moderatorId: moderator.id, expectedRevision: 0, expiresAt: session.expiresAt.toISOString(),
+    });
+    const staleApproval = await qaContext.request.post(qaPath + "/approve", {
+      headers: mutation, data: { expectedVersion: review.version - 1 },
+    });
+    expect(staleApproval.status()).toBe(409);
+    expect(await db.expertReview.findUnique({ where: { id: review.id } })).toMatchObject({
+      status: "SUBMITTED", version: review.version,
+    });
+    const qa = await qaContext.newPage();
+    await qa.goto("/qa/reviews");
+    await qa.getByRole("button", { name: `Open review ${review.id}` }).press("Enter");
+    await expect(qa.getByText(evidence, { exact: true })).toBeVisible();
+    await qa.getByRole("checkbox", { name: claimText }).press("Space");
+    const approve = qa.getByRole("button", { name: "Approve review" });
+    await expect(approve).toBeDisabled();
+    const speech = qa.getByLabel("Speech observation");
+    await speech.selectOption({ index: 1 });
+    await speech.focus();
+    await qa.keyboard.press("Tab");
+    await expect(qa.getByLabel("Context", { exact: true })).toBeFocused();
+    await qa.getByLabel("Context", { exact: true }).fill(consentContext);
+    await qa.getByLabel("Manual transcript (optional)").fill(transcript);
+    await auditForm(qa);
+    await approve.press("Enter");
+    const decisionDialog = qa.getByRole("dialog");
+    await expect(decisionDialog.getByRole("heading")).toBeFocused();
+    await decisionDialog.getByRole("button", { name: "Confirm approval" }).press("Enter");
+    await expect(qa.getByRole("status").filter({ hasText: "Review approved." })).toBeVisible();
+
+    const foreignReports = await peerContext.request.get("/api/reviews/me");
+    expect(foreignReports.status()).toBe(200);
+    expect(await foreignReports.json()).toEqual({ reports: [], nextCursor: null });
+    await ownerPage.reload();
+    await expect(ownerPage.getByText(summary, { exact: true })).toBeVisible();
+    await expect(ownerPage.getByText(transcript, { exact: true })).toBeVisible();
+    await auditForm(ownerPage);
+
+    const matches = await peerContext.newPage();
+    const readReasons = async (shared: boolean) => {
+      const apiRead = matches.waitForResponse(response =>
+        new URL(response.url()).pathname === "/api/matches/recommendations" && response.ok());
+      await matches.goto("/account/matches");
+      const response = await apiRead;
+      expect(response.headers()["cache-control"]).toBe("private, no-store");
+      const result = await response.json();
+      expect(result).toEqual({
+        available: true, nextCursor: null,
+        recommendations: [{ key: expect.any(String), pairId: expect.any(String),
+          reasons: shared ? ["Meets both members’ matching settings.", claimText] : ["Meets both members’ matching settings."] }],
+      });
+      for (const privateValue of [summary, evidence, transcript, consentContext, owner.id, peer.id, review.id, videoId]) {
+        expect(JSON.stringify(result)).not.toContain(privateValue);
+      }
+      const reason = matches.getByText(claimText, { exact: true });
+      await expect(matches.getByText("Meets both members’ matching settings.", { exact: true })).toBeVisible();
+      if (shared) await expect(reason).toBeVisible();
+      else await expect(reason).toHaveCount(0);
+      return result.recommendations[0].pairId as string;
+    };
+    await readReasons(false);
+    await ownerPage.getByRole("button", { name: "Confirm this claim" }).press("Enter");
+    await expect(ownerPage.getByText("Confirmed · not shared")).toBeVisible();
+    await readReasons(false);
+    const share = ownerPage.getByRole("button", { name: "Share this claim for matching" });
+    await share.press("Enter");
+    await expect(ownerPage.getByText("Sharing approved for matching")).toBeVisible();
+    await readReasons(true);
+    await setConsent(ownerContext, 1, ["VIDEO_CLAIM_MATCHING"], false);
+    await readReasons(false);
+    await ownerPage.reload();
+    await share.press("Enter");
+    await expect(ownerPage.getByRole("main").getByRole("alert"))
+      .toContainText("Enable profile matching, report sharing, and video claim matching");
+    await auditForm(ownerPage);
+    await setConsent(ownerContext, 2, ["VIDEO_CLAIM_MATCHING"], true);
+    await readReasons(false);
+    await ownerPage.getByRole("button", { name: "Reload report", exact: true }).press("Enter");
+    await share.press("Enter");
+    await expect(ownerPage.getByText("Sharing approved for matching")).toBeVisible();
+    await readReasons(true);
+    await ownerPage.getByRole("button", { name: "Revoke this claim" }).press("Enter");
+    const revoke = ownerPage.getByRole("dialog");
+    await expect(revoke.getByRole("heading")).toBeFocused();
+    await revoke.getByRole("button", { name: "Confirm revocation" }).press("Enter");
+    await expect(ownerPage.getByText("Revoked", { exact: true })).toBeVisible();
+    const peerReference = await readReasons(false);
+
+    const foreignDecision = await ownerContext.request.post(`/api/matches/${peerReference}/decision`, {
+      headers: mutation, data: { choice: "ACCEPT" },
+    });
+    expect(foreignDecision.status()).toBe(404);
+    expect(await foreignDecision.json()).toMatchObject({ code: "MATCH_UNAVAILABLE" });
+    expect(await db.matchDecision.count({ where: { actorUserId: { in: members } } })).toBe(0);
+    await matches.getByRole("button", { name: "Accept", exact: true }).press("Enter");
+    await expect(matches.getByText("Acceptance saved.")).toBeVisible();
+    await expect(matches.getByText("Mutual match", { exact: false })).toHaveCount(0);
+    await ownerPage.goto("/account/matches");
+    await ownerPage.getByRole("button", { name: "Accept", exact: true }).press("Enter");
+    await expect(ownerPage.getByText("Mutual match", { exact: false })).toBeVisible();
+    await matches.reload();
+    await expect(matches.getByText("Mutual match", { exact: false })).toBeVisible();
+    await setConsent(ownerContext, 3, ["PROFILE_MATCHING"], false);
+    await matches.reload();
+    await expect(matches.getByText("Accepted ·", { exact: false })).toContainText("Unavailable");
+    await expect(matches.getByText("Mutual match", { exact: false })).toHaveCount(0);
+    const history = await peerContext.request.get("/api/matches/decisions");
+    expect(history.status()).toBe(200);
+    expect(await history.json()).toEqual({ decisions: [{
+      id: expect.any(String), choice: "ACCEPT", createdAt: expect.any(String), available: false, mutual: false,
+    }], nextCursor: null });
+    expect(await db.matchDecision.count({ where: { actorUserId: { in: members } } })).toBe(2);
+  } finally {
+    try {
+      await Promise.all([ownerContext.close(), peerContext.close(), qaContext.close(), assigningStaff.close()]);
+    } finally {
+      // Keep later browser cases isolated even if a browser context failed during teardown.
+      await db.profile.updateMany({ where: { userId: { in: members } }, data: { visibilityEnabled: false } });
+    }
   }
 });

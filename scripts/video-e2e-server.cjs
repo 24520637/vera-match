@@ -137,6 +137,9 @@ async function cleanup() {
   const { ExpertMfaSource } = require(
     resolve(root, "apps/api/dist/expert-admin/expert-mfa.source.js"),
   );
+  const { StaffAssuranceSource } = require(
+    resolve(root, "apps/api/dist/safety/staff-assurance.source.js"),
+  );
   const { PrismaService } = require(resolve(root, "apps/api/dist/database/prisma.service.js"));
   const { configureApplication } = require(
     resolve(root, "apps/api/dist/configure-app.js"),
@@ -180,6 +183,18 @@ async function cleanup() {
         const session = await tx.session.findUnique({ where: { id: auth.sessionId }, include: { user: true } });
         if (session?.userId !== auth.user.id || !session.user.email.endsWith("@t08.example.invalid")) return undefined;
         return { userId: session.userId, sessionId: session.id, expiresAt: session.expiresAt, testOnly: true };
+      },
+    })
+    .overrideProvider(StaffAssuranceSource)
+    .useValue({
+      async resolve(tx, auth) {
+        const session = await tx.session.findUnique({ where: { id: auth.sessionId }, include: { user: true } });
+        if (session?.userId !== auth.user.id || session.user.role !== "MODERATOR" ||
+          !session.user.email.endsWith("@t16-qa.example.invalid")) return undefined;
+        return {
+          userId: session.userId, sessionId: session.id, level: "MFA",
+          verifiedAt: session.createdAt, expiresAt: session.expiresAt, testOnly: true,
+        };
       },
     })
     .compile();

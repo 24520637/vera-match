@@ -631,3 +631,57 @@ account deletion are not claimed by these tests.
 - Production consent publication, field-level disclosure policy, trusted staff
   assurance, real deployment transport and account lifecycle acceptance remain
   separate from synthetic test evidence.
+
+## T16 end-to-end integration (C088–C092)
+
+- C088: run `npm run test:auth --workspace apps/web` with loopback
+  PostgreSQL and Mailpit. The same member registers in the browser, verifies
+  the Mailpit link, signs in, reloads the protected account, signs out and
+  rejects replay of the verification link. The suite also checks reopened
+  browser sessions, independent session revocation and transport failures.
+- C089 and C090: run `node scripts/run-video-e2e.cjs expert-review.video-e2e.ts`
+  with the native video prerequisites above. The T16 case uploads a synthetic
+  video, assigns an eligible expert, submits reviewed observations, and runs
+  independent QA and owner claim actions in the browser against the same data.
+  It verifies wrong-role, missing-assurance, missing-grant, stale-version and
+  foreign-owner denials. QA uses session-bound test assurance on the isolated
+  server and an assignment-scoped grant from the internal PA2 service.
+- The same case checks the peer's API response and rendered recommendations
+  before claim sharing, after sharing, after permission withdrawal and
+  regrant, and after explicit revocation. It verifies cross-member reference
+  denial and a mutual acceptance that becomes unavailable in reloaded history
+  after `PROFILE_MATCHING` withdrawal. Run the member browser suite for
+  decline, block and stale-reference regressions, and the matching API suite
+  for reciprocal eligibility, session binding, races and atomic audit writes.
+- C091: the T16 case exercises keyboard navigation, dialog focus and
+  recovery from incomplete observations and missing claim consent. It scans
+  the expert, QA and owner report content with axe and checks mobile reflow
+  at 320px. The shared UI suite also checks that the QA queue and disputes
+  view keep a single main landmark when mounted in the page layout. Run the
+  shared UI and member suites for member settings, matching states and shared
+  controls.
+- C092: run Prisma validation/generation, both workspace type checks and
+  builds, API unit and PostgreSQL integration tests, and Playwright.
+  `matching-responses.spec.ts` verifies that invalid successful decision
+  receipts show uncertainty, fetch the updated decision history and do not
+  repeat the write.
+  The existing matching migration test verifies the populated upgrade.
+
+Local verification on Windows with PostgreSQL 18, loopback Mailpit and
+MinIO, and Chromium desktop/mobile passed Prisma validation and generation,
+both workspace type checks and builds, 336 API unit tests, 36 auth browser
+tests, 10 video/review browser tests, 4 member browser tests, 4 safety browser
+tests, and 218 shared UI tests. The full PostgreSQL run passed 577 of 578
+cases. One C031 migration case exceeded the 30-second local deadline. All
+7 cases in that migration suite passed on a targeted rerun with a 90-second
+CLI timeout. The timed-out case also passed in isolation using the default
+deadline. All 578 PostgreSQL cases passed across the runs.
+
+Independent recovery audit (2026-11-22): Prisma validation and generation,
+both builds and type checks, 336 unit tests, and the complete browser suites
+(UI 218, auth 36, video/review 10, member 4, safety 4) passed. The PostgreSQL
+18.7 run passed 569 of 578 cases, including C031 at the default timeout.
+The nine failures were in T01, which expects migrations in the configured
+schema. After deploying the 23 committed migrations to the disposable audit
+database, the complete T01 suite passed 11 of 11. All 578 integration cases
+passed across the audit runs.
