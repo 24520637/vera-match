@@ -74,6 +74,20 @@ test("members accept, reload history and lose the mutual state after a real bloc
     await expect(page.getByText("Mutual match")).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Accept", exact: true })).toHaveCount(0);
 
+    // A fresh history navigation must reauthorize; cached mutual state is not authority.
+    await page.goto("/account/profile");
+    await page.goBack();
+    await expect(page.getByText("Accepted ·", { exact: false })).toContainText("Unavailable");
+    expect((await peer.request.delete("/api/blocks/" + a.id, {
+      data: {}, headers: { origin: "http://localhost:3100" },
+    })).status()).toBe(204);
+    const refocused = page.waitForResponse(response => response.url().endsWith("/api/matches/recommendations") && response.ok());
+    await page.evaluate(() => { window.dispatchEvent(new Event("blur")); window.dispatchEvent(new Event("focus")); });
+    await refocused;
+    await expect(page.getByText("Accepted ·", { exact: false })).toContainText("Unavailable");
+    await expect(page.getByText("Mutual match")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Accept", exact: true })).toHaveCount(0);
+
     const withdrawing = await member();
     const legacy = await member();
     await db.profile.update({ where: { userId: legacy.id }, data: { birthDate: new Date("1990-01-01T01:00:00Z") } });

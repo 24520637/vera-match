@@ -1,0 +1,17 @@
+# C062 — Safety integration acceptance
+
+Baseline develop 20aaea8; Huong / T11. This deliverable verifies the actual T14 Matching and T08/T10/T12 review workflow, not an invented consumer.
+
+Existing matching-api coverage proves both block directions before discovery; block before decision, after one accept and after mutual accept; explicit unblock and consent regrant never revive invalidated pairs; opaque handles remain actor/session/expiry bound; strict role, Origin, field, quota and audit-rollback checks. Existing safety-api and assignment-access suites cover idempotent owner-scoped block/unblock, report privacy, reciprocal expert access and role/assurance boundaries.
+
+New safety-workflow integration adds 12 actual HTTP operations after owner→expert block: playback; draft init/read/edit; submit; QA read/return/approve; claim confirm/share; owner report; report-derived matching reasons. It also holds real PostgreSQL transactions before commit to prove both block/submit lock orderings. Duplicate block creates one minimal audit event; denied work creates no successful domain audit. Block alone does not cancel an assignment or invent a new C051 reason. Independent profile matching may remain valid while blocked expert-derived claims are suppressed.
+
+Browser coverage extends the existing real API desktop/mobile matching flow with Back navigation and listener-driven refocus after block/unblock. It requires a fresh actual HTTP recommendation response and proves an invalidated mutual pair stays unavailable. Focus event dispatch tests application listeners; physical background-tab scheduling on every browser/OS is NOT RUN. No private report text or bearer token is persisted in browser storage.
+
+Shared native workflow fixtures use real measured media, native MinIO, actual login/session authorization and per-fixture native loopback clients. Test-only assurance/provisioning providers are scoped to synthetic identities in a disposable test schema; ordinary runtime providers stay fail-closed. No production authorization or schema changes.
+
+Verification: PostgreSQL/HTTP integration 141/141 across safety-workflow, matching-api, safety-api and assignment-access PASS. Browser and quality results are recorded in the PR after execution. No new universal denial-event audit is claimed.
+
+Production limitation: Auth/Safety/Matching counters remain volatile per API process. A multi-instance deployment requires a separately reviewed shared quota design and trusted proxy topology; arbitrary X-Forwarded-For remains untrusted. These tests are not multi-instance quota certification. Production MFA/provisioning and approved consent publication remain external gates.
+
+Final local checks: Member browser desktop/mobile 4/4 PASS (including Axe); API unit 336/336 PASS; Prisma validate/generate PASS; API/web production builds and TypeScript/lint PASS. The initial added DELETE fixture omitted JSON and correctly received 415; corrected to the existing API contract, then reran successfully.

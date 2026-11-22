@@ -25,9 +25,9 @@ import { securityHarness } from "./security-regression-fixtures";
 /** Synthetic qualification/policies/MFA only, isolated from ordinary runtime.
  * Login, approval, consent, upload, assignment, signing and storage remain real.
  */
-export async function securityMediaHarness() {
+export async function securityMediaHarness(options?: { isolatedClients?: boolean }) {
   const bucket = "vera-security-test-" + randomUUID(),
-    h = await securityHarness(bucket);
+    h = await securityHarness(bucket, options?.isolatedClients);
   const endpoint = new URL(h.values.minio.endpoint);
   if (
     process.env.NODE_ENV !== "test" ||
@@ -140,7 +140,7 @@ export async function securityMediaHarness() {
     return ((await response.json()) as { assignment: { id: string } })
       .assignment.id;
   }
-  async function fixture(expiresAfterMs?: number) {
+  async function fixture(expiresAfterMs?: number, mediaBytes?: Buffer) {
     const owner = await h.account(),
       moderator = await h.account("MODERATOR"),
       expert = await h.account("EXPERT");
@@ -190,11 +190,11 @@ export async function securityMediaHarness() {
     await consent(owner, 1, "EXPERT_VIDEO_REVIEW", true);
     const upload = await h.request(owner.cookie, "videos/upload-intent", {
       mimeType: "video/mp4",
-      sizeBytes: 12,
+      sizeBytes: mediaBytes?.length ?? 12,
     });
     expect(upload.status).toBe(201);
     const intent = (await upload.json()) as { id: string; uploadUrl: string };
-    const bytes = Buffer.from([
+    const bytes = mediaBytes ?? Buffer.from([
       0, 0, 0, 24, 102, 116, 121, 112, 105, 115, 111, 109,
     ]);
     expect(
@@ -214,8 +214,32 @@ export async function securityMediaHarness() {
       ? new Date(Date.now() + expiresAfterMs).toISOString()
       : null;
     const id = await assign(owner, moderator, expert, intent.id, expiresAt);
-    return { owner, moderator, expert, videoId: intent.id, id, expiresAt };
+    return { owner, moderator, expert, videoId: intent.id, id, expiresAt, uploadUrl: intent.uploadUrl };
   }
+  async function objectAbsent(videoId: string, incoming = false) {
+      const video = await h.db.client.video.findUniqueOrThrow({
+        where: { id: videoId },
+      });
+      if (video.bucket !== bucket)
+        throw Error("Foreign fixture bucket refused");
+      const key = incoming ? video.uploadKey ?? (await h.db.client.videoCleanupTask.findUnique({ where: { videoId } }))?.uploadKey
+        : video.objectKey;
+      if (!key) throw Error("Missing fixture object locator");
+      try {
+        await client.send(
+          new HeadObjectCommand({ Bucket: bucket, Key: key }),
+        );
+        return false;
+      } catch (error) {
+        if (
+          (error as { $metadata?: { httpStatusCode?: number } }).$metadata
+            ?.httpStatusCode === 404
+        )
+          return true;
+        throw Error("Fixture storage HEAD unavailable");
+      }
+  }
+
   return {
     ...h,
     approvalRegistry,
@@ -227,26 +251,8 @@ export async function securityMediaHarness() {
     consent,
     storageConsent,
     assign,
-    async finalObjectAbsent(videoId: string) {
-      const video = await h.db.client.video.findUniqueOrThrow({
-        where: { id: videoId },
-      });
-      if (video.bucket !== bucket)
-        throw Error("Foreign fixture bucket refused");
-      try {
-        await client.send(
-          new HeadObjectCommand({ Bucket: bucket, Key: video.objectKey }),
-        );
-        return false;
-      } catch (error) {
-        if (
-          (error as { $metadata?: { httpStatusCode?: number } }).$metadata
-            ?.httpStatusCode === 404
-        )
-          return true;
-        throw Error("Fixture storage HEAD unavailable");
-      }
-    },
+    finalObjectAbsent(videoId: string) { return objectAbsent(videoId); },
+    incomingObjectAbsent(videoId: string) { return objectAbsent(videoId, true); },
     play(cookie: string, id: string) {
       return h.request(cookie, "expert/assignments/" + id + "/playback");
     },
