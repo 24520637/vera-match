@@ -10,6 +10,9 @@ import { createHash } from "node:crypto";
 import { EnvironmentService } from "../config/environment.service";
 import { AuthRateLimitException } from "./auth-rate-limit.exception";
 
+type RateLimit = { scope: string; identity: string; limit: number; durationMs?: number };
+const maxWindows = 10000;
+
 /** MVP only: one API process, volatile counters. Never stores raw IP/email. */
 @Injectable()
 export class AuthRateLimiter {
@@ -18,29 +21,31 @@ export class AuthRateLimiter {
     { count: number; expires: number }
   >();
   consume(scope: string, identity: string, limit: number, durationMs = 900000) {
+    this.consumeAll({ scope, identity, limit, durationMs });
+  }
+
+  /** Charge all applicable buckets only when every bucket can admit the request. */
+  consumeAll(...limits: RateLimit[]) {
     const now = Date.now();
-    const key = createHash("sha256")
-      .update(`${scope}:${identity}`)
-      .digest("hex");
-    let entry = this.windows.get(key);
-    if (!entry || entry.expires <= now) {
-      if (this.windows.size >= 10000) {
-        for (const [id, window] of this.windows)
-          if (window.expires <= now) this.windows.delete(id);
-      }
-      if (this.windows.size >= 10000 && !this.windows.has(key))
-        throw new HttpException(
-          { code: "AUTH_CAPACITY", message: "Please try again shortly." },
-          503,
-        );
-      entry = { count: 0, expires: now + durationMs };
-      this.windows.set(key, entry);
+    const pending = new Map<string, { count: number; expires: number }>();
+    for (const { scope, identity, limit, durationMs = 900000 } of limits) {
+      const key = createHash("sha256").update(`${scope}:${identity}`).digest("hex");
+      const stored = pending.get(key) ?? this.windows.get(key);
+      const entry = stored && stored.expires > now ? stored : { count: 0, expires: now + durationMs };
+      if (entry.count >= limit)
+        throw new AuthRateLimitException(Math.max(1, Math.ceil((entry.expires - now) / 1000)));
+      pending.set(key, { count: entry.count + 1, expires: entry.expires });
     }
-    if (entry.count >= limit)
-      throw new AuthRateLimitException(
-        Math.max(1, Math.ceil((entry.expires - now) / 1000)),
+
+    const fits = () => this.windows.size + [...pending.keys()].filter(key => !this.windows.has(key)).length <= maxWindows;
+    if (!fits()) {
+      for (const [key, window] of this.windows)
+        if (window.expires <= now) this.windows.delete(key);
+      if (!fits()) throw new HttpException(
+        { code: "AUTH_CAPACITY", message: "Please try again shortly." }, 503,
       );
-    entry.count++;
+    }
+    for (const [key, entry] of pending) this.windows.set(key, entry);
   }
 }
 

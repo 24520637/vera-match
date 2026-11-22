@@ -29,7 +29,7 @@ export function normalizeText(value: string) {
   return value.normalize("NFC").replace(/\r\n?/g, "\n").trim();
 }
 
-function fieldErrors(field: ProfileField, value: unknown, today: Date): Detail[] {
+export function profileFieldErrors(field: ProfileField, value: unknown, today: Date): Detail[] {
   const error = (path = field): Detail[] => [{ field: path, messages: ["Use a valid value for this field."] }];
   if (field === "visibilityEnabled") return typeof value === "boolean" ? [] : error();
   if (value === null) return [];
@@ -76,7 +76,7 @@ export function parseProfilePatch(input: unknown, today = new Date()): ProfilePa
     changes++;
     let value = body[field];
     if (["occupation", "city", "bio"].includes(field) && typeof value === "string") value = normalizeText(value);
-    details.push(...fieldErrors(field, value, today));
+    details.push(...profileFieldErrors(field, value, today));
     patch[field] = value;
   }
   if (!changes) details.push({ field: "_form", messages: ["Submit at least one profile field."] });
@@ -85,7 +85,7 @@ export function parseProfilePatch(input: unknown, today = new Date()): ProfilePa
 }
 
 export function assertStoredProfile(data: ProfileData, revision: number, today = new Date()) {
-  const fields = profileFields.filter(field => fieldErrors(field, data[field], today).length > 0);
+  const fields = profileFields.filter(field => profileFieldErrors(field, data[field], today).length > 0);
   if (fields.length) {
     throw new ServiceUnavailableException({
       code: "DATA_SHAPE_UNAVAILABLE",
