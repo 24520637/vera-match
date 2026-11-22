@@ -26,7 +26,7 @@ import { SafetyRateLimiter, SafetyRequestGuard } from "./safety-request.guard";
     SafetyRateLimiter,
     SafetyRequestGuard,
   ],
-  exports: [BlockAccessService, StaffAssuranceSource],
+  exports: [BlockAccessService, SafetyAccessService, StaffAssuranceSource],
 })
 export class SafetyModule implements NestModule {
   configure(consumer: MiddlewareConsumer) {

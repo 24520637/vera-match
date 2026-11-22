@@ -9,6 +9,7 @@ import {
   Prisma,
 } from "@prisma/client";
 import { PrismaService } from "../database/prisma.service";
+import { closeSourceUnavailableDispute } from "./review-dispute-source-closure";
 
 const active = ["ASSIGNED", "IN_PROGRESS", "SUBMITTED"] as const;
 export const CANCELLATION_SYSTEM_ACTOR = "system:assignment-cancellation:v1";
@@ -146,6 +147,14 @@ export class AssignmentCancellationService {
       },
       { timeout: 10000 },
     );
+  }
+  async processSourceUnavailableDispute(id: string) {
+    return this.prisma.$transaction(async (tx) => {
+      const dispute = await tx.reviewDispute.findUnique({ where: { id }, select: { ownerId: true } });
+      if (!dispute) return;
+      await tx.$queryRaw`SELECT id FROM "User" WHERE id=${dispute.ownerId} FOR UPDATE`;
+      await closeSourceUnavailableDispute(tx, id, dispute.ownerId);
+    }, { timeout: 10000 });
   }
   async processWithdrawal(taskId: string) {
     return this.prisma.$transaction(

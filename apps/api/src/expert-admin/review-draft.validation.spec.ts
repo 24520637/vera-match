@@ -1,4 +1,4 @@
-import { draftPatch, requireDurationBounds } from "./review-draft.validation";
+import { draftPatch, requireDurationBounds, requireSubmittableReview } from "./review-draft.validation";
 
 describe("T08 observation validation", () => {
   const row = { category: "EYE", startMs: 0, endMs: 1000, observation: "Turns head.", context: "During opening." };
@@ -25,5 +25,28 @@ describe("T08 observation validation", () => {
     expect(() => patch({ ...row, startMs: 1001 })).toThrow(expect.objectContaining({ status: 422 }));
     expect(() => patch({ ...row, context: " " })).toThrow(expect.objectContaining({ status: 400 }));
     expect(() => patch({ ...row, expertId: "untrusted" })).toThrow(expect.objectContaining({ status: 400 }));
+  });
+});
+
+describe("C055 saved review submission validation", () => {
+  const review = { summary: "The speaker paused during the first answer.", limitations: "One prompted recording.", observations: [] };
+
+  test.each(["summary", "limitations"] as const)("requires a nonblank %s", field => {
+    expect(() => requireSubmittableReview({ ...review, [field]: " \n " }, null)).toThrow(expect.objectContaining({
+      status: 422, response: expect.objectContaining({ code: "REVIEW_INCOMPLETE", details: [expect.objectContaining({ field })] }),
+    }));
+  });
+
+  test("accepts a narrative without a transcript or timecoded evidence", () => {
+    expect(() => requireSubmittableReview(review, null)).not.toThrow();
+  });
+
+  test("revalidates stored evidence against the current verified duration", () => {
+    const row = { category: "SPEECH" as const, startMs: 100, endMs: 200, observation: "Pauses.", context: "During the opening answer." };
+    const saved = { ...review, observations: [row] };
+    expect(() => requireSubmittableReview(saved, 200)).not.toThrow();
+    expect(() => requireSubmittableReview(saved, 199)).toThrow(expect.objectContaining({ status: 422 }));
+    expect(() => requireSubmittableReview(saved, null)).toThrow(expect.objectContaining({ status: 503 }));
+    expect(() => requireSubmittableReview({ ...review, observations: [{ ...row, context: null }] }, 200)).toThrow(expect.objectContaining({ status: 400 }));
   });
 });

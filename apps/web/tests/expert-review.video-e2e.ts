@@ -203,7 +203,8 @@ for (const container of ["mp4", "webm"] as const) test(`reviewer plays synthetic
     const bytes = execFileSync(ffmpeg, [
       "-v", "error", "-f", "lavfi", "-i", "color=black:s=64x64:r=10",
       "-frames:v", "10", "-an", "-pix_fmt", "yuv420p", "-threads", "1",
-      ...(container === "mp4" ? ["-c:v", "libx264", "-movflags", "frag_keyframe+empty_moov"] : ["-c:v", "libvpx"]),
+      // Disable B-frames so the fragmented MP4 starts at 0 and 100 ms is seekable.
+      ...(container === "mp4" ? ["-c:v", "libx264", "-bf", "0", "-movflags", "frag_keyframe+empty_moov"] : ["-c:v", "libvpx"]),
       "-f", container, "pipe:1",
     ], { timeout: 10000, maxBuffer: 1048576, windowsHide: true, stdio: ["ignore", "pipe", "ignore"] });
     const intent = await ownerContext.request.post("/api/videos/upload-intent", { headers: mutation, data: {

@@ -14,7 +14,7 @@ function timecode(field: string): never {
     details: [{ field, messages: ["Check the observation time range."] }] });
 }
 
-function record(value: unknown, keys: readonly string[], field = "_form"): Record<string, unknown> {
+export function record(value: unknown, keys: readonly string[], field = "_form"): Record<string, unknown> {
   if (value === null || typeof value !== "object" || Array.isArray(value)) invalid(field, "Send a JSON object.");
   if (Object.keys(value).some(key => !keys.includes(key))) invalid(field, "Unexpected fields.");
   return value as Record<string, unknown>;
@@ -34,7 +34,7 @@ function text(value: unknown, field: string, required: boolean) {
   return value;
 }
 
-function version(value: unknown) {
+export function version(value: unknown) {
   if (typeof value !== "number" || !Number.isInteger(value) || value < 1 || value > MAX_INT)
     invalid("expectedVersion", "Send the current draft version.");
   return value;
@@ -69,6 +69,44 @@ export function observationPost(value: unknown) {
 }
 
 export function requireEmpty(value: unknown) { record(value, []); }
+
+export function reviewSubmit(value: unknown) {
+  return version(record(value, ["expectedVersion"]).expectedVersion);
+}
+
+export function reviewReturn(value: unknown) {
+  const row = record(value, ["expectedVersion", "reason"]);
+  const reason = text(row.reason, "reason", true).trim();
+  if (reason.length > 2000) invalid("reason", "Use 2,000 characters or fewer.");
+  return { expectedVersion: version(row.expectedVersion), reason };
+}
+
+export function reviewCursor(value: unknown) {
+  const { after } = record(value, ["after"], "query");
+  if (after === undefined) return;
+  if (typeof after !== "string") invalid("after", "Send a valid cursor.");
+  return reviewId(after);
+}
+
+export function requireSubmittableReview(review: {
+  summary: string | null;
+  limitations: string | null;
+  observations: readonly (Omit<ReturnType<typeof observation>, "context"> & { context: string | null })[];
+}, durationMs: number | null) {
+  const missing = (["summary", "limitations"] as const).filter(field => !review[field]?.trim());
+  if (missing.length) {
+    throw new UnprocessableEntityException({
+      code: "REVIEW_INCOMPLETE", message: "Complete the summary and limitations before submitting.",
+      details: missing.map(field => ({ field, messages: ["Enter explicit text."] })),
+    });
+  }
+  text(review.summary, "summary", true);
+  text(review.limitations, "limitations", true);
+  for (const [index, row] of review.observations.entries()) {
+    observation(row, `observations.${index}`);
+  }
+  requireDurationBounds(review.observations, durationMs, "observations");
+}
 
 export function requireDurationBounds<T extends { startMs: number; endMs: number }>(
   rows: readonly T[], durationMs: number | null, prefix: "observations" | "observation",

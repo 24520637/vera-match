@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { ApiError, apiJson } from "@/lib/api";
 import { useAuth } from "../auth/auth-provider";
 import { Button } from "../ui/button";
+import { Modal } from "../ui/modal";
 import { Notice } from "../ui/status";
 
 const categories = ["EYE", "FACIAL", "BODY", "SPEECH", "CROSS_MODAL"] as const;
@@ -13,9 +14,11 @@ type Note = {
 };
 type Draft = {
   id: string; version: number; summary: string | null; limitations: string | null;
+  feedback?: string | null;
   observations: Array<Omit<Note, "startMs" | "endMs" | "context"> & { startMs: number; endMs: number; context: string | null }>;
 };
-type DraftResponse = { draft: Draft | null; durationMs: number | null };
+type Submission = { id: string; version: number; status: "SUBMITTED" | "APPROVED"; submittedAt: string };
+type DraftResponse = { draft: Draft | null; durationMs: number | null; submission?: Submission };
 type Playback = { url: string; expiresAt: string };
 const reference = /^[A-Za-z0-9_-]{1,200}$/;
 
@@ -52,8 +55,10 @@ function Workspace({ assignmentId }: { assignmentId: string }) {
   const [error, setError] = useState(""), [version, reload] = useState(0);
   const [media, setMedia] = useState<Playback>(), [playbackBusy, setPlaybackBusy] = useState(false);
   const [playbackNotice, setPlaybackNotice] = useState("");
+  const [confirming, setConfirming] = useState(false);
   const video = useRef<HTMLVideoElement>(null);
   const requests = useRef<AbortController | null>(null);
+  const validNotes = !!form && notesAreValid(form.notes, data?.durationMs);
 
   function report(err: unknown) {
     if (err instanceof ApiError) {
@@ -63,6 +68,7 @@ function Workspace({ assignmentId }: { assignmentId: string }) {
         return;
       }
       if (err.status === 409) { setError("This draft changed elsewhere. Reload the saved draft to continue."); return; }
+      if (err.code === "REVIEW_INCOMPLETE") { setError("Complete and save the summary and limitations before submitting."); return; }
       if (err.status === 422) { setError("Check that each time range is within the verified video duration."); return; }
       if (err.status === 429) { setError("Too many requests. Wait before retrying."); return; }
     }
@@ -125,6 +131,25 @@ function Workspace({ assignmentId }: { assignmentId: string }) {
     finally { if (!signal.aborted) setPlaybackBusy(false); }
   }
 
+  async function submit() {
+    const draft = data?.draft;
+    if (!draft || !form?.summary.trim() || !form.limitations.trim() || !validNotes || busy || playbackBusy || dirty || error) return;
+    const signal = requests.current!.signal;
+    setBusy(true);
+    setConfirming(false);
+    setMedia(undefined);
+    try {
+      const submission = await apiJson<Submission>(`/expert/reviews/${draft.id}/submit`, {
+        method: "POST", signal, json: { expectedVersion: draft.version },
+      });
+      if (signal.aborted) return;
+      if (!submission) throw new Error("Missing submission.");
+      setData({ draft: null, durationMs: null, submission });
+      setForm(undefined);
+    } catch (err) { if (!signal.aborted) report(err); }
+    finally { if (!signal.aborted) setBusy(false); }
+  }
+
   useEffect(() => {
     const draft = data?.draft;
     if (!dirty || busy || playbackBusy || error || !form || !draft) return;
@@ -163,7 +188,10 @@ function Workspace({ assignmentId }: { assignmentId: string }) {
     <Button disabled={busy || playbackBusy} onClick={() => { setData(undefined); setForm(undefined); reload(n => n + 1); }}>
       Reload saved draft
     </Button>
-    {data && <>
+    {data?.submission && (data.submission.status === "APPROVED"
+      ? <Notice title="Review approved">Version {data.submission.version} has passed independent quality review.</Notice>
+      : <Notice title="Submitted for quality review">Version {data.submission.version} is locked until a moderator reviews it.</Notice>)}
+    {data && !data.submission && <>
       <h2>Assigned video</h2>
       <Button disabled={busy || playbackBusy} onClick={() => void playback()}>{media ? "Renew playback" : "Load playback"}</Button>
       {playbackNotice && <p role="status">{playbackNotice}</p>}
@@ -176,11 +204,12 @@ function Workspace({ assignmentId }: { assignmentId: string }) {
       {!data.draft && <Button disabled={busy} onClick={() => void initialize()}>Start draft</Button>}
       {data.draft && form && <fieldset disabled={busy || playbackBusy}>
         <legend>Private review draft</legend>
+        {data.draft.feedback && <Notice title="Returned for revision"><span style={{ whiteSpace: "pre-wrap" }}>{data.draft.feedback}</span></Notice>}
         <p role="status">{busy ? "Saving…" : dirty ? "Unsaved changes" : `Saved version ${data.draft.version}`}</p>
-        {notesDirty && !notesAreValid(form.notes, data.durationMs) &&
-          <p role="status">Enter evidence, context and valid start and end times to save your changes.</p>}
+        {notesDirty && !validNotes && <p role="status">Enter evidence, context and valid start and end times to save your changes.</p>}
+        {!notesDirty && !validNotes && <p role="status">Correct or remove observations with missing evidence, context or verified time ranges before submitting.</p>}
         {error && dirty && <Button onClick={() => setError("")} disabled={error.startsWith("This draft changed")}>Retry save</Button>}
-        <p>Describe only what is observable. Explain context and avoid diagnostic or personality labels.</p>
+        <p>Describe only what is observable, explain the context, and avoid diagnostic or personality labels. Use Limitations to record uncertainty and limits of the source.</p>
         <p><label>Summary<br /><textarea value={form.summary} onChange={e => edit({ ...form, summary: e.target.value })} /></label></p>
         <p><label>Limitations<br /><textarea value={form.limitations} onChange={e => edit({ ...form, limitations: e.target.value })} /></label></p>
         <ol aria-label="Timeline observations">
@@ -209,8 +238,17 @@ function Workspace({ assignmentId }: { assignmentId: string }) {
           const stamp = String(Math.floor((video.current?.currentTime ?? 0) * 1000));
           edit(current => ({ ...current, notes: [...current.notes, { category: "EYE", startMs: stamp, endMs: stamp, observation: "", context: "" }] }));
         }}>Add observation</Button>
+        <p>Save the summary and limitations before submitting for independent quality review.</p>
+        <Button disabled={dirty || !!error || !validNotes || !form.summary.trim() || !form.limitations.trim()} onClick={() => setConfirming(true)}>
+          Submit for quality review
+        </Button>
       </fieldset>}
     </>}
+    <Modal open={confirming} onOpenChange={setConfirming} title="Submit this review?"
+      description="The saved version will be locked for an independent moderator to review.">
+      <Button variant="secondary" onClick={() => setConfirming(false)}>Keep editing</Button>
+      <Button onClick={() => void submit()}>Confirm submission</Button>
+    </Modal>
     {busy && !data && <p role="status">Loading review…</p>}
   </main>;
 }
