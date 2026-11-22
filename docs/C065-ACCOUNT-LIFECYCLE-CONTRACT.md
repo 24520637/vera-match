@@ -1,7 +1,7 @@
 # C065 / C066 — Proposed account lifecycle decision record
 
 Status: **PROPOSED / implementation BLOCKED**. Huong / T11. Documentation only.
-Baseline develop `8383d65`, including merged PR18 queues and PR22 draft APIs. Neither this document nor
+Baseline develop `aa8d82e`, including merged T10/T12 and PR24/25/26. Neither this document nor
 its PR approves a deletion policy, retention duration or irreversible operation.
 Do not interpret the proposed names below as existing enums, endpoints or workers.
 
@@ -142,9 +142,9 @@ C066 UI and the status API remain BLOCKED pending that contract.
 
 ## Relationship inventory and deletion hazards
 
-The following inventory comes from the actual 15-migration schema on develop and a
+The following inventory comes from the actual 22-migration schema on develop and a
 fresh disposable PostgreSQL 18 catalog, not hypothetical future models. The separate
-C095 rehearsal restored and compared all 46 foreign keys and 48 non-internal triggers.
+C095 rehearsal restored and compared all 50 foreign keys and 61 non-internal triggers.
 No database, application code, schema or migration changes are made by this PR.
 Refresh this inventory after any pending Phuc migration merges.
 
@@ -193,6 +193,10 @@ Refresh this inventory after any pending Phuc migration merges.
 | `Report.targetUserId` → `User.id` | SET NULL | `Report_targetUserId_fkey` |
 | `ReportModerationAction.reportId` → `Report.id` | RESTRICT | `ReportModerationAction_reportId_fkey` |
 | `ReviewClaim.reviewId` → `ExpertReview.id` | CASCADE | `ReviewClaim_reviewId_fkey` |
+| `ReviewClaimFeedback.claimId` → `ReviewClaim.id` | CASCADE | `ReviewClaimFeedback_claimId_fkey` |
+| `ReviewDecision.reviewId` → `ExpertReview.id` | CASCADE | `ReviewDecision_reviewId_fkey` |
+| `ReviewDecisionEvidence.assignmentId` → `ExpertAssignmentIdentity.assignmentId` | RESTRICT | `ReviewDecisionEvidence_assignmentId_fkey` |
+| `ReviewDispute.(claimId, reviewId)` → `ReviewClaim.(id, reviewId)` | CASCADE | `ReviewDispute_claimId_reviewId_fkey` |
 | `ReviewDispute.reviewId` → `ExpertReview.id` | CASCADE | `ReviewDispute_reviewId_fkey` |
 | `Session.userId` → `User.id` | CASCADE | `Session_userId_fkey` |
 | `Video.ownerId` → `User.id` | CASCADE | `Video_ownerId_fkey` |
@@ -208,7 +212,7 @@ account deletion therefore cannot promise reports disappear or retain them indef
 
 | Table / fields | Required lifecycle analysis |
 | --- | --- |
-| AuditLog.actorId, subjectId | Polymorphic raw locators; deleting User/Video does not remove or anonymize them. SAFETY actions have scoped DB immutability; all audit actions are not universally protected by that trigger. |
+| AuditLog.actorId, subjectId | Polymorphic locators do not disappear with User/Video. Selected T10/T12 actions map actors to opaque ExpertActorIdentity subjects and have scoped immutability in addition to SAFETY protections. Other actions keep their existing semantics; no universal anonymity or retention approval follows. |
 | AssignmentEvent.assignmentId, snapshot, actorEvidence | Retained event has no live assignment FK; snapshot may still contain video/subject references. Must preserve approved minimal evidence without claiming anonymity. |
 | ExpertAssignmentIdentity.assignmentId | Immutable ID tombstone survives live assignment removal; prevents ID reuse. No User/Video cascade. |
 | ExpertActorIdentity.subjectId; ExpertCredentialApproval/Event.subjectId | Independent actor/credential evidence survives live mapping. Approval/evidence JSON and event reason require minimization/retention decisions. |
@@ -217,15 +221,16 @@ account deletion therefore cannot promise reports disappear or retain them indef
 | VideoWithdrawalReceipt.withdrawalTaskId | No SQL FK. Consumer receipt must not be mistaken for physical cleanup or all-consumer completion. |
 | AssignmentCancellationScan.afterId, throughId | Mutable scheduling references only, no FKs; never completion evidence or authorization. Source removal must preserve eventual fair reconciliation. |
 | AssignmentModeratorScope.moderatorSubjectId; AssignmentModeratorGrantEvent.actorEvidence | No live User FK. Queue authority requires the current scope/expiry and live trusted identity checks; closure must revoke scope through the agreed lifecycle/events, not delete immutable scopes or events. Retained subject/evidence still needs minimization policy. |
-| ExpertReview.qaById | Scalar staff identity, no User FK; must be considered with future QA evidence. |
-| ReviewDispute.ownerId | Scalar User locator, no FK; review FK cascade can delete the dispute even while ownerId survives other paths. |
+| ExpertReview.qaById; ReviewDecision.moderatorId/reason | Live QA identity/feedback has no User FK. Video tombstoning removes live decisions and clears qaById/qaFeedback; retained opaque decision evidence is separate. Closure still needs an approved minimization and handoff sequence. |
+| ReviewDecisionEvidence.reviewId/moderatorSubjectId | No live review/moderator FK. Immutable minimal evidence survives live source deletion through the retained assignment-identity FK; this requires an explicit retention/hold/purge decision. |
+| ReviewDispute.ownerId | Scalar owner locator, no User FK. Review/claim cascades can delete live disputes; source-loss closure does not by itself implement account-closure retention or erase reasons/resolutions. |
 | MatchPair.userLowId, userHighId, reasons | Scalar account references, no User FKs; rows may outlive either User. Matching consumer purge/denial is not implemented by account cascade. |
 | MatchDecision.actorUserId | No User FK; only pair cascade exists. Close/delete must not leave accessible historical decisions by accident. |
 | ConsentPolicyEvidence.content/digest | Intentionally retained exact policy snapshot, not a live user profile. Do not rewrite approved bytes or infer indefinite retention. |
 
 ### SQL trigger constraints beyond Prisma relations
 
-| Table | Actual non-internal triggers (48 total) |
+| Table | Actual non-internal triggers (61 total) |
 | --- | --- |
 | `AssignmentCancellationContext` | `AssignmentCancellationContext_binding`, `AssignmentCancellationContext_immutable`, `AssignmentCancellationContext_no_truncate`, `AssignmentCancellationContext_recorded_at` |
 | `AssignmentEvent` | `AssignmentEvent_binding`, `AssignmentEvent_immutable`, `AssignmentEvent_no_truncate`, `AssignmentEvent_recorded_at` |
@@ -233,7 +238,7 @@ account deletion therefore cannot promise reports disappear or retain them indef
 | `AssignmentModeratorGrantEvent` | `AssignmentModeratorGrantEvent_binding`, `AssignmentModeratorGrantEvent_immutable`, `AssignmentModeratorGrantEvent_no_truncate` |
 | `AssignmentModeratorScope` | `AssignmentModeratorScope_event_required`, `AssignmentModeratorScope_mutation`, `AssignmentModeratorScope_no_delete`, `AssignmentModeratorScope_no_truncate` |
 | `AssignmentWithdrawalReceipt` | `AssignmentWithdrawalReceipt_immutable`, `AssignmentWithdrawalReceipt_no_truncate`, `AssignmentWithdrawalReceipt_recorded_at` |
-| `AuditLog` | `AuditLog_safety_immutable`, `AuditLog_safety_no_truncate` |
+| `AuditLog` | `AuditLog_safety_immutable`, `AuditLog_safety_no_truncate`, `AuditLog_t10_actor_subject`, `AuditLog_t10_delete`, `AuditLog_t10_update`, `AuditLog_t12_actor_subject`, `AuditLog_t12_delete`, `AuditLog_t12_update` |
 | `ConsentEvent` | `consent_event_immutable`, `consent_event_no_truncate` |
 | `ConsentPolicyEvidence` | `consent_policy_immutable`, `consent_policy_no_truncate` |
 | `ExpertActorIdentity` | `ExpertActorIdentity_delete`, `ExpertActorIdentity_immutable`, `ExpertActorIdentity_no_truncate` |
@@ -243,6 +248,9 @@ account deletion therefore cannot promise reports disappear or retain them indef
 | `ExpertCredentialApproval` | `ExpertCredentialApproval_immutable`, `ExpertCredentialApproval_no_truncate` |
 | `ExpertCredentialEvent` | `ExpertCredentialEvent_binding`, `ExpertCredentialEvent_immutable`, `ExpertCredentialEvent_no_truncate`, `ExpertCredentialEvent_recorded_at` |
 | `ReportModerationAction` | `ReportModerationAction_immutable`, `ReportModerationAction_no_truncate`, `ReportModerationAction_recorded_at` |
+| `ReviewDecision` | `ReviewDecision_guard_delete`, `ReviewDecision_immutable`, `ReviewDecision_no_truncate`, `ReviewDecision_record_evidence` |
+| `ReviewDecisionEvidence` | `ReviewDecisionEvidence_immutable`, `ReviewDecisionEvidence_no_truncate` |
+| `Video` | `Video_remove_live_qa_details` |
 
 ConsentEvent/ConsentPolicyEvidence reject UPDATE/DELETE/TRUNCATE. Credential approvals,
 credential events, AssignmentEvent, assignment identity/idempotency and C051 context/
@@ -264,10 +272,11 @@ cascade alone is the intended privacy behavior.
 
 | Dependency | Current boundary / required follow-up |
 | --- | --- |
-| C035 queue/grant foundation (PR18 merged) | Included in the 46-FK / 48-trigger inventory. Scope binds retained assignment identity, with a deferred currentGrantId FK and immutable self-referencing grant events. User deletion does not cascade scopes/events. Plan explicit revocation and membership handoff; role alone grants no queue access. Trusted provisioning/MFA and external grant management remain production gates. |
-| T08 draft API (PR22 merged) | Actual draft initialization/read/save and backend duration retry now exist. Include their account/generation checks, positive version and ordered timecode constraints (legacy rows remain NOT VALID), and late duration-probe identity reconciliation. This contract does not certify those races. Submission/QA/claims in open PR29/30 are not adopted here. |
-| Expert QA, claims, disputes, matching | Some draft tables exist, but absent/unmerged consumer workflows cannot acknowledge withdrawal/deletion. Need access denial, derived-data invalidation, cache/in-flight handling and independent durable receipts. |
-| C062 reciprocal blocking integration | Existing BlockAccessService is reusable, but absent Matching/Review consumers remain separate; closure cannot claim integration complete. |
+| C035 queue/grant foundation (PR18 merged) | Included in the 50-FK / 61-trigger inventory. Scope binds retained assignment identity, with a deferred currentGrantId FK and immutable self-referencing grant events. User deletion does not cascade scopes/events. Plan explicit revocation and membership handoff; role alone grants no queue access. Trusted provisioning/MFA and external grant management remain production gates. |
+| T08 draft API (PR22 merged) | Actual draft initialization/read/save and backend duration retry now exist. Include their account/generation checks, positive version and ordered timecode constraints (legacy rows remain NOT VALID), and late duration-probe identity reconciliation. This contract does not certify those races. Merged T10/T12 submission, QA and claims are included below; their existence does not complete account closure. |
+| T10/T12 review, QA, claims and disputes (PR29/30 merged) | Real APIs enforce source/generation authorization. Source loss closes disputes, tombstoning minimizes live QA details, and selected review/claim/dispute audits plus decision evidence remain protected. Account-closure handoffs, receipts, approved retention and full closure races are not implemented by those source-loss guarantees. |
+| Matching (PR31 still open) | Do not import unapproved code or fabricate consumer acknowledgement. Closure needs access denial, derived-data invalidation, cache/in-flight handling and an agreed durable acknowledgement contract. |
+| C062 reciprocal blocking integration | Review consumers now use the merged reciprocal-block checks. Matching remains unmerged; neither consumer has an implemented C065 barrier/closure acknowledgement. Do not claim full account-closure integration. |
 | Staff MFA/provisioning and policy publication | Default fail-closed. No NODE_ENV/test evidence, role claim or invented approval may enable ordinary-runtime private access. |
 | Backup/hold/retention and status authentication | Not approved or implemented. Production purge and C066 final completion remain blocked. |
 
@@ -288,7 +297,7 @@ cascade alone is the intended privacy behavior.
 ## Validation and handoff
 
 PASS: documentation inventory reconciled with Prisma schema, all migration DDL and the
-fresh PostgreSQL catalog (46 FKs / 48 triggers); no runtime/schema/secret changes.
+fresh PostgreSQL catalog (50 FKs / 61 triggers); no runtime/schema/secret changes.
 The referenced C095 synthetic backup/restore evidence is an independent deliverable,
 not a new execution of account closure. NOT RUN: any account closure/purge API, lifecycle
 state transition, C066 UI, production retention/deletion, backup restriction replay or
@@ -300,6 +309,8 @@ Phuc. Keep this proposal distinguishable from implemented guarantees in all hand
 
 ## Refresh and traceability
 
-The original proposal used the pre-C035 catalog. This refresh includes all 15 currently merged migrations, 46 FKs and 48 non-internal triggers, verified by the separate synthetic restore rehearsal. C035 scope/grant tables cannot be purged via User deletion; their immutable lifecycle and deferred circular FK need a separately approved retention/revocation design. PR22 draft constraints preserve legacy rows with NOT VALID checks; their existence is not proof all historical rows satisfy the new checks.
+The original proposal used the pre-C035 catalog. This refresh includes all 22 currently merged migrations, 50 FKs and 61 non-internal triggers, verified by the separate synthetic restore rehearsal. C035 scope/grant tables cannot be purged via User deletion; their immutable lifecycle and deferred circular FK need a separately approved retention/revocation design. PR22 draft constraints preserve legacy rows with NOT VALID checks; their existence is not proof all historical rows satisfy the new checks.
 
 The private commit plan assigns C065 to T11. The initial documentation commit/PR body incorrectly labeled T12; this document and follow-up traceability correct that to T11 without rewriting published history. No account closure or purge is implemented.
+
+This merge refreshes the proposed record against merged T10/T12 and PR24/25/26. The inventory includes ReviewDecision, retained ReviewDecisionEvidence, ReviewClaimFeedback, composite dispute provenance, T10/T12 actor/audit guards and source-loss cleanup. D1–D9 remain unapproved implementation decisions; merging this documentation does not authorize closure code, policy publication, retention periods or hard deletion.
