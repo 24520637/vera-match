@@ -11,6 +11,27 @@ const valid = {
   },
 };
 
+test("continues discovery from an empty page and stops at the end", async ({ page }) => {
+  await page.route("**/api/auth/me", route => route.fulfill({
+    json: { id: "synthetic-member", role: "MEMBER", email: "member@example.invalid", displayName: null },
+  }));
+  await page.route("**/api/matches/decisions", route => route.fulfill({ json: valid.decisions }));
+  await page.route("**/api/matches/recommendations*", route => {
+    const after = new URL(route.request().url()).searchParams.get("after");
+    return route.fulfill({ json: after === "opaque-window" ? valid.recommendations : {
+      available: true, recommendations: [], nextCursor: "opaque-window",
+    } });
+  });
+
+  await page.goto("http://127.0.0.1:3101/matches");
+  const section = page.getByRole("region", { name: "Recommendations" });
+  const next = section.getByRole("button", { name: "Next recommendations" });
+  await expect(section.getByText("No recommendations on this page")).toBeVisible();
+  await next.click();
+  await expect(section.getByRole("button", { name: "Accept", exact: true })).toBeVisible();
+  await expect(next).toHaveCount(0);
+});
+
 for (const endpoint of ["recommendations", "decisions"] as const) {
   for (const variant of ["null", "invalid item"] as const) {
     test(`${endpoint} rejects a successful ${variant} response and supports retry`, async ({ page }) => {

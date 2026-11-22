@@ -195,8 +195,12 @@ If the caller fails the matching eligibility checks, the response contains
 `available: false`, `recommendations: []` and `nextCursor: null`. An eligible
 caller can receive an empty list with `available: true`. The server inspects
 at most 48 shortlisted candidates and returns at most 16 recommendations.
-It issues a cursor only after finding another eligible recommendation in that
-window. A `null` cursor can still leave candidates outside the inspected window.
+A non-null `nextCursor` resumes discovery after the returned candidates or
+continues beyond the inspected window. Clients can receive a cursor with an
+empty list and should allow the caller to continue. A `null` cursor marks the
+end of the current traversal. The server rechecks live eligibility on each
+request. Restart without `after` to revisit candidates earlier in the traversal.
+The cursor discloses no screened account identities, exact counts, or rejection reasons.
 
 `key` is an opaque per-caller key. `pairId` is the temporary reference for the
 decision route. `reasons` contains the common eligibility explanation and can
@@ -268,14 +272,14 @@ becoming unavailable is reported in the `200` response.
 
 ### C079 and C080 product decisions still open
 
-The implemented ranking uses the viewer's directional priorities within each
-discovery window. Canonical factual statements can appear as explanations only
-after independent QA, owner confirmation and explicit sharing approval. The
-source observation must still match the approved review. Consent withdrawal,
-claim revocation and applicable disputes exclude a claim. The API leaves
-reciprocal aggregation, global ranking, a
-structured lifestyle criterion, field-specific profile disclosure, and claim
-contributions to ranking open for product review. See
+The viewer's directional priorities order recommendations within each discovered
+window. The API provides no global top-N or reciprocal aggregate score.
+Only authorized, independently QA-approved, owner-confirmed, currently shareable
+canonical factual statements can appear as explanations. The source observation
+must still match the approved review. Consent withdrawal, claim revocation and
+applicable disputes exclude a claim. Claims contribute zero to ranking in the MVP.
+Reciprocal aggregation, global ranking, a structured lifestyle criterion,
+field-specific profile disclosure and claim scoring remain open for product review. See
 [matching eligibility and ranking](MATCHING-DESIGN.md#c078-and-c079-eligibility-and-ranking)
 and [live claims](MATCHING-DESIGN.md#c080-live-claims).
 

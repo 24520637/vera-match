@@ -74,7 +74,7 @@ export class MatchingService {
     const after = this.readCursor(auth, "recommendations", pageCursor(query))?.id;
     const actor = auth.user.id;
     return this.store(async () => {
-      // This is only a bounded shortlist. None of these rows authorize an output.
+      // The extra ID signals another window. Only the first 48 enter eligibility checks.
       const shortlist = await this.prisma.user.findMany({
         where: {
           id: { not: actor, ...(after && { gt: after }) },
@@ -83,9 +83,9 @@ export class MatchingService {
           consents: { some: { purpose, granted: true, policyEvidenceId: { not: null } } },
           blocksMade: { none: { blockedId: actor } }, blocksReceived: { none: { blockerId: actor } },
         },
-        orderBy: { id: "asc" }, select: { id: true }, take: discoveryScanLimit,
+        orderBy: { id: "asc" }, select: { id: true }, take: discoveryScanLimit + 1,
       });
-      const peers = shortlist.map(row => row.id);
+      const peers = shortlist.slice(0, discoveryScanLimit).map(row => row.id);
       return this.access.run(auth, "MEMBER", peers, async (tx, now) => {
         const members = await this.members(tx, [actor, ...peers], now);
         const viewer = members.get(actor);
@@ -96,7 +96,7 @@ export class MatchingService {
         const existing = await this.pairs(tx, actor, peers);
         const blockCounts = await this.blockCounts(tx, [actor, ...peers]);
         const ranked = [];
-        let nextCursor = null;
+        let nextAfter = shortlist.length > discoveryScanLimit ? peers[peers.length - 1] : undefined;
         let lastEligibleId = "";
         for (const peerId of peers) {
           const peer = members.get(peerId);
@@ -108,11 +108,9 @@ export class MatchingService {
           if (pair && (pair.decisions.some(decision => decision.actorUserId === actor) ||
             !await this.currentPair(tx, pair))) continue;
 
-          // A continuation discloses only that another authorized recommendation exists.
           if (ranked.length === discoverySize) {
-            nextCursor = this.handles.issue(auth, "recommendations", {
-              id: lastEligibleId, expires: now.getTime() + handleLifetime,
-            });
+            // Resume before the first eligible candidate that did not fit on this page.
+            nextAfter = lastEligibleId;
             break;
           }
           lastEligibleId = peerId;
@@ -140,7 +138,9 @@ export class MatchingService {
         return {
           available: true,
           recommendations: ranked.sort(compareRank).map(row => row.recommendation),
-          nextCursor,
+          nextCursor: nextAfter ? this.handles.issue(auth, "recommendations", {
+            id: nextAfter, expires: now.getTime() + handleLifetime,
+          }) : null,
         };
       }, matchingIsolation);
     });

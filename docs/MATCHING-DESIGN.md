@@ -15,13 +15,19 @@ a ranking input. The explicit `different-relationship-goal` dealbreaker
 requires equal, known profile goals. Invalid matching inputs fail closed.
 Check blocks in both directions.
 
-Discovery inspects at most 48 shortlisted candidates per request. It locks
-them in sorted User ID order, rechecks the session and live rows, and returns
-up to 16 eligible recommendations. A cursor is issued only when the inspected
-window contains another eligible recommendation. An empty page or a page with
-no cursor can occur even when further candidates exist outside that window.
-This bounds the transaction and keeps pagination from revealing screened-out
-accounts. Rankings are local to the displayed window. Each direction uses that member’s lexicographic priorities:
+Discovery inspects at most 48 shortlisted candidates per request and fetches
+one extra shortlist ID to detect another window. It locks the inspected
+candidates in sorted User ID order, rechecks the session and live rows, and
+returns up to 16 eligible recommendations. If another eligible candidate is
+found within the window after the page fills, continuation starts after the
+last included candidate in shortlist order. Otherwise, if the lookahead
+exists, continuation starts after the last inspected ID. An empty page can
+carry a cursor. The cursor reveals no screened account IDs, exact counts, or
+rejection reasons. Each page rechecks live eligibility. A fresh traversal can
+revisit IDs already passed by a cursor.
+
+Ranking is local to the discovered window. There is no global top-N.
+Each direction uses that member’s lexicographic priorities:
 known exact desired-goal match, Jaccard overlap for values and interests,
 and an opaque tie key. Null priorities use the approved default order and
 an empty list skips the optional criteria. Each member sees their own
@@ -42,9 +48,9 @@ confirmation and share approval, current consent and original source and
 share generations, a speech observation on that review with the recorded
 timecodes, no individual revocation, and no applicable open,
 in-review, or upheld dispute. The only optional output is a distinct
-canonical factual statement authorized for this viewer. An ineligible
-claim does not affect a profile-only recommendation. Claim-to-score
-mapping and contribution require a product decision. The feature exposes
+canonical factual statement authorized for this viewer. Claims contribute
+zero to ranking in the MVP. Claim-to-score mapping and contribution require
+a product decision. The feature exposes
 no reports, transcripts, observation or claim IDs, timecodes, source
 details, feedback, or media locators. See [T12](EXPERT-REVIEW-WORKFLOW.md#7-t12-claims-and-disputes).
 

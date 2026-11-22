@@ -603,9 +603,13 @@ account deletion are not claimed by these tests.
   eligibility checks after the participant lock is released.
 - C079 unit checks cover independent directional vectors, null and empty
   priorities, Jaccard overlap, lexicographic order, and opaque ties. API
-  assertions cover actual ordering changes, privacy-safe projection, and a
-  continuation only when another eligible recommendation was found. Reciprocal aggregation, lifestyle
-  scoring, and profile-field sharing policy require product decisions.
+  assertions cover ordering within each discovered window, privacy-safe
+  projection and continuation beyond 48 ineligible or already selected
+  candidates. PostgreSQL tests exercise multiple windows, full-page spillover,
+  cursor replay and rejection, and eligibility changes between pages. The
+  browser suite verifies that a member can continue from an empty page.
+  Reciprocal aggregation, lifestyle scoring and profile-field sharing policy
+  require product decisions.
 - C080 uses the real approval, claim permissions and dispute services to verify
   that recommendation output includes only currently shared canonical copy,
   and suppresses a claim whose source observation no longer matches.

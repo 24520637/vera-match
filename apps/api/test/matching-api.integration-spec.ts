@@ -16,6 +16,11 @@ import { createAuthDatabase } from "./disposable-auth-database";
 const origin = "http://localhost:3000";
 const policyVersion = "synthetic-t14";
 type Actor = { id: string; token: string };
+type DiscoveryPage = {
+  available: boolean;
+  recommendations: { key: string; pairId: string; reasons: string[] }[];
+  nextCursor: string | null;
+};
 
 describe("T14 real matching HTTP and PostgreSQL", () => {
   let app: INestApplication;
@@ -66,10 +71,10 @@ describe("T14 real matching HTTP and PostgreSQL", () => {
       headers: { ...init.headers, "idempotency-key": randomUUID() } });
     expect(response.status).toBe(200);
   }
-  async function user(role: UserRole = "MEMBER", granted = true): Promise<Actor> {
+  async function user(role: UserRole = "MEMBER", granted = true, fixtureId?: string): Promise<Actor> {
     const token = randomBytes(32).toString("base64url");
     const { id } = await db.client.user.create({ data: {
-      email: `${randomUUID()}@example.invalid`, displayName: "Private Name", passwordHash: "synthetic-only",
+      id: fixtureId, email: `${randomUUID()}@example.invalid`, displayName: "Private Name", passwordHash: "synthetic-only",
       role, status: "ACTIVE", emailVerifiedAt: new Date(), declaredAdult: true,
       profile: { create: { birthDate: new Date("1990-01-01"), visibilityEnabled: true,
         relationshipGoal: "long-term", bio: "PRIVATE_BIO" } },
@@ -85,6 +90,36 @@ describe("T14 real matching HTTP and PostgreSQL", () => {
     await db.client.session.create({ data: { userId: actor.id, tokenHash: hashSessionToken(token),
       expiresAt: new Date(Date.now() + 600_000) } });
     return { id: actor.id, token };
+  }
+
+  const discoveryPath = (after?: string) => `matches/recommendations${after ? `?after=${encodeURIComponent(after)}` : ""}`;
+
+  async function discover(actor: Actor, after?: string): Promise<DiscoveryPage> {
+    const response = await api(discoveryPath(after), actor);
+    expect(response.status).toBe(200);
+    const page = await response.json() as DiscoveryPage;
+    expect(JSON.stringify(page)).not.toMatch(/discovery-peer-|PRIVATE_BIO|Private Name|example\.invalid/);
+    return page;
+  }
+
+  async function discoveryPeers(count: number) {
+    const peers: Actor[] = [];
+    for (let index = 1; index <= count; index++) {
+      peers.push(await user("MEMBER", true, `discovery-peer-${String(index).padStart(3, "0")}`));
+    }
+    return peers;
+  }
+
+  async function excludeByPeerAgePreference(peers: Actor[]) {
+    await db.client.matchPreference.createMany({ data: peers.map(peer => ({ userId: peer.id, minAge: 120 })) });
+  }
+
+  async function recommendedPeerIds(actor: Actor, page: DiscoveryPage) {
+    const session = await db.client.session.findUniqueOrThrow({
+      where: { tokenHash: hashSessionToken(actor.token) }, include: { user: true },
+    });
+    const auth = { sessionId: session.id, user: session.user };
+    return page.recommendations.map(row => app.get(MatchingHandles).read(auth, "decision", row.pairId)?.id).sort();
   }
   async function recommendation(actor: Actor) {
     const response = await api("matches/recommendations", actor);
@@ -257,7 +292,7 @@ describe("T14 real matching HTTP and PostgreSQL", () => {
     expect((await decide(a, await recommendation(a))).status).toBe(200);
   });
 
-  it("does not issue a cursor based on blocked or otherwise screened-out accounts", async () => {
+  it("does not issue a cursor when a short discovery window is exhausted", async () => {
     const a = await user();
     const eligible = await user();
     const blocked = await user();
@@ -272,6 +307,80 @@ describe("T14 real matching HTTP and PostgreSQL", () => {
       key: expect.any(String), pairId: expect.any(String), reasons: ["Meets both members’ matching settings."],
     }] });
     expect(JSON.stringify(body)).not.toContain(eligible.id);
+  });
+
+  it.each(["reciprocally ineligible", "already selected"])(
+    "reaches candidate 49 after 48 %s candidates", async (reason) => {
+      const actor = await user("MEMBER", true, "discovery-viewer");
+      const peers = await discoveryPeers(49);
+      const firstWindow = peers.slice(0, 48);
+      if (reason === "reciprocally ineligible") {
+        await excludeByPeerAgePreference(firstWindow);
+      } else {
+        const viewerLedger = await db.client.consentLedger.findUniqueOrThrow({ where: { userId: actor.id } });
+        const peerLedgers = await db.client.consentLedger.findMany({ where: { userId: { in: firstWindow.map(peer => peer.id) } } });
+        await db.client.$transaction(async tx => {
+          for (const peer of peerLedgers) {
+            const pair = await tx.matchPair.create({ data: {
+              userLowId: peer.userId, userHighId: actor.id,
+              lowConsentSubjectId: peer.subjectId, lowConsentVersion: peer.version,
+              highConsentSubjectId: viewerLedger.subjectId, highConsentVersion: viewerLedger.version,
+            } });
+            const decision = await tx.matchDecision.create({ data: { pairId: pair.id, actorUserId: actor.id, choice: "DECLINE" } });
+            await tx.auditLog.create({ data: { actorId: viewerLedger.subjectId, action: "MATCH_DECISION_RECORDED",
+              subjectType: "MatchDecision", subjectId: decision.id } });
+          }
+        });
+      }
+
+      const first = await discover(actor);
+      expect(first).toEqual({ available: true, recommendations: [], nextCursor: expect.any(String) });
+      const second = await discover(actor, first.nextCursor!);
+      expect(await recommendedPeerIds(actor, second)).toEqual([peers[48].id]);
+      expect(second.nextCursor).toBeNull();
+
+      await consent(peers[48], false, 1);
+      expect(await discover(actor, first.nextCursor!)).toEqual({ available: true, recommendations: [], nextCursor: null });
+      expect(await discover(actor)).toEqual({ available: true, recommendations: [], nextCursor: null });
+    },
+  );
+
+  it("crosses an empty window, rechecks live eligibility and preserves cursors across retries", async () => {
+    const actor = await user();
+    const peers = await discoveryPeers(117);
+    await excludeByPeerAgePreference([...peers.slice(19, 112), peers[114]]);
+
+    const first = await discover(actor);
+    expect(await recommendedPeerIds(actor, first)).toEqual(peers.slice(0, 16).map(peer => peer.id));
+    expect(first.nextCursor).toEqual(expect.any(String));
+    const second = await discover(actor, first.nextCursor!);
+    expect(await recommendedPeerIds(actor, second)).toEqual(peers.slice(16, 19).map(peer => peer.id));
+    expect(second.nextCursor).toEqual(expect.any(String));
+    const repeated = await discover(actor, first.nextCursor!);
+    expect(repeated.recommendations.map(row => row.key)).toEqual(second.recommendations.map(row => row.key));
+    expect(repeated.nextCursor).toEqual(expect.any(String));
+
+    const third = await discover(actor, second.nextCursor!);
+    expect(third).toEqual({ available: true, recommendations: [], nextCursor: expect.any(String) });
+    const cursor = third.nextCursor!;
+    const tampered = `${cursor.slice(0, 10)}${cursor[10] === "A" ? "B" : "A"}${cursor.slice(11)}`;
+    expect((await api(discoveryPath(tampered), actor)).status).toBe(400);
+    expect((await api(discoveryPath(cursor), await newSession(actor))).status).toBe(400);
+    expect((await api(discoveryPath(cursor), peers[0])).status).toBe(400);
+
+    await consent(peers[112], false, 1);
+    expect((await api("blocks", peers[113], json("POST", { targetUserId: actor.id }))).status).toBe(204);
+    await db.client.matchPreference.delete({ where: { userId: peers[110].id } });
+    await db.client.matchPreference.delete({ where: { userId: peers[114].id } });
+
+    const fourth = await discover(actor, cursor);
+    expect(await recommendedPeerIds(actor, fourth)).toEqual(peers.slice(114).map(peer => peer.id));
+    expect(fourth.nextCursor).toBeNull();
+
+    // Candidate 111 was already consumed by the empty window. A fresh traversal sees the change.
+    const refreshedSecond = await discover(actor, first.nextCursor!);
+    const refreshedThird = await discover(actor, refreshedSecond.nextCursor!);
+    expect(await recommendedPeerIds(actor, refreshedThird)).toEqual([peers[110].id]);
   });
 
   it("applies each viewer's priority order without exposing ranks or profile fields", async () => {
