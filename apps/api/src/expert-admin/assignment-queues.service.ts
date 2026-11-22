@@ -74,7 +74,7 @@ export class AssignmentQueuesService {
     return this.read(auth, role, [], async tx => {
       // Own metadata only. Moderator visibility is intentionally gated above.
       const rows = await tx.expertAssignment.findMany({ where: {
-        expertId: auth.user.id,
+        expertId: auth.user.id, video: { owner: { status: { not: "CLOSED" } } },
         ...(query.status ? { status: query.status } : {}), ...(query.after ? { id: { lt: query.after } } : {}),
       }, orderBy: { id: "desc" }, take: 51, select: { id: true, status: true, dueAt: true } });
       await tx.auditLog.create({ data: { actorId: auth.user.id, action: "ASSIGNMENT_QUEUE_READ", subjectType: "AssignmentQueue" } });
@@ -124,6 +124,8 @@ export class AssignmentQueuesService {
           WITH clock AS MATERIALIZED (SELECT clock_timestamp() AS at), authorized AS MATERIALIZED (
             SELECT a.id, a.status, a."dueAt", g."expiresAt" AS "grantExpiresAt"
             FROM "ExpertAssignment" a
+            JOIN "Video" v ON v.id=a."videoId"
+            JOIN "User" owner ON owner.id=v."ownerId" AND owner.status::text<>'CLOSED'
             JOIN "AssignmentModeratorScope" s ON s."assignmentId"=a.id
             JOIN "ExpertActorIdentity" i ON i."subjectId"=s."moderatorSubjectId" AND i."userId"=${actor.id}
             JOIN "AssignmentModeratorGrantEvent" g ON g.id=s."currentGrantId" AND g."scopeId"=s.id AND g.kind='GRANTED'

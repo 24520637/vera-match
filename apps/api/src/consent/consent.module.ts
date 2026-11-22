@@ -11,6 +11,6 @@ import { ConsentRequestGuard, ConsentWithdrawalLimiter } from "./consent-request
 
 @Module({ imports: [AuthModule, DatabaseModule, EnvironmentModule, ProfileModule], controllers: [ConsentController],
   providers: [ConsentPolicyRegistry, ConsentService, ConsentAccessService, ConsentRequestGuard, ConsentWithdrawalLimiter],
-  exports: [ConsentAccessService],
+  exports: [ConsentAccessService, ConsentService],
 })
 export class ConsentModule {}
