@@ -73,7 +73,8 @@ export class AssignmentService {
         const credential = await tx.expertCredential.findUnique({ where: { userId: input.expertId }, include: { approval: true } });
         if (!credential || credential.status !== "APPROVED" || !credential.approval || credential.approval.subjectId !== credential.subjectId) forbidden();
         if (credential.revision !== BigInt(input.expectedCredentialRevision)) conflict("RESOURCE_REVISION_CONFLICT");
-        const limits = await assignmentEvidence(credential.approval, input.expertId, this.registry, this.evidence);
+        const limits = await assignmentEvidence(credential.approval, input.expertId, this.registry, this.evidence)
+          .catch(() => assignmentUnavailable());
         if (await tx.block.count({ where: { OR: [
           { blockerId: ownerId, blockedId: input.expertId }, { blockerId: input.expertId, blockedId: ownerId },
         ] } })) forbidden();

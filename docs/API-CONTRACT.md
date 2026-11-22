@@ -1,5 +1,9 @@
 # API contract — VERA Match
 
+**T10 implementation:** [Expert review](EXPERT-REVIEW-WORKFLOW.md#6-t10-implementation) defines
+versioned submit and independent QA decisions, the submitted QA queue, and the
+current video owner's approved-report response.
+
 **C051 implementation:** [Assignment cancellation](ASSIGNMENT-CANCELLATION.md) adds
 transactional cancellation to owner video deletion and a durable, source-bound
 consumer for storage/review withdrawals. It grants no new access or account deletion.
@@ -22,7 +26,8 @@ uses the C034 assignment authorization transaction for playback and draft access
 An active, verified assigned EXPERT needs current storage and review consent with
 matching generations, valid qualification and session-bound assurance. Withdrawal,
 cancellation, expiry or qualification loss denies access. Draft writes and their
-minimal audits commit atomically. Submission and QA remain planned.
+minimal audits commit atomically. T10 extends the workspace with submission,
+QA return and resubmission, and an approved review receipt.
 
 **C033 implementation:** [Assignment API](ASSIGNMENT-API.md) defines
 `POST /expert-admin/assignments`, review-consent generation binding and durable
@@ -100,16 +105,22 @@ not changes to current auth.
 | GET       | `/expert/assignments/me`           | Expert                  | C035 own metadata only, server identity, assurance and cursor pagination; see [queue contract](ASSIGNMENT-QUEUES-API.md) |
 | GET       | `/expert-admin/assignments`        | Moderator               | C035 PA2 grant-filtered metadata/status/cursor reader; production assurance/provisioning gates remain; see [contract](ASSIGNMENT-QUEUES-API.md) |
 | GET       | `/expert-admin/assignments/candidate` | Moderator             | C035 known video/expert pair eligibility check; no public directory/search                               |
-| GET       | `/expert/assignments/:id/draft`    | Assigned expert         | T08: return private draft or null with server-owned `durationMs` (nullable), and audit the read without initializing a draft. |
-| POST      | `/expert/assignments/:id/draft`    | Assigned expert         | T08: empty JSON initializes one DRAFT at version 1 per assignment or returns the existing draft. |
+| GET       | `/expert/assignments/:id/draft`    | Assigned expert         | Audit the private draft read without initializing a draft. Return the draft or null with nullable, server-owned `durationMs`, or the submitted or approved receipt while the editor is locked. |
+| POST      | `/expert/assignments/:id/draft`    | Assigned expert         | Empty JSON initializes one DRAFT at version 1 per assignment or returns the existing editable review. A locked submission returns `409`. |
 | POST      | `/expert/reviews/:id/observations` | Assigned expert         | T08: append one categorized observation with integer timecodes and context using `expectedVersion` and the verified duration bound. |
-| PATCH     | `/expert/reviews/:id/draft`        | Assigned expert         | T08: versioned draft-only edit with atomic audit. Omitted observations are preserved, and an empty array clears them. Nonempty observation edits require a verified duration. |
+| PATCH     | `/expert/reviews/:id/draft`        | Assigned expert         | Versioned DRAFT or RETURNED edit with atomic audit. Omitted observations are preserved, and an empty array clears them. Nonempty observation edits require a verified duration. |
 | POST      | `/expert/reviews/:id/submit`       | Assigned expert         | Required summary/limitations; freeze submitted snapshot                                                   |
-| POST      | `/qa/reviews/:id/return`           | Moderator               | Not original author; actionable reason required                                                           |
-| POST      | `/qa/reviews/:id/approve`          | Moderator               | Not original author; enforce independent QA and valid transition                                          |
-| GET       | `/reviews/me`                      | Owner                   | Only QA-approved reports for the caller                                                                   |
-| POST      | `/reviews/:id/disputes`            | Owner                   | Reason, dispute status and audit                                                                          |
-| PATCH     | `/reviews/claims/:id`              | Owner                   | Granular confirmation, share permission, withdrawal                                                       |
+| GET       | `/qa/reviews`                      | Scoped moderator       | Submitted queue with session-bound MFA, current assignment grants, and optional `after` cursor            |
+| GET       | `/qa/reviews/:id`                  | Scoped moderator       | Submitted version, observation IDs, and factual claim catalog                                            |
+| POST      | `/qa/reviews/:id/return`           | Scoped moderator       | Independent QA, current assignment grant, and actionable reason                                          |
+| POST      | `/qa/reviews/:id/approve`          | Scoped moderator       | Independent QA, current assignment grant, and optional evidence-linked claims                            |
+| GET       | `/reviews/me`                      | Owner                   | QA-approved reports, private claim evidence, and recent disputes                                          |
+| POST      | `/reviews/:id/disputes`            | Owner                   | Open a report or claim dispute with a private reason                                                      |
+| PATCH     | `/reviews/claims/:id`              | Owner                   | Revision-checked individual confirmation, share permission, and withdrawal                                |
+| PATCH     | `/reviews/claims/:id/feedback`     | Owner                   | Save a private, revision-checked annotation on approved claim evidence                                    |
+| GET       | `/qa/reviews/disputes`             | Scoped moderator       | Open and in-review disputes with optional `after` cursor                                                 |
+| GET       | `/qa/reviews/disputes/:id`         | Scoped moderator       | Private dispute status and reason with approved report context or linked claim evidence                   |
+| PATCH     | `/qa/reviews/disputes/:id`         | Scoped moderator       | Revision-checked intake and final response                                                               |
 | GET       | `/matches/recommendations`         | Member                  | Reciprocal constraints; current consents; permitted claims only                                           |
 | POST      | `/matches/:pairId/decision`        | Member                  | `ACCEPT`/`DECLINE`; actor must belong to the pair                                                         |
 | POST      | `/blocks`                          | Member                  | Block another user and immediately exclude both directions                                                |
@@ -282,3 +293,7 @@ auth state or redirect; cancellation/network/5xx remain distinct.
 The browser API client is the C009 same-origin transport. `apiRequest` and `postAuth` delegate to `apiJson`; they do not select a second API base. ApiError uses kind/message/status/code/details and optional retryAfterSeconds. HTTP status stays authoritative; network/abort failures do not invent 401. `Retry-After` and matching JSON timing are retained for 429, with no automatic retry. Unknown details are validated by form consumers.
 
 AuthLoadingBoundary is C010 presentation; SessionBoundary supplies state from AuthProvider and owns redirects. The protected/member server layout validates its cookie before rendering protected pages. Server session lookup forwards the cookie only to validated server-only API_INTERNAL_ORIGIN. Same-origin proxy requests still require the exact browser Origin and JSON for auth mutations; the proxy does not remove CSRF checks.
+
+## C053 provider failure privacy
+
+C032 approval registry/evidence failure returns the existing sanitized `503 EXPERT_APPROVAL_UNAVAILABLE`; C033 evidence failure returns sanitized `503 ASSIGNMENT_UNAVAILABLE`. Safety staff-assurance provider failure returns `503 STAFF_ASSURANCE_UNAVAILABLE`, while absent/invalid assurance remains `403 STAFF_ASSURANCE_REQUIRED`. Upstream HttpException bodies are never a public diagnostic contract. These wrappers do not alter application-generated authentication, ownership, revision, consent or idempotency errors. See [C053 privacy regression](C053-PRIVACY-AUDIT.md).
