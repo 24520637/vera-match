@@ -1,24 +1,16 @@
 import "reflect-metadata";
 import { NestFactory } from "@nestjs/core";
-import { SwaggerModule, DocumentBuilder } from "@nestjs/swagger";
 import { AppModule } from "./app.module";
 import { EnvironmentService } from "./config/environment.service";
 import { configureApplication } from "./configure-app";
+import { configureSwagger } from "./openapi/configure-swagger";
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   const settings = app.get(EnvironmentService).values;
   app.enableShutdownHooks(["SIGINT", "SIGTERM"]);
   configureApplication(app);
-  const config = new DocumentBuilder()
-    .setTitle("VERA Match API — scaffold")
-    .setVersion("0.1.0")
-    .build();
-  SwaggerModule.setup(
-    "api/docs",
-    app,
-    SwaggerModule.createDocument(app, config),
-  );
+  configureSwagger(app);
   await app.listen(settings.apiPort);
 }
 bootstrap().catch((err) => {

@@ -1,4 +1,5 @@
 import { Body, Controller, Headers, Post, Req, Res, UseGuards } from "@nestjs/common";
+import { ApiTags } from "@nestjs/swagger";
 import { UserRole } from "@prisma/client";
 import type { Response } from "express";
 import type { AuthenticatedRequest } from "../auth/auth-context";
@@ -7,13 +8,16 @@ import { SessionAuthGuard } from "../auth/session-auth.guard";
 import { ExpertApprovalRequestGuard } from "./expert-approval-request.guard";
 import { approvalInvalid } from "./expert-approval.validation";
 import { AssignmentService } from "./assignment.service";
+import { ApiCreateAssignment } from "../openapi/assignments";
 
+@ApiTags("Assignments")
 @Controller("expert-admin/assignments")
 @UseGuards(SessionAuthGuard, RolesGuard, ExpertApprovalRequestGuard)
 @Roles(UserRole.MODERATOR)
 export class AssignmentController {
   constructor(private readonly assignments: AssignmentService) {}
   @Post()
+  @ApiCreateAssignment()
   async create(@Body() input: unknown, @Headers("idempotency-key") key: unknown, @Req() request: AuthenticatedRequest,
     @Res({ passthrough: true }) response: Response) {
     if (Object.keys(request.query).length) approvalInvalid("_form", "Query parameters are not supported.");
