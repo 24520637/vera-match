@@ -32,7 +32,7 @@ export function MemberSettingsNav() {
 }
 export function MemberSettings({
   screen,
-  publishedPolicies = {},
+  publishedPolicies,
 }: {
   screen: Screen;
   publishedPolicies?: PublishedPolicies;

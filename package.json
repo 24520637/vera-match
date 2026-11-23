@@ -15,7 +15,8 @@
     "prisma:validate": "npm run prisma:validate --workspace apps/api",
     "prisma:migrate": "npm run prisma:migrate --workspace apps/api",
     "lint": "npm run lint --workspaces --if-present",
-    "test:ops": "node scripts/verify-synthetic-backup.cjs"
+    "test:ops": "node scripts/verify-synthetic-backup.cjs",
+    "consent:policy-candidate": "node scripts/consent-policy-candidate.cjs"
   },
   "engines": {
     "node": ">=24"

@@ -1,3 +1,4 @@
+import { policyDependencies } from "./consent-policy.catalog";
 import { ConflictException, ForbiddenException, HttpException, Injectable, ServiceUnavailableException } from "@nestjs/common";
 import { AccountStatus, Consent, ConsentEventKind, ConsentPurpose, Prisma, UserRole } from "@prisma/client";
 import { PrismaService } from "../database/prisma.service";
@@ -35,6 +36,10 @@ function project(rows: Consent[], version: number): ConsentReadDto {
 export class ConsentService {
   constructor(private readonly prisma: PrismaService, private readonly registry: ConsentPolicyRegistry,
     private readonly environment: EnvironmentService) {}
+  published(locale: unknown) {
+    if (locale !== "en" && locale !== "vi") return invalidRequest([{ field: "locale", messages: ["Choose en or vi."] }]);
+    return { locale, policies: (this.registry.list?.(locale) ?? []).filter(policy => !policy.testOnly).map(policy => ({ purpose: policy.purpose, policyVersion: policy.policyVersion, locale: policy.locale, content: policy.content, digest: policyDigest(policy.content), optional: true, dependencies: policyDependencies[policy.purpose] })) };
+  }
   get(userId: string) {
     return consentStorage(() => this.prisma.$transaction(async tx => {
       await requireConsentMember(tx, userId);
@@ -84,10 +89,14 @@ export class ConsentService {
       const policies = new Map<ConsentPurpose, PolicySnapshot>();
       dto.consents.forEach((item, index) => {
         if (!item.granted) return; // Withdrawal never consults the current registry.
-        const policy = this.registry.current(item.purpose);
+        const policy = this.registry.current(item.purpose, item.locale);
         if (!policy || policy.purpose !== item.purpose || !policy.content || !policy.locale ||
             policy.policyVersion !== item.policyVersion || (policy.testOnly && this.environment.values.nodeEnv !== "test")) {
           return invalidRequest([{ field: `consents.${index}.policyVersion`, messages: ["A current approved policy is required to grant this purpose."] }]);
+        }
+        if ((!policy.testOnly || item.locale !== undefined || item.policyDigest !== undefined) &&
+            (item.locale !== policy.locale || item.policyDigest !== policyDigest(policy.content))) {
+          return invalidRequest([{ field: `consents.${index}.policyVersion`, messages: ["Read the current policy in your chosen language before granting."] }]);
         }
         policies.set(item.purpose, policy);
       });

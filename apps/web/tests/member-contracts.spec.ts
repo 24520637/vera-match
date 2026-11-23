@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { ApiError, apiJson } from "../src/lib/api";
-import { defaults, memberErrors, readConsents, readResource, resourcePayload, questions, purposes } from "../src/lib/member-contracts";
+import { defaults, memberErrors, readConsents, readResource, resourcePayload, questions, purposes, readPublishedPolicies } from "../src/lib/member-contracts";
 
 test("PATCH sends only explicit dirty fields, preserving null, [] and omission", () => {
   expect(resourcePayload("profile", 4, { ...defaults("profile"), city: null, interests: [] }, ["city", "interests"]))
@@ -36,4 +36,16 @@ test("the existing transport preserves only safe legacy revision metadata", asyn
     globalThis.fetch = async () => Response.json({ code: "DATA_SHAPE_UNAVAILABLE", revision: "9" }, { status: 503 });
     await expect(apiJson("/profile/me")).rejects.toMatchObject({ resourceRevision: undefined });
   } finally { globalThis.fetch = original; }
+});
+
+test("published policy parsing binds exact displayed UTF-8 content, locale and digest", async () => {
+  const { createHash } = await import("node:crypto");
+  const content = "Synthetic notice — thử nghiệm";
+  const entry = { purpose: "VIDEO_STORAGE", policyVersion: "2026.v1", locale: "vi", content, digest: createHash("sha256").update(content).digest("hex"), optional: true, dependencies: [] };
+  expect((await readPublishedPolicies({ locale: "vi", policies: [entry] }, "vi")).VIDEO_STORAGE).toMatchObject({ content, digest: entry.digest, locale: "vi" });
+  await expect(readPublishedPolicies({ locale: "vi", policies: [{ ...entry, content: content + " altered" }] }, "vi")).rejects.toThrow();
+  await expect(readPublishedPolicies({ locale: "en", policies: [entry] }, "en")).rejects.toThrow();
+  await expect(readPublishedPolicies({ locale: "vi", policies: [entry, entry] }, "vi")).rejects.toThrow();
+  await expect(readPublishedPolicies({ locale: "vi", policies: [{ ...entry, dependencies: ["UNSUPPORTED"] }] }, "vi")).rejects.toThrow();
+  expect(await readPublishedPolicies({ locale: "vi", policies: [] }, "vi")).toEqual({});
 });

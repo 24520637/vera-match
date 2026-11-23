@@ -21,7 +21,7 @@ export const purposeLabels = {
 } as const;
 export type Purpose = keyof typeof purposeLabels;
 export const purposes = Object.keys(purposeLabels) as Purpose[];
-export type PublishedPolicies = Partial<Record<Purpose, { version: string; locale: string; content: string }>>;
+export type PublishedPolicies = Partial<Record<Purpose, { version: string; locale: string; content: string; digest?: string; dependencies?: Purpose[] }>>;
 export interface ConsentState { purpose: Purpose; granted: boolean; policyVersion: string | null;
   grantedAt: string | null; revokedAt: string | null; updatedAt: string | null }
 export interface ConsentSnapshot { version: number; consents: ConsentState[] }
@@ -89,4 +89,22 @@ export function memberErrorMessage(error: unknown): string {
     return error.message;
   }
   return "The request could not be completed. Your edits have been kept.";
+}
+
+/** Published policy bytes must match the digest before any grant control is enabled. */
+export async function readPublishedPolicies(input: unknown, locale: "en" | "vi"): Promise<PublishedPolicies> {
+  if (!object(input) || input.locale !== locale || !Array.isArray(input.policies) || input.policies.length > 5) return invalid();
+  const result: PublishedPolicies = {};
+  for (const entry of input.policies) {
+    if (!object(entry) || !purposes.includes(entry.purpose as Purpose) || result[entry.purpose as Purpose] || entry.locale !== locale || entry.optional !== true ||
+        typeof entry.policyVersion !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/.test(entry.policyVersion) ||
+        typeof entry.content !== "string" || !entry.content.length || entry.content.length > 20000 ||
+        typeof entry.digest !== "string" || !/^[a-f0-9]{64}$/.test(entry.digest) || !Array.isArray(entry.dependencies) ||
+        entry.dependencies.some(p => !purposes.includes(p as Purpose) || p === entry.purpose) || new Set(entry.dependencies).size !== entry.dependencies.length) return invalid();
+    const bytes = new TextEncoder().encode(entry.content);
+    const hash = [...new Uint8Array(await crypto.subtle.digest("SHA-256", bytes))].map(n => n.toString(16).padStart(2,"0")).join("");
+    if (hash !== entry.digest) return invalid();
+    result[entry.purpose as Purpose] = { version: entry.policyVersion, locale, content: entry.content, digest: entry.digest, dependencies: entry.dependencies as Purpose[] };
+  }
+  return result;
 }
