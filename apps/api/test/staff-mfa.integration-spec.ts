@@ -1,3 +1,4 @@
+import { ExpertMfaSource } from "../src/expert-admin/expert-mfa.source";
 import { StaffMfaKeyring } from "../src/staff-security/staff-mfa-keyring";
 import { StaffMfaKeyRotationService } from "../src/staff-security/staff-mfa-key-rotation.service";
 import { INestApplication } from "@nestjs/common";
@@ -69,6 +70,8 @@ describe("C064 real TOTP / HTTP / PostgreSQL (no assurance override)",()=>{
   expect((await request(f.elevated,"moderation/reports")).status).toBe(200);
   const context=(await auth(f.elevated))!; const proof=await db.client.$transaction(tx=>app.get(StaffMfaService).resolve(tx,context));
   expect(proof).toMatchObject({userId:f.user.id,sessionId:context.sessionId,testOnly:false,level:"MFA"});
+  const expertProof=await db.client.$transaction(tx=>app.get(ExpertMfaSource).resolve(context,tx));
+  expect(expertProof).toMatchObject({userId:f.user.id,sessionId:context.sessionId,testOnly:false,expiresAt:proof!.expiresAt});
   const state=await db.client.staffMfaDevice.findUniqueOrThrow({where:{id:f.deviceId}});expect(state.secretEnvelope).not.toContain(f.secret);
   const status=await mfa(f.elevated);expect(status.headers.get("cache-control")).toContain("no-store");const body=await status.text();expect(body).not.toContain(f.secret);expect(body).not.toContain("token");
   expect((await mfa(f.elevated,"verify",{password,deviceId:f.deviceId,code:f.submittedCode})).status).toBe(403);
