@@ -89,6 +89,7 @@ model User {
   emailVerifiedAt DateTime?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  staffIdentity StaffIdentity?
   sessions Session[]
   emailTokens EmailVerificationToken[]
   resetTokens PasswordResetToken[]
@@ -791,4 +792,32 @@ model ClosureStatusToken {
   consumedAt DateTime?
   @@index([closureId, createdAt])
   @@index([expiresAt])
+}
+
+// C064: real staff authority is independent of the ordinary User.role flag.
+// Retention/recovery approval is required before removing these identity mappings.
+model StaffIdentity {
+  userId String @id
+  user User @relation(fields: [userId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  subjectId String @unique @db.Uuid
+  revision BigInt
+  mfaEpoch BigInt
+  role UserRole
+  state String
+  expiresAt DateTime @db.Timestamptz(3)
+  currentDirectiveId String @unique @db.Uuid
+  currentDirective StaffTrustEvent @relation(fields: [currentDirectiveId], references: [directiveId], onDelete: Restrict, onUpdate: NoAction)
+}
+// Exact signed instructions survive revocation; no secret or live session token.
+model StaffTrustEvent {
+  directiveId String @id @db.Uuid
+  userId String
+  subjectId String @db.Uuid
+  revision BigInt
+  mfaEpoch BigInt
+  signedDirective String @db.Text
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  currentFor StaffIdentity?
+  @@unique([subjectId, revision])
+  @@unique([userId, revision])
 }

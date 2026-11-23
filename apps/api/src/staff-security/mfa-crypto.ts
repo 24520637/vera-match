@@ -75,12 +75,14 @@ export class MfaSecretBox {
     try { return this.seal(secret, binding); } finally { secret.fill(0); }
   }
 }
-export function recoveryCodeHash(code: string): string | undefined {
+function opaqueCodeHash(code: string, domain: string): string | undefined {
   if (!/^[A-Za-z0-9_-]{43}$/.test(code)) return undefined;
   const value = Buffer.from(code, "base64url");
   if (value.length !== 32 || value.toString("base64url") !== code) return undefined;
-  return createHash("sha256").update("VERA-MATCH:MFA-RECOVERY:v1:").update(value).digest("hex");
+  return createHash("sha256").update(domain).update(value).digest("hex");
 }
+export const recoveryCodeHash = (code: string) => opaqueCodeHash(code,"VERA-MATCH:MFA-RECOVERY:v1:");
+export const staffEnrollmentKeyHash = (code: string) => opaqueCodeHash(code,"VERA-MATCH:MFA-ENROLLMENT:v1:");
 export function newRecoveryCodes() {
   return Array.from({ length: 8 }, () => { const code = randomBytes(32).toString("base64url"); return { code, hash: recoveryCodeHash(code)! }; });
 }

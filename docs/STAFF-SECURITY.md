@@ -1,6 +1,6 @@
 # Staff security integration
 
-Status: C064 PARTIAL. Cryptographic primitives and signed authority instructions are implemented; provisioning persistence, HTTP enrollment/recovery, assurance adapters and browser workflows are not yet connected. Existing privileged endpoints remain fail-closed. This document does not assert production readiness.
+Status: C064 PARTIAL. Cryptographic primitives, signed authority instructions and transactional provisioning persistence are implemented. HTTP MFA enrollment/recovery, assurance adapters and browser workflows are not yet connected. Existing privileged endpoints remain fail-closed. This document does not assert production readiness.
 
 ## Cryptographic contract
 
@@ -19,3 +19,21 @@ The verifier does not mutate roles, create identities or establish MFA. Persiste
 ## Required operational controls
 
 Keep signing keys offline/outside the application, wrapping keys outside the database/repository, and both outside ordinary database backups. Use restrictive host ACLs and reviewed key rotation. Test with ephemeral synthetic authorities only. Production qualification, legal policy approval, provisioning authority and deployment acceptance must be supplied genuinely before privileged access can open.
+
+## Provisioning persistence (implemented)
+
+The additive staff-trust migration adds StaffIdentity and append-only StaffTrustEvent. It does not provision existing staff, change their roles or enable privileged access. User deletion is restricted for retained staff identities until a separate approved retention/account-deletion contract exists. DELETE/recreate and TRUNCATE cannot reset identity or evidence.
+
+StaffIdentityService accepts only a current valid authority signature bound to an ACTIVE, email-verified account and normalized email digest. User then sorted Session rows are locked before the identity. Every new sequential directive creates immutable evidence, changes identity by CAS, changes the role only for an explicit ACTIVE instruction, revokes every existing session and records audit in one transaction. Audit failure rolls back everything. Concurrent exact-byte replays return the committed directive without duplicate events. Replaying an older revision or replacing the opaque subject is rejected. Reactivation or role change requires exactly the next MFA epoch; ordinary renewal does not silently reset devices.
+
+External public-key file format: JSON with schemaVersion 1 and keys array, each containing id and publicKeyPem (Ed25519 SPKI PEM). It must be an absolute path in STAFF_AUTHORITY_KEYS_PATH. Missing configuration denies authority; partial/invalid configuration fails initialization with code-only diagnostics. Root rotations explicitly retain reviewed public keys during transition. Removing a root denies identities still signed by it; reissue their directives first.
+
+The operator-only command is npm run staff:provision -- --directive ABSOLUTE_SIGNED_FILE --database-fingerprint SHA256 --apply. It starts no HTTP listener or background workers. The target fingerprint is SHA-256 of JSON.stringify([URL.protocol, URL.hostname, URL.port, URL.pathname, URL.searchParams.get("schema") ?? "public"]); credentials are excluded. Review the target independently. The command is not run automatically and has not been applied to the developer database. No root private keys or successful real identities are supplied by this repository.
+
+C064 remains PARTIAL until MFA persistence, real HTTP/UI enrollment and genuine assurance adapters are connected and tested. Existing Expert/Safety runtime placeholders remain closed in this commit. Qualification evidence and independent restriction recovery are not provided by a provisioning signature alone.
+
+Initial MFA enrollment also requires an independent 256-bit activation capability delivered through the trusted operator channel. The ACTIVE signed directive binds only its domain-separated enrollmentKeyHash; the API never receives that capability through provisioning evidence. Revoked directives carry null. Changing that hash without an explicit new MFA epoch is rejected, and confirmed device history must prevent reusing it after factor revocation. This requirement is part of the pending enrollment implementation; provisioning itself does not produce MFA assurance.
+
+## Verified foundation checks
+
+Local native PostgreSQL: 156 integration tests in 10 suites PASS, including concurrent directives, rollback, immutable evidence and additive migration upgrade. API unit: 367 PASS (31 cryptography/authority tests). Prisma validate/generate, TypeScript, lint and API/web production builds PASS. No UI changes are included, so new browser MFA acceptance is NOT RUN. Local Node is 26.8.2; repository CI uses Node 24. Developer/shared database migrations and real staff provisioning are NOT RUN.

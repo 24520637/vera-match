@@ -5,7 +5,7 @@ describe("Trusted staff directives", () => {
   const authority = generateKeyPairSync("ed25519"), other = generateKeyPairSync("ed25519");
   const publicPem = authority.publicKey.export({type:"spki",format:"pem"}).toString();
   const now = new Date("2026-11-24T00:00:00.000Z");
-  const payload = (): StaffDirective => ({schemaVersion:1,directiveId:randomUUID(),authorityKeyId:"root-1",subjectId:randomUUID(),userId:"synthetic-staff",emailDigest:staffEmailDigest("staff@example.invalid"),role:"MODERATOR",state:"ACTIVE",revision:1,mfaEpoch:1,permissions:[],issuedAt:"2026-11-23T00:00:00.000Z",expiresAt:"2026-12-23T00:00:00.000Z"});
+  const payload = (): StaffDirective => ({schemaVersion:1,directiveId:randomUUID(),authorityKeyId:"root-1",subjectId:randomUUID(),userId:"synthetic-staff",emailDigest:staffEmailDigest("staff@example.invalid"),role:"MODERATOR",state:"ACTIVE",revision:1,mfaEpoch:1,permissions:[],enrollmentKeyHash:"a".repeat(64),issuedAt:"2026-11-23T00:00:00.000Z",expiresAt:"2026-12-23T00:00:00.000Z"});
   const envelope = (p: StaffDirective, privateKey = authority.privateKey) => JSON.stringify({payload:p,signature:sign(null,staffDirectiveMessage(p),privateKey).toString("base64url")});
   const verifier = () => new StaffDirectiveVerifier(new Map([["root-1",publicPem]]));
   it("verifies an exact signed instruction and freezes the result", () => {
@@ -35,7 +35,7 @@ describe("Trusted staff directives", () => {
   it("requires explicit ADMIN permission and rejects privileges on revocation", () => {
     const p = {...payload(),role:"ADMIN",permissions:["ASSIGNMENT_GRANT_ADMIN"]} as StaffDirective;
     expect(verifier().verify(envelope(p),now).permissions).toEqual(["ASSIGNMENT_GRANT_ADMIN"]);
-    p.state = "REVOKED"; expect(() => verifier().verify(envelope(p),now)).toThrow("STAFF_DIRECTIVE_INVALID");
+    p.state = "REVOKED"; p.enrollmentKeyHash = null; expect(() => verifier().verify(envelope(p),now)).toThrow("STAFF_DIRECTIVE_INVALID");
     p.permissions = []; expect(verifier().verify(envelope(p),now).state).toBe("REVOKED");
   });
   it("rejects extra fields, private keys, oversized input and malformed signatures", () => {

@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { decodeTotpSecret, encodeTotpSecret, hotp, matchingTotpCounter, MfaSecretBox, newRecoveryCodes, newTotpSecret, recoveryCodeHash } from "./mfa-crypto";
+import { decodeTotpSecret, encodeTotpSecret, hotp, matchingTotpCounter, MfaSecretBox, newRecoveryCodes, newTotpSecret, recoveryCodeHash, staffEnrollmentKeyHash } from "./mfa-crypto";
 
 describe("RFC-based MFA cryptography (does not itself confer assurance)", () => {
   const secret = Buffer.from("12345678901234567890", "ascii");
@@ -50,6 +50,8 @@ describe("RFC-based MFA cryptography (does not itself confer assurance)", () => 
   it("generates high-entropy recovery codes with domain-separated hashes only", () => {
     const codes = newRecoveryCodes(); expect(codes).toHaveLength(8); expect(new Set(codes.map(x=>x.code)).size).toBe(8);
     for (const item of codes) { expect(item.code).toHaveLength(43); expect(item.hash).toMatch(/^[a-f0-9]{64}$/); expect(recoveryCodeHash(item.code)).toBe(item.hash); }
+    expect(staffEnrollmentKeyHash(codes[0].code)).not.toBe(codes[0].hash);
+    expect(staffEnrollmentKeyHash(codes[0].code)).toMatch(/^[a-f0-9]{64}$/);
     expect(recoveryCodeHash("wrong")).toBeUndefined(); expect(recoveryCodeHash(codes[0].code+"=")).toBeUndefined();
   });
 });
