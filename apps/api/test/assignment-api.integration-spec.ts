@@ -10,7 +10,7 @@ import { parseEnvironment } from "../src/config/environment";
 import { PrismaService } from "../src/database/prisma.service";
 import { ConsentService } from "../src/consent/consent.service";
 import { ConsentAccessService } from "../src/consent/consent-access.service";
-import { ConsentPolicyRegistry } from "../src/consent/consent.policy";
+import { ConsentPolicyRegistry, policyDigest } from "../src/consent/consent.policy";
 import { ExpertApprovalRegistry, ExpertEvidenceSource, ExpertEvidence } from "../src/expert-admin/expert-approval.sources";
 import { createAuthDatabase } from "./disposable-auth-database";
 import { credentialEvent, transition } from "./expert-db-fixtures";
@@ -48,8 +48,13 @@ describe("C033 assignment API / disposable PostgreSQL", () => {
   const request = (cookie: string, body: unknown, key: string = randomUUID(), headers: Record<string, string> = {}, path = "assignments") =>
     fetch(`${base}/api/expert-admin/${path}`, { method: "POST", headers: { Cookie: cookie, Origin: origin, "Content-Type": "application/json",
       "Idempotency-Key": key, ...headers }, body: JSON.stringify(body) });
+  function consentGrant(purpose: "VIDEO_STORAGE" | "EXPERT_VIDEO_REVIEW") {
+    const policy = app.get(ConsentPolicyRegistry).current(purpose);
+    if (!policy) throw new Error("Expected synthetic policy fixture");
+    return { purpose, granted: true, policyVersion: policy.policyVersion, locale: policy.locale, policyDigest: policyDigest(policy.content) };
+  }
   async function patchConsent(id: string, version: number, purpose: "VIDEO_STORAGE" | "EXPERT_VIDEO_REVIEW", granted: boolean) {
-    return app.get(ConsentService).patch(id, { expectedVersion: version, consents: [{ purpose, granted, ...(granted ? { policyVersion } : {}) }] }, randomUUID());
+    return app.get(ConsentService).patch(id, { expectedVersion: version, consents: [granted ? consentGrant(purpose) : { purpose, granted: false }] }, randomUUID());
   }
   async function fixture(expiry: string | null = null, evidenceExpiry: Date | null = null) {
     const moderator = await user("MODERATOR"), owner = await user("MEMBER"), expert = await user("EXPERT");
@@ -61,7 +66,7 @@ describe("C033 assignment API / disposable PostgreSQL", () => {
       trainingEvidenceId, confidentialityEvidenceId, expiresAt: expiry }, randomUUID(), {}, `experts/${expert.id}/approvals`);
     expect(approved.status).toBe(201);
     await app.get(ConsentService).patch(owner.id, { expectedVersion: 0, consents: [
-      { purpose: "VIDEO_STORAGE", granted: true, policyVersion }, { purpose: "EXPERT_VIDEO_REVIEW", granted: true, policyVersion },
+      consentGrant("VIDEO_STORAGE"), consentGrant("EXPERT_VIDEO_REVIEW"),
     ] }, randomUUID());
     const video = await db.client.video.create({ data: { ownerId: owner.id, bucket: "synthetic-private", objectKey: randomUUID(),
       mimeType: "video/mp4", status: "READY", storageConsentVersion: 1n } });

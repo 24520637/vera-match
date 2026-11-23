@@ -4,7 +4,7 @@ Status: code preparation only. No hosting, DNS, certificates, public API base UR
 
 ## Scope and dependencies
 
-This branch reuses Phuc's OpenAPI foundation from PR #41; it does not modify or push his branch. Review the combined OpenAPI changes together. Huong adds 27 operations for Auth, Safety, private Video, Closure and Health to the 33 existing Phuc-owned operations: 60 actual operations total. Regression tests compare registered routes, security requirements, request schemas, status codes, report enums and selected actual validators.
+This branch reuses Phuc's OpenAPI foundation from PR #41; it does not modify or push his branch. Review the combined OpenAPI changes together. Huong adds 27 operations for Auth, Safety, private Video, Closure and Health to the 33 existing Phuc-owned operations: The signed policy-discovery endpoint adds one further operation: 61 actual operations total. Regression tests compare registered routes, security requirements, request schemas, status codes, report enums and selected actual validators.
 
 No authentication, consent, assignment, cleanup or release gate is relaxed. No legal policy is published. No local database migration or deployment is performed.
 

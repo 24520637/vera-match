@@ -16,6 +16,7 @@
     "prisma:migrate": "npm run prisma:migrate --workspace apps/api",
     "lint": "npm run lint --workspaces --if-present",
     "test:ops": "node scripts/verify-synthetic-backup.cjs",
+    "consent:policy-candidate": "node scripts/consent-policy-candidate.cjs",
     "release:preflight": "node scripts/release-preflight.cjs",
     "test:release-config": "node --test scripts/release-preflight.spec.cjs"
   },

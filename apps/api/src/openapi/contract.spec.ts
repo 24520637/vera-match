@@ -18,6 +18,7 @@ import { configureSwagger } from "./configure-swagger";
 
 const routes = [
   ["get", "/api/consents/me", 200],
+  ["get", "/api/consents/policies", 200],
   ["patch", "/api/consents/me", 200, parseConsentPatch],
   ["post", "/api/expert-admin/experts/{userId}/approvals", 201, parseExpertApproval],
   ["post", "/api/expert-admin/assignments", 201, parseAssignment],
@@ -128,7 +129,7 @@ describe("Phúc's generated OpenAPI contract", () => {
         .filter(method => item[method]?.description?.startsWith("Requires a valid HttpOnly session cookie"))
         .map(method => method + " " + path));
     expect(tagged.sort()).toEqual(routes.map(([method, path]) => method + " " + path).sort());
-    expect(routes).toHaveLength(33);
+    expect(routes).toHaveLength(34);
   });
 
   it("declares the configured cookie and requires it on every documented protected operation", () => {
