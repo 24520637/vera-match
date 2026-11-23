@@ -1,3 +1,5 @@
+import { StaffMfaService } from "../staff-security/staff-mfa.service";
+import { StaffSecurityModule } from "../staff-security/staff-security.module";
 import { ModerationController } from "./moderation.controller";
 import { ModerationService } from "./moderation.service";
 import { StaffAssuranceSource } from "./staff-assurance.source";
@@ -14,13 +16,13 @@ import { BlockAccessService } from "./block-access.service";
 import { SafetyAccessService } from "./safety-access.service";
 import { SafetyRateLimiter, SafetyRequestGuard } from "./safety-request.guard";
 @Module({
-  imports: [AuthModule, DatabaseModule, EnvironmentModule],
+  imports: [StaffSecurityModule,AuthModule, DatabaseModule, EnvironmentModule],
   controllers: [BlockController, ReportController, ModerationController],
   providers: [
     BlockService,
     ReportService,
     ModerationService,
-    StaffAssuranceSource,
+    { provide: StaffAssuranceSource, useFactory: (mfa: StaffMfaService) => new StaffAssuranceSource(mfa), inject: [StaffMfaService] },
     BlockAccessService,
     SafetyAccessService,
     SafetyRateLimiter,

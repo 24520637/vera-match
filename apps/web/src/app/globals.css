@@ -693,3 +693,6 @@ code {
     border-right-color: transparent;
   }
 }
+
+.mfa-codes { display: grid; gap: var(--space-2); padding-inline-start: var(--space-5); }
+.mfa-codes code { overflow-wrap: anywhere; }

@@ -16,6 +16,9 @@
     "prisma:migrate": "npm run prisma:migrate --workspace apps/api",
     "lint": "npm run lint --workspaces --if-present",
     "test:ops": "node scripts/verify-synthetic-backup.cjs",
+    "staff:provision": "node scripts/staff-provision.cjs",
+    "test:staff-mfa": "node scripts/run-staff-mfa-e2e.cjs",
+    "staff:mfa-rewrap": "node scripts/staff-mfa-rewrap.cjs",
     "consent:policy-candidate": "node scripts/consent-policy-candidate.cjs",
     "release:preflight": "node scripts/release-preflight.cjs",
     "test:release-config": "node --test scripts/release-preflight.spec.cjs"
