@@ -4,7 +4,7 @@ import { EnvironmentService } from "../config/environment.service";
 import { configureApplication } from "../configure-app";
 import { PrismaService } from "../database/prisma.service";
 import { HealthController } from "../health.controller";
-import { configureSwagger } from "./configure-swagger";
+import { configureSwagger, documentationMode } from "./configure-swagger";
 
 const swaggerPaths = [
   "/api/docs",
@@ -18,10 +18,14 @@ const swaggerPaths = [
 ];
 
 describe("Swagger exposure", () => {
+  it("rejects an unrecognized exposure mode", () => { expect(() => documentationMode("production", { API_DOCS_MODE: "true" })).toThrow("API_DOCS_MODE"); });
   it.each([
-    ["development", 200],
-    ["production", 404],
-  ] as const)("serves Swagger paths with HTTP %s mode status %i", async (nodeEnv, expectedStatus) => {
+    ["development", undefined, 200],
+    ["production", undefined, 404],
+    ["production", "public", 200],
+    ["test", "disabled", 404],
+  ] as const)("serves Swagger paths with HTTP %s mode status %i", async (nodeEnv, mode, expectedStatus) => {
+    const exposure = jest.replaceProperty(process, "env", { ...process.env, API_DOCS_MODE: mode });
     const settings = parseEnvironment({
       NODE_ENV: nodeEnv,
       DATABASE_URL: "postgresql://synthetic:synthetic@127.0.0.1:5433/not_connected",
@@ -58,11 +62,17 @@ describe("Swagger exposure", () => {
       expect(results).toEqual(swaggerPaths.flatMap(path =>
         ["GET", "HEAD"].map(method => [method, path, expectedStatus]),
       ));
+      if (nodeEnv === "production" && mode === "public") {
+        const init = await (await fetch(base + "/api/docs/swagger-ui-init.js")).text();
+        expect(init).toMatch(/"persistAuthorization":\s*false/);
+        expect(init).toMatch(/"supportedSubmitMethods":\s*\[\]/);
+      }
       const health = await fetch(base + "/api/health");
       expect(health.status).toBe(200);
       expect(await health.json()).toMatchObject({ status: "ok" });
     } finally {
       await app.close();
+      exposure.restore();
     }
   });
 });
