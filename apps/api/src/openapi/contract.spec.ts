@@ -1,3 +1,4 @@
+import { huongContracts } from "./huong-contracts";
 import type { INestApplication } from "@nestjs/common";
 import type { OpenAPIObject, RequestBodyObject, ResponseObject, SchemaObject } from "@nestjs/swagger/dist/interfaces/open-api-spec.interface";
 import { Test } from "@nestjs/testing";
@@ -130,7 +131,7 @@ describe("Phúc's generated OpenAPI contract", () => {
     expect(routes).toHaveLength(33);
   });
 
-  it("declares the configured cookie and requires it only on the 33 owned operations", () => {
+  it("declares the configured cookie and requires it on every documented protected operation", () => {
     expect(document.components?.securitySchemes).toEqual({
       sessionCookie: { type: "apiKey", in: "cookie", name: "vera_contract_session" },
     });
@@ -139,7 +140,7 @@ describe("Phúc's generated OpenAPI contract", () => {
       (["get", "post", "patch", "put", "delete"] as const)
         .filter(method => item[method]?.security?.some(requirement => "sessionCookie" in requirement))
         .map(method => method + " " + path));
-    expect(secured.sort()).toEqual(routes.map(([method, path]) => method + " " + path).sort());
+    expect(secured.sort()).toEqual([...routes.map(([method, path]) => method + " " + path), ...huongContracts.filter(c => c.security).map(c => c.method + " " + c.path)].sort());
   });
 
   it("serves the existing Swagger UI and YAML without requiring a session", async () => {

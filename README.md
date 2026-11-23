@@ -147,3 +147,9 @@ implementation of C019-C024, or a claim that Draft PR #8 is merged. C019 will
 choose concrete schema/migration design, reusing existing migrations and never
 recreating the initial migration. See the contract's PRE-PRODUCTION register
 for remaining real-user policy approvals and provider verification.
+
+## API documentation and release preparation
+
+See [public demo and deployment preparation](docs/RELEASE-PREPARATION.md) for the 60-operation Swagger contract, native hosting templates, environment requirements, verification commands and remaining release gates. Local docs use `/api/docs` (JSON `/api/docs-json`, YAML `/api/docs-yaml`). Production docs are disabled by default; explicit `API_DOCS_MODE=public` enables a read-only UI. Public documentation does not grant API access.
+
+No public domain, live website or API base URL is provisioned by this repository change. After hosting and DNS/TLS are configured, the intended paths are `https://YOUR_DOMAIN/`, `https://YOUR_DOMAIN/api` and `https://YOUR_DOMAIN/api/docs`. These are placeholders, not verified live URLs.
