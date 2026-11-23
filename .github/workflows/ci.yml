@@ -142,6 +142,13 @@ jobs:
           MINIO_ROOT_USER: synthetic-ci
           MINIO_ROOT_PASSWORD: synthetic-ci-only-not-a-secret
           PLAYWRIGHT_HTML_OUTPUT_DIR: playwright-report/member
+      - name: Save account closure visual review
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: account-closure-ui
+          path: apps/web/test-results/**/closure-*.png
+          if-no-files-found: ignore
       - name: Verify native background-tab matching revocation
         shell: bash
         run: |
