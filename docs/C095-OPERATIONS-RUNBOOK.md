@@ -1,3 +1,5 @@
+> Latest lifecycle-specific evidence: [C095-RESTRICTION-RECOVERY-EVIDENCE.md](C095-RESTRICTION-RECOVERY-EVIDENCE.md), based on develop 20aaea8 plus proposed C065 PR #35. Native rehearsal measured 24 migrations / 54 FKs / 76 triggers. Old-backup resurrection is reproduced safely; production recovery remains BLOCKED without an independent restriction journal/fence. Earlier counts below are historical evidence.
+
 # C095 — Operations and synthetic recovery rehearsal
 
 Status: **PARTIAL**, T17 / Huong. Baseline refreshed to develop `69603c2` (22 migrations), including merged C035, T08, T10 and T12.
