@@ -5,7 +5,7 @@ import { consentPurposes } from "./consent.policy";
 
 export interface ConsentPatchDto {
   expectedVersion: number;
-  consents: { purpose: ConsentPurpose; granted: boolean; policyVersion?: string }[];
+  consents: { purpose: ConsentPurpose; granted: boolean; policyVersion?: string; locale?: string; policyDigest?: string }[];
 }
 export interface ConsentReadDto {
   version: number;
@@ -26,10 +26,11 @@ export function parseConsentPatch(input: unknown): ConsentPatchDto {
   input.consents.forEach((item: unknown, index: number) => {
     const path = `consents.${index}`;
     if (!object(item)) { errors.push({ field: path, messages: ["Send a consent object."] }); return; }
-    if (Object.keys(item).some(key => !["purpose", "granted", "policyVersion"].includes(key))) errors.push({ field: path, messages: ["Remove unsupported fields."] });
+    if (Object.keys(item).some(key => !["purpose", "granted", "policyVersion", "locale", "policyDigest"].includes(key))) errors.push({ field: path, messages: ["Remove unsupported fields."] });
     if (typeof item.purpose !== "string" || !consentPurposes.includes(item.purpose as ConsentPurpose) || seen.has(item.purpose)) errors.push({ field: `${path}.purpose`, messages: ["Choose each supported purpose at most once."] });
     if (typeof item.purpose === "string") seen.add(item.purpose);
     if (typeof item.granted !== "boolean") errors.push({ field: `${path}.granted`, messages: ["Use a literal boolean."] });
+    for (const field of ["locale", "policyDigest"]) if (Object.prototype.hasOwnProperty.call(item, field) && typeof item[field] !== "string") errors.push({ field: `${path}.${field}`, messages: ["Use the exact displayed policy binding."] });
     if (Object.prototype.hasOwnProperty.call(item, "policyVersion") && typeof item.policyVersion !== "string") errors.push({ field: `${path}.policyVersion`, messages: ["Use a policy identifier string."] });
   });
   if (errors.length) return invalidRequest(errors);
@@ -47,6 +48,8 @@ export function parseIdempotencyKey(value: unknown): string {
 }
 export function consentFingerprint(dto: ConsentPatchDto): string {
   const consents = [...dto.consents].sort((a, b) => consentPurposes.indexOf(a.purpose) - consentPurposes.indexOf(b.purpose))
-    .map(item => ({ purpose: item.purpose, granted: item.granted, policyVersion: item.policyVersion ?? null }));
+    .map(item => ({ purpose: item.purpose, granted: item.granted, policyVersion: item.policyVersion ?? null,
+      ...(item.locale !== undefined ? { locale: item.locale } : {}),
+      ...(item.policyDigest !== undefined ? { policyDigest: item.policyDigest } : {}) }));
   return createHash("sha256").update(JSON.stringify({ expectedVersion: dto.expectedVersion, consents })).digest("hex");
 }

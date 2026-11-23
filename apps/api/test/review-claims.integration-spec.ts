@@ -6,7 +6,7 @@ import { AssignmentCancellationService } from "../src/assignment-cancellation/as
 import { AssignmentCancellationWorker } from "../src/assignment-cancellation/assignment-cancellation.worker";
 import type { EnvironmentService } from "../src/config/environment.service";
 import { ConsentAccessService } from "../src/consent/consent-access.service";
-import { consentPurposes, type ConsentPolicyRegistry } from "../src/consent/consent.policy";
+import { consentPurposes, ConsentPolicyRegistry } from "../src/consent/consent.policy";
 import { ConsentService } from "../src/consent/consent.service";
 import type { PrismaService } from "../src/database/prisma.service";
 import { AssignmentGrantsService } from "../src/expert-admin/assignment-grants.service";
@@ -31,9 +31,9 @@ describe("T12 review claims and disputes / disposable PostgreSQL", () => {
 
   const policyVersion = "synthetic-t12-policy";
   const environment = { values: { nodeEnv: "test" } } as EnvironmentService;
-  const registry: ConsentPolicyRegistry = { current: purpose => ({
-    purpose, policyVersion, locale: "en", content: "Synthetic test consent policy.", testOnly: true,
-  }) };
+  const registry = new class extends ConsentPolicyRegistry {
+    override current(purpose: ConsentPurpose) { return { purpose, policyVersion, locale: "en", content: "Synthetic test consent policy.", testOnly: true }; }
+  }();
   const assurance: StaffAssuranceSource = { resolve: async (_tx, auth) => ({
     userId: auth.user.id, sessionId: auth.sessionId, level: "MFA", verifiedAt: new Date(0),
     expiresAt: new Date(Date.now() + 600_000), testOnly: true,

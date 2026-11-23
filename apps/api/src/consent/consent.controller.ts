@@ -1,5 +1,5 @@
-import { Body, Controller, Get, Header, Patch, Req, Res, UseGuards } from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
+import { Body, Controller, Get, Header, Patch, Req, Res, UseGuards } from "@nestjs/common";
 import { UserRole } from "@prisma/client";
 import type { Request, Response } from "express";
 import type { CurrentUser as SafeUser } from "../auth/auth-context";
@@ -9,7 +9,7 @@ import { SessionAuthGuard } from "../auth/session-auth.guard";
 import { invalidRequest } from "../profile/profile.validation";
 import { ConsentRequestGuard } from "./consent-request.guard";
 import { ConsentService } from "./consent.service";
-import { ApiReadConsent, ApiUpdateConsent } from "../openapi/consent";
+import { ApiReadConsent, ApiReadConsentPolicies, ApiUpdateConsent } from "../openapi/consent";
 
 @ApiTags("Consent")
 @Controller("consents")
@@ -19,6 +19,14 @@ export class ConsentController {
   constructor(private readonly consents: ConsentService) {}
   private query(request: Request) {
     if (Object.keys(request.query).length) invalidRequest([{ field: "_form", messages: ["Query parameters are not supported."] }]);
+  }
+  @Get("policies")
+  @Header("Cache-Control", "private, no-store")
+  @Header("Vary", "Cookie")
+  @ApiReadConsentPolicies()
+  published(@Req() request: Request) {
+    if (Object.keys(request.query).some(key => key !== "locale")) invalidRequest([{ field: "_form", messages: ["Only locale is supported."] }]);
+    return this.consents.published(request.query.locale ?? "en");
   }
   @Get("me")
   @ApiReadConsent()
