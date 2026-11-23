@@ -1,8 +1,8 @@
-import { ForbiddenException, Injectable } from "@nestjs/common";
+import { ForbiddenException, Injectable, Optional } from "@nestjs/common";
 import { ConsentPurpose, Prisma } from "@prisma/client";
 import { PrismaService } from "../database/prisma.service";
 import { EnvironmentService } from "../config/environment.service";
-import { policyDigest } from "./consent.policy";
+import { ConsentPolicyRegistry, policyDigest } from "./consent.policy";
 import { consentStorage, requireConsentMember } from "./consent.service";
 
 /** Consumers must use authoritative checks, not cached consent projections.
@@ -10,10 +10,12 @@ import { consentStorage, requireConsentMember } from "./consent.service";
  */
 @Injectable()
 export class ConsentAccessService {
-  constructor(private readonly prisma: PrismaService, private readonly environment: EnvironmentService) {}
+  constructor(private readonly prisma: PrismaService, private readonly environment: EnvironmentService, @Optional() private readonly registry?: ConsentPolicyRegistry) {}
   private async allowed(tx: Prisma.TransactionClient, userId: string, purpose: ConsentPurpose) {
     const row = await tx.consent.findUnique({ where: { userId_purpose: { userId, purpose } }, include: { policyEvidence: true } });
     const policy = row?.policyEvidence;
+    const published = policy && !policy.testOnly ? this.registry?.current(purpose, policy.locale) : undefined;
+    if (policy && !policy.testOnly && (!published || published.testOnly || published.policyVersion !== policy.policyVersion || published.content !== policy.content || policyDigest(published.content) !== policy.digest)) return false;
     return !!row?.granted && !!policy && policy.purpose === purpose && row.policyVersion === policy.policyVersion &&
       (!policy.testOnly || this.environment.values.nodeEnv === "test") &&
       policy.algorithm === "SHA-256" && policy.encoding === "UTF-8" && policyDigest(policy.content) === policy.digest;
