@@ -1,4 +1,5 @@
 import { type CanActivate, Body, Controller, type ExecutionContext, ForbiddenException, Get, HttpCode, HttpException, Injectable, Param, Patch, Post, Req, UseGuards } from "@nestjs/common";
+import { ApiTags } from "@nestjs/swagger";
 import type { AuthenticatedRequest } from "../auth/auth-context";
 import { AuthRateLimiter } from "../auth/auth-request.guard";
 import { SessionAuthGuard } from "../auth/session-auth.guard";
@@ -27,7 +28,15 @@ export class ReviewDraftRequestGuard implements CanActivate {
     return true;
   }
 }
+import {
+  ApiReadDraft,
+  ApiInitializeDraft,
+  ApiUpdateDraft,
+  ApiAppendObservation,
+  ApiSubmitReview,
+} from "../openapi/reviews";
 
+@ApiTags("Expert reviews")
 @Controller("expert/assignments")
 @UseGuards(SessionAuthGuard, RolesGuard, ReviewDraftRequestGuard)
 @Roles("EXPERT")
@@ -35,11 +44,13 @@ export class AssignmentDraftController {
   constructor(private readonly drafts: ReviewDraftService) {}
 
   @Get(":id/draft")
+  @ApiReadDraft()
   read(@Req() request: AuthenticatedRequest, @Param("id") id: string) {
     return this.drafts.read(request.auth!, id);
   }
 
   @Post(":id/draft")
+  @ApiInitializeDraft()
   @HttpCode(200)
   initialize(@Req() request: AuthenticatedRequest, @Param("id") id: string, @Body() body: unknown) {
     requireEmpty(body);
@@ -47,6 +58,7 @@ export class AssignmentDraftController {
   }
 }
 
+@ApiTags("Expert reviews")
 @Controller("expert/reviews")
 @UseGuards(SessionAuthGuard, RolesGuard, ReviewDraftRequestGuard)
 @Roles("EXPERT")
@@ -54,17 +66,20 @@ export class ReviewDraftController {
   constructor(private readonly drafts: ReviewDraftService) {}
 
   @Patch(":id/draft")
+  @ApiUpdateDraft()
   save(@Req() request: AuthenticatedRequest, @Param("id") id: string, @Body() body: unknown) {
     return this.drafts.save(request.auth!, id, body);
   }
 
   @Post(":id/observations")
+  @ApiAppendObservation()
   @HttpCode(200)
   append(@Req() request: AuthenticatedRequest, @Param("id") id: string, @Body() body: unknown) {
     return this.drafts.save(request.auth!, id, body, true);
   }
 
   @Post(":id/submit")
+  @ApiSubmitReview()
   @HttpCode(200)
   submit(@Req() request: AuthenticatedRequest, @Param("id") id: string, @Body() body: unknown) {
     return this.drafts.submit(request.auth!, id, body);

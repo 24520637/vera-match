@@ -1,4 +1,5 @@
 import { Body, Controller, Get, Header, Patch, Req, Res, UseGuards } from "@nestjs/common";
+import { ApiTags } from "@nestjs/swagger";
 import { UserRole } from "@prisma/client";
 import type { Request, Response } from "express";
 import type { CurrentUser as SafeUser } from "../auth/auth-context";
@@ -8,7 +9,9 @@ import { SessionAuthGuard } from "../auth/session-auth.guard";
 import { invalidRequest } from "../profile/profile.validation";
 import { ConsentRequestGuard } from "./consent-request.guard";
 import { ConsentService } from "./consent.service";
+import { ApiReadConsent, ApiUpdateConsent } from "../openapi/consent";
 
+@ApiTags("Consent")
 @Controller("consents")
 @UseGuards(SessionAuthGuard, RolesGuard, ConsentRequestGuard)
 @Roles(UserRole.MEMBER)
@@ -18,12 +21,14 @@ export class ConsentController {
     if (Object.keys(request.query).length) invalidRequest([{ field: "_form", messages: ["Query parameters are not supported."] }]);
   }
   @Get("me")
+  @ApiReadConsent()
   @Header("Cache-Control", "private, no-store")
   @Header("Vary", "Cookie")
   get(@CurrentUser() user: SafeUser, @Req() request: Request) {
     this.query(request); return this.consents.get(user.id);
   }
   @Patch("me")
+  @ApiUpdateConsent()
   @Header("Cache-Control", "private, no-store")
   @Header("Vary", "Cookie")
   async patch(@CurrentUser() user: SafeUser, @Body() input: unknown, @Req() request: Request, @Res({ passthrough: true }) response: Response) {
