@@ -146,7 +146,8 @@ function MatchesScreen() {
       const result = await apiJson<{ choice: Choice; mutual: boolean }>(
         `/matches/${recommendation.pairId}/decision`, { method: "POST", json: { choice } },
       );
-      if (!result || result.choice !== choice) throw new Error("Missing decision receipt");
+      if (!result || result.choice !== choice || typeof result.mutual !== "boolean" ||
+        (choice === "DECLINE" && result.mutual)) throw new Error("Invalid decision receipt");
       setNotice({
         tone: "success",
         message: choice === "ACCEPT" ? "Acceptance saved." : "Decline saved.",
