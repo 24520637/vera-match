@@ -17,6 +17,7 @@ enum AccountStatus {
   PENDING_EMAIL
   ACTIVE
   SUSPENDED
+  CLOSED
   DELETED
 }
 enum ConsentPurpose {
@@ -96,6 +97,7 @@ model User {
   questionnaireAnswers QuestionnaireAnswer[]
   resourceRevisions MemberResourceRevision[]
   consents Consent[]
+  closure AccountClosure?
   consentLedger ConsentLedger?
   blocksMade Block[] @relation("Blocker")
   blocksReceived Block[] @relation("Blocked")
@@ -744,4 +746,49 @@ model AssignmentCancellationScan {
   lane String @id
   afterId String?
   throughId String?
+}
+
+// Closure retains the access barrier; physical User deletion is not a coordinator operation.
+enum ClosureState {
+  RESTRICTED
+  RETENTION_PENDING
+}
+model AccountClosure {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId String @unique
+  user User @relation(fields: [userId], references: [id], onDelete: Restrict)
+  state ClosureState @default(RESTRICTED)
+  revision Int @default(1)
+  keyHash String
+  fingerprint String
+  createdAt DateTime @default(now())
+  events AccountClosureEvent[]
+  consumers AccountClosureConsumer[]
+  tokens ClosureStatusToken[]
+}
+model AccountClosureEvent {
+  closureId String @db.Uuid
+  closure AccountClosure @relation(fields: [closureId], references: [id], onDelete: Restrict)
+  revision Int
+  kind String
+  createdAt DateTime @default(now())
+  @@id([closureId, revision])
+}
+model AccountClosureConsumer {
+  closureId String @db.Uuid
+  closure AccountClosure @relation(fields: [closureId], references: [id], onDelete: Restrict)
+  name String
+  status String @default("PENDING")
+  @@id([closureId, name])
+}
+model ClosureStatusToken {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  closureId String @db.Uuid
+  closure AccountClosure @relation(fields: [closureId], references: [id], onDelete: Restrict)
+  tokenHash String @unique
+  createdAt DateTime @default(now())
+  expiresAt DateTime
+  consumedAt DateTime?
+  @@index([closureId, createdAt])
+  @@index([expiresAt])
 }

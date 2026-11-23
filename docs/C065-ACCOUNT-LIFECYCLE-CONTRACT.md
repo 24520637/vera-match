@@ -1,3 +1,5 @@
+> Historical proposal. The owner technical decisions and current baseline are finalized in [PRIVACY-LIFECYCLE-DECISIONS.md](PRIVACY-LIFECYCLE-DECISIONS.md). This older inventory/proposed protocol remains history, not the current implementation status. External production/legal gates still apply.
+
 # C065 / C066 — Proposed account lifecycle decision record
 
 Status: **PROPOSED / implementation BLOCKED**. Huong / T11. Documentation only.

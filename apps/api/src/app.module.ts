@@ -1,3 +1,4 @@
+import { AccountClosureModule } from "./account-closure/account-closure.module";
 import { SafetyModule } from "./safety/safety.module";
 import { Module } from "@nestjs/common";
 import { EnvironmentModule } from "./config/environment.module";
@@ -15,6 +16,7 @@ import { MatchingModule } from "./matching/matching.module";
 
 @Module({
   imports: [
+    AccountClosureModule,
     EnvironmentModule,
     DatabaseModule,
     AuthModule,
