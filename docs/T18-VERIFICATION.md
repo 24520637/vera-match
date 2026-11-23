@@ -13,12 +13,13 @@ The T18 worktree was clean at the start of implementation on historical T16 base
 | Acceptance | Evidence |
 | --- | --- |
 | C096 | The existing assignment-access, review-claims and matching API suites passed. They cover role and scope enforcement, stale versions, concurrent decisions, audit rollback, consent withdrawal, blocks and revocation. |
-| C097 | Two clean invocations passed, each with a desktop and mobile joined journey. The same member registered and verified their email before the video, review, claims and matching steps. |
-| C098 | The release notes are drafted for internal-demo scope. Hương’s cross-review is pending. [Release notes](RELEASE-NOTES-v0.1.0.md). |
+| C097 | The full video/review browser suite passed 10 tests. A second clean, focused demo run passed 2/2 tests. Both invocations covered the joined journey on desktop and mobile, with the same member registering and verifying their email before the video, review, claims and matching steps. |
+| C098 | Hương approved T18 for internal demo, subject to the documentation corrections on PR #39. Production release gates remain open. [Release notes](RELEASE-NOTES-v0.1.0.md). |
 
 ## Upstream status
 
 - PR #38 was squash-merged into `develop` at `d5151e3`. The original PR head was `3507d21`, and upstream CI run 45037118321 tested that head. [PR #38](https://github.com/24520637/vera-match/pull/38) · [CI run 45037118321](https://github.com/24520637/vera-match/actions/runs/45037118321).
+- GitHub Actions CI run 45047743675 succeeded for PR #39 at `f918b69`. This is the CI result for the T18 PR revision. The local run counts below come from the recorded T18 verification. [PR #39](https://github.com/24520637/vera-match/pull/39) · [CI run 45047743675](https://github.com/24520637/vera-match/actions/runs/45047743675).
 - PRs #32 and #33 are open and carry the broader withdrawal/deletion race and bilateral block suites. Recheck those suites when the underlying changes are approved and integrated. [PR #32](https://github.com/24520637/vera-match/pull/32) · [PR #33](https://github.com/24520637/vera-match/pull/33).
 - PR #34 is open for lifecycle owner decisions. The closure foundation, its UI, and the restore negative control are open drafts. PRs #36 and #37 are stacked on #35. The demo uses the existing paths on the T16 baseline. Lifecycle release acceptance depends on draft review and the remaining reconciliation, policy and restore gates. [PR #34](https://github.com/24520637/vera-match/pull/34) · [PR #35](https://github.com/24520637/vera-match/pull/35) · [PR #36](https://github.com/24520637/vera-match/pull/36) · [PR #37](https://github.com/24520637/vera-match/pull/37).
 - T17 release sign-off remains with Hương. PR #27 supplied the baseline runbook and synthetic recovery rehearsal. The C093–C095 release sign-offs and production restore runbook review are still outstanding. [PR #27](https://github.com/24520637/vera-match/pull/27) · [C095 runbook](C095-OPERATIONS-RUNBOOK.md).
@@ -52,8 +53,8 @@ The local runs took place on 2026-11-22 (UTC+07). The 2026-11-23 review checked 
 | Baseline targeted API unit | `npm.cmd test --workspace apps/api -- --runInBand review matching assignment-grants` | 61 | 0 | 0 |
 | Baseline PostgreSQL reviewer, claims and matching | `npm.cmd run test:integration --workspace apps/api -- assignment-access review-claims.integration matching-api` | 122 | 0 | 0 |
 | Full API unit with native FFprobe | `npm.cmd test --workspace apps/api -- --runInBand` | 336 | 0 | 0 |
-| Demo run 1 and full video/review browser suite | `node scripts/run-video-e2e.cjs` | 10, including desktop and mobile joined scenarios | 0 | 0 |
-| Demo run 2, focused | `node .venv/t18/browser.cjs video --grep "T18 demo"` | 2 | 0 | 0 |
+| Full video/review browser run | `node scripts/run-video-e2e.cjs` | 10, including desktop and mobile joined demo tests | 0 | 0 |
+| Second run, focused on the joined demo | `node .venv/t18/browser.cjs video --grep "T18 demo"` | 2/2, one desktop and one mobile test | 0 | 0 |
 | Shared UI and accessibility | `node .venv/t18/browser.cjs ui` | 218 | 0 | 0 |
 | Auth browser | `node .venv/t18/browser.cjs auth` | 36 | 0 | 0 |
 | Member browser | `node .venv/t18/browser.cjs member` | 4 | 0 | 0 |

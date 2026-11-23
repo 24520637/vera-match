@@ -16,7 +16,9 @@ Matching ranks within each discovery window using that member’s settings. Shar
 
 ## Demo and QA evidence
 
-The demo passed twice on isolated PostgreSQL, Mailpit, MinIO and Chromium, with a desktop and mobile scenario in each run. Synthetic staff accounts use assignment-scoped grants and test-only staff assurance, training evidence and policies. The verification record covers the local runs on the historical T16 baseline `3507d21`. PR #38 was squash-merged into `develop` at `d5151e3`, which has the same committed tree. The final integrated release candidate still requires release sign-off and fresh HTTPS/proxy evidence. [T18 verification record](T18-VERIFICATION.md) · [PR #38](https://github.com/24520637/vera-match/pull/38).
+The local full video/review browser run passed 10 tests, including the desktop and mobile joined demo tests. The second run used fresh PostgreSQL, Mailpit and MinIO fixtures and ran only the joined demo in Chromium, passing 2/2 tests. Synthetic staff accounts use assignment-scoped grants and test-only staff assurance, training evidence and policies. The verification record covers these local runs on historical T16 baseline `3507d21`. PR #38 was squash-merged into `develop` at `d5151e3`, which has the same committed tree. [T18 verification record](T18-VERIFICATION.md) · [PR #38](https://github.com/24520637/vera-match/pull/38).
+
+GitHub Actions CI run 45047743675 succeeded for PR #39 at `f918b69`. Hương approved C096–C098 for internal demo, subject to the documentation corrections on PR #39. The final integrated release candidate still requires release sign-off and fresh HTTPS/proxy evidence. [PR #39](https://github.com/24520637/vera-match/pull/39) · [CI run 45047743675](https://github.com/24520637/vera-match/actions/runs/45047743675).
 
 ## Release blockers and limitations
 
