@@ -1,7 +1,7 @@
 import type { INestApplication } from "@nestjs/common";
 import type { OpenAPIObject, RequestBodyObject, SchemaObject } from "@nestjs/swagger/dist/interfaces/open-api-spec.interface";
 import { Test } from "@nestjs/testing";
-import { ReportReason } from "@prisma/client";
+import { Prisma, ReportReason } from "@prisma/client";
 import { configureApplication } from "../configure-app";
 import { PrismaService } from "../database/prisma.service";
 import { configureSwagger } from "./configure-swagger";
@@ -37,6 +37,11 @@ describe("Huong owned OpenAPI release contracts", () => {
   it("tracks the actual report enum and server validators", () => {
     const report = huongContracts.find(c => c.path === "/api/reports")!;
     expect((report.body!.properties!.reason as SchemaObject).enum).toEqual(Object.values(ReportReason));
+    const reasonField = Prisma.dmmf.datamodel.models.find(m => m.name === "Report")!.fields.find(field => field.name === "reasonCode")!;
+    const queue = document.paths["/api/moderation/reports"]!.get!.responses[200] as import("@nestjs/swagger/dist/interfaces/open-api-spec.interface").ResponseObject;
+    const result = queue.content!["application/json"].schema as SchemaObject;
+    const reports = result.properties!.reports as SchemaObject;
+    expect(((reports.items as SchemaObject).properties!.reasonCode as SchemaObject).nullable).toBe(!reasonField.isRequired);
     expect(uploadInput({ mimeType: "video/mp4", sizeBytes: 12 })).toEqual({ mimeType: "video/mp4", sizeBytes: 12 });
     expect(() => uploadInput({ mimeType: "video/mp4", sizeBytes: 104857601 })).toThrow();
     expect(() => closureInput({ confirmation: "CLOSE MY ACCOUNT", password: "synthetic", expectedRevision: 0 }, "12345678-1234-4234-8234-123456789abc")).not.toThrow();

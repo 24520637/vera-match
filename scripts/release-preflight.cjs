@@ -20,6 +20,10 @@ async function smoke(origin, fetcher = fetch) {
     const response = await fetcher(new URL(path,u), { redirect: 'manual', signal: AbortSignal.timeout(15000) });
     try {
       if (response.status !== expected) throw new Error(path + ' unexpected HTTP status');
+      if (path === '/api/health' || path === '/api/health/ready') {
+        const health = await response.json();
+        if (health.service !== 'vera-api' || health.status !== (path.endsWith('/ready') ? 'ready' : 'ok') || path.endsWith('/ready') && health.database !== 'ok') throw new Error(path + ' invalid health payload');
+      }
       if (path === '/api/docs-json') {
         const spec = await response.json();
         if (!String(spec.openapi).startsWith('3.') || !spec.paths?.['/api/auth/login'] || !spec.paths?.['/api/matches/recommendations'] || !spec.paths?.['/api/account-closure']) throw new Error('Public OpenAPI contract is incomplete');

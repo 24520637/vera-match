@@ -16,8 +16,13 @@ test('HTTPS smoke checks only public GETs and protected 401 boundaries', async (
   const paths = [];
   await smoke('https://host.test', async url => {
     paths.push(url.pathname);
+    if (url.pathname === '/api/health' || url.pathname === '/api/health/ready') return new Response(JSON.stringify({ service: 'vera-api', status: url.pathname.endsWith('/ready') ? 'ready' : 'ok', database: 'ok' }));
     return new Response(url.pathname === '/api/docs-json' ? JSON.stringify({ openapi: '3.0.0', paths: { '/api/auth/login': {}, '/api/matches/recommendations': {}, '/api/account-closure': {} } }) : '', { status: ['/api/auth/me','/api/videos/me'].includes(url.pathname) ? 401 : 200 });
   });
   assert.equal(paths.length, 7);
   assert.ok(paths.every(path => !path.includes('reset-password')));
+});
+
+test('does not accept a frontend HTML fallback as API health', async () => {
+  await assert.rejects(smoke('https://host.test', async url => new Response(url.pathname === '/' ? '<html>ok</html>' : '{}')), /invalid health payload/);
 });

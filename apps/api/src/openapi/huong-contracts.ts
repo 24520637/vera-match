@@ -711,7 +711,7 @@ export const huongContracts: Contract[] = [
                 "type": "string"
               },
               "reasonCode": {
-                "type": "string"
+                "type": "string", "nullable": true
               },
               "status": {
                 "type": "string"
@@ -763,7 +763,7 @@ export const huongContracts: Contract[] = [
               "type": "string"
             },
             "reason": {
-              "type": "string"
+              "type": "string", "nullable": true
             },
             "details": {
               "type": "string"
