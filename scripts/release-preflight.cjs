@@ -16,17 +16,43 @@ function checkEnvironment(env) {
 async function smoke(origin, fetcher = fetch) {
   const u = new URL(origin);
   if (u.protocol !== 'https:' || u.username || u.password || u.pathname !== '/' || u.search || u.hash) throw new Error('Supply one credential-free HTTPS origin');
-  for (const [path, expected] of [['/',200],['/api/health',200],['/api/health/ready',200],['/api/docs',200],['/api/docs-json',200],['/api/auth/me',401],['/api/videos/me',401]]) {
+  const checks = [
+    ['/', 200],
+    ['/api', 200],
+    ['/api/health', 200],
+    ['/api/health/ready', 200],
+    ['/api/docs', 200],
+    ['/api/docs/swagger-ui-init.js', 200],
+    ['/api/docs-json', 200],
+    ['/api/auth/me', 401],
+    ['/api/videos/me', 401],
+  ];
+  for (const [path, expected] of checks) {
     const response = await fetcher(new URL(path,u), { redirect: 'manual', signal: AbortSignal.timeout(15000) });
     try {
       if (response.status !== expected) throw new Error(path + ' unexpected HTTP status');
+      if (path === '/api') {
+        const root = await response.json();
+        if (root?.service !== 'vera-api' || root.health !== '/api/health' || root.readiness !== '/api/health/ready') {
+          throw new Error('/api invalid discovery payload');
+        }
+      }
       if (path === '/api/health' || path === '/api/health/ready') {
         const health = await response.json();
         if (health.service !== 'vera-api' || health.status !== (path.endsWith('/ready') ? 'ready' : 'ok') || path.endsWith('/ready') && health.database !== 'ok') throw new Error(path + ' invalid health payload');
       }
+      if (path === '/api/docs' && !(await response.text()).includes('id="swagger-ui"')) {
+        throw new Error('Expected Swagger UI at /api/docs');
+      }
+      if (path === '/api/docs/swagger-ui-init.js') {
+        const script = await response.text();
+        if (!script.includes('SwaggerUIBundle') || !/"supportedSubmitMethods"\s*:\s*\[\s*\]/.test(script) || !/"persistAuthorization"\s*:\s*false/.test(script)) {
+          throw new Error('Expected read-only Swagger UI with authorization persistence disabled');
+        }
+      }
       if (path === '/api/docs-json') {
         const spec = await response.json();
-        if (!String(spec.openapi).startsWith('3.') || !spec.paths?.['/api/auth/login'] || !spec.paths?.['/api/matches/recommendations'] || !spec.paths?.['/api/account-closure']) throw new Error('Public OpenAPI contract is incomplete');
+        if (!String(spec.openapi).startsWith('3.') || !spec.paths?.['/api']?.get || !spec.paths?.['/api/auth/login'] || !spec.paths?.['/api/matches/recommendations'] || !spec.paths?.['/api/account-closure']) throw new Error('Public OpenAPI contract is incomplete');
       }
     } finally { if (!response.bodyUsed) await response.body?.cancel(); }
   }

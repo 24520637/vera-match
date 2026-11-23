@@ -158,7 +158,7 @@ export const huongContracts: Contract[] = [
       ]
     },
     "security": true,
-    "description": ""
+    "description": "Returns the signed-in user's safe profile for session restoration. Missing, expired, or revoked sessions return 401. The cookie and password hash are never returned."
   },
   {
     "method": "post",
@@ -494,8 +494,7 @@ export const huongContracts: Contract[] = [
     "body": {
       "type": "object",
       "additionalProperties": false,
-      "properties": {},
-      "required": []
+      "properties": {}
     },
     "security": true,
     "description": "Verifies storage object MIME, size and container, and promotes to an immutable playback key. READY confirms storage, not necessarily a verified duration for review observations."
@@ -530,8 +529,7 @@ export const huongContracts: Contract[] = [
     "body": {
       "type": "object",
       "additionalProperties": false,
-      "properties": {},
-      "required": []
+      "properties": {}
     },
     "security": true,
     "description": "MEMBER owner only; current storage consent and original generation binding are required. URL TTL is 60 seconds; previously issued URLs may remain valid until expiry. Experts use the assignment endpoint instead."
@@ -570,8 +568,7 @@ export const huongContracts: Contract[] = [
     "body": {
       "type": "object",
       "additionalProperties": false,
-      "properties": {},
-      "required": []
+      "properties": {}
     },
     "security": true,
     "description": "Does not require current storage consent. Denies new access and cancels eligible assignments atomically. PENDING is not physical erasure."
@@ -616,7 +613,7 @@ export const huongContracts: Contract[] = [
       ]
     },
     "security": true,
-    "description": ""
+    "description": "Returns only blocks created by the signed-in member. Pass the previous page's nextCursor as cursor to continue. A null nextCursor means the list is complete."
   },
   {
     "method": "post",
@@ -646,8 +643,7 @@ export const huongContracts: Contract[] = [
     "body": {
       "type": "object",
       "additionalProperties": false,
-      "properties": {},
-      "required": []
+      "properties": {}
     },
     "security": true,
     "description": "Unblocking does not revive invalidated matching decisions or stale handles."
