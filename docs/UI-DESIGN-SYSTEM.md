@@ -273,3 +273,11 @@ session controls. Moderator access denied for missing real assurance is an error
 state, not an empty queue. Synthetic browser assurance is isolated to the test host.
 Desktop/mobile browser checks cover keyboard confirmation/cancel, validation, error
 recovery, responsive overflow and axe checks; screenshots use synthetic data only.
+
+## Staff authenticator workflow
+
+The staff-security page keeps the established mist/plum, Newsreader/Instrument Sans direction. One editorial context column explains the sensitive task; one existing Card contains shared Form, Input, Select, Button, Notice and loading/retry components. Mobile stacks the same reading order. No new palette, dependency, QR provider or repeated-card dashboard is added.
+
+Actions are explicit: add/confirm an authenticator, verify access, recover access, replace codes and revoke a device. Native labeled validation, one-time-code input, password autocomplete, visible keyboard focus and shared Retry-After feedback apply. Revocation/recovery explain their consequences before the credential-confirmed action. Server uncertainty asks for a status refresh instead of automatic mutation retry. Setup and recovery values stay in memory, are never stored in browser storage, and are hidden on visibility/session changes. Pending setup can continue from its reference without re-fetching its secret.
+
+Desktop/mobile real-API E2E covers actual TOTP, cookie/session rotation, recovery, moderator authorization, revocation, visibility handling and HTTP 429. Scoped axe checks pass for the verified and throttled states. Visual review covers both viewports; screenshots deliberately exclude setup keys and recovery codes.

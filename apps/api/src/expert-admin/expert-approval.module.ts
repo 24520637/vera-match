@@ -23,8 +23,9 @@ import { ReviewQaController } from "./review-qa.controller";
 import { ReviewQaService } from "./review-qa.service";
 import { ReviewOwnerController } from "./review-owner.controller";
 import { ReviewOwnerService } from "./review-owner.service";
+import { StaffSecurityModule } from "../staff-security/staff-security.module";
 
-@Module({ imports: [AuthModule, DatabaseModule, EnvironmentModule, ConsentModule, VideoModule, SafetyModule], controllers: [ExpertApprovalController, AssignmentController, ExpertPlaybackController, AssignmentDraftController, ReviewDraftController, ReviewQaController, ReviewOwnerController],
+@Module({ imports: [AuthModule, DatabaseModule, EnvironmentModule, ConsentModule, VideoModule, SafetyModule, StaffSecurityModule], controllers: [ExpertApprovalController, AssignmentController, ExpertPlaybackController, AssignmentDraftController, ReviewDraftController, ReviewQaController, ReviewOwnerController],
   providers: [ExpertApprovalService, ExpertApprovalRegistry, ExpertEvidenceSource, ExpertApprovalRateLimiter, ExpertApprovalRequestGuard, AssignmentService,
     AssignmentAccessService, ExpertMfaSource, ExpertPlaybackService, ExpertPlaybackLimiter, ExpertPlaybackRequestGuard, ReviewDraftService, ReviewDraftRequestGuard, ReviewQaService, ReviewOwnerService] })
 export class ExpertApprovalModule implements NestModule {

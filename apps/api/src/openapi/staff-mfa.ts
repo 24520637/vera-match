@@ -1,0 +1,25 @@
+import type { SchemaObject } from "@nestjs/swagger/dist/interfaces/open-api-spec.interface";
+import type { Contract } from "./huong-contracts";
+
+const password: SchemaObject = { type: "string", minLength: 1, maxLength: 1024, writeOnly: true, description: "Current password; bounded to 1024 UTF-8 bytes, never logged." };
+const deviceId: SchemaObject = { type: "string", format: "uuid" };
+const code: SchemaObject = { type: "string", pattern: "^[0-9]{6}$", writeOnly: true };
+const time: SchemaObject = { type: "string", format: "date-time" };
+const codes: SchemaObject = { type: "array", minItems: 8, maxItems: 8, items: { type: "string" }, description: "Eight recovery secrets shown once; keep offline. Only hashes are stored." };
+const object = (properties: Record<string, SchemaObject>, required = Object.keys(properties)): SchemaObject => ({ type: "object", additionalProperties: false, properties, required });
+const base = "/api/auth/staff-mfa";
+const description = "Requires an active server session and signed current staff identity. A role alone is insufficient. TOTP uses six digits / 30 seconds; assurance lasts at most five minutes and is bound to the exact replacement session, identity revision and device epoch. Mutations require same-origin JSON and configured Origin. Durable factor quota: five failures per 15 minutes per staff identity; HTTP 429 includes Retry-After. No automatic retries. Missing authority or wrapping keys denies access. TOTP is not phishing-resistant or device attestation.";
+const result = object({ verifiedUntil: { ...time, nullable: true } });
+export const staffMfaContracts: Contract[] = [
+  { method: "get", path: base, summary: "Read own staff MFA status", status: 200, security: true, description,
+    response: object({ pendingEnrollment: { ...object({ deviceId, expiresAt: time }), nullable: true }, devices: { type: "array", items: object({ id: deviceId, createdAt: time, activatedAt: { ...time, nullable: true } }) }, verifiedUntil: { ...time, nullable: true }, recoveryEnrollmentAllowed: { type: "boolean" } }) },
+  { method: "post", path: base + "/enrollment", summary: "Begin session-bound TOTP enrollment", status: 201, security: true,
+    description: description + " Initial enrollment requires a separately delivered activation capability. Later enrollment requires current MFA or a recovery enrollment permit. Maximum five active devices; one live pending setup. Enrollment expires within five minutes. Secret is shown only for this setup and must never enter URLs, browser storage or logs.",
+    body: object({ password, activationKey: { type: "string", maxLength: 43, writeOnly: true } }, ["password"]),
+    response: object({ deviceId, secret: { type: "string", description: "Ephemeral Base32 setup secret; synthetic examples deliberately omit secrets." }, expiresAt: time, issuer: { type: "string", enum: ["VERA Match"] }, digits: { type: "integer", enum: [6] }, periodSeconds: { type: "integer", enum: [30] } }) },
+  { method: "post", path: base + "/enrollment/confirm", summary: "Confirm TOTP device and rotate the session", status: 200, security: true, description: description + " Exact initiating session required. Counter consumed atomically once. Replaces HttpOnly session cookie; old session revoked. Recovery codes appear only if none remain.", body: object({ deviceId, code }), response: object({ verifiedUntil: time, recoveryCodes: codes }, ["verifiedUntil"]) },
+  { method: "post", path: base + "/verify", summary: "Verify TOTP and rotate the session", status: 200, security: true, description: description + " Requires current password and an unused TOTP counter. Replaces HttpOnly session cookie and revokes the old session.", body: object({ deviceId, code, password }), response: result },
+  { method: "post", path: base + "/recover", summary: "Consume recovery code for restricted re-enrollment", status: 200, security: true, description: description + " Recovery revokes all previous devices, codes and sessions. Replacement cookie permits enrollment only, not private-data access or MFA assurance. Permit expires within five minutes.", body: object({ password, recoveryCode: { type: "string", maxLength: 43, writeOnly: true } }), response: object({ verifiedUntil: { type: "string", nullable: true, enum: [null] }, recoveryExpiresAt: time }) },
+  { method: "post", path: base + "/recovery-codes", summary: "Rotate own recovery codes", status: 200, security: true, description: description + " Requires current password and fresh MFA. Invalidates every previous unused code; returns replacement codes once.", body: object({ password }), response: object({ recoveryCodes: codes }) },
+  { method: "post", path: base + "/devices/{deviceId}/revoke", summary: "Revoke own MFA device and all sessions", status: 204, security: true, description: description + " Requires current password and fresh MFA. Device belongs to current subject/epoch. Revokes every account session and clears browser cookie; no response body.", body: object({ password }) },
+];

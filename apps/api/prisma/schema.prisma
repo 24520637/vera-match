@@ -89,6 +89,7 @@ model User {
   emailVerifiedAt DateTime?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  staffIdentity StaffIdentity?
   sessions Session[]
   emailTokens EmailVerificationToken[]
   resetTokens PasswordResetToken[]
@@ -120,6 +121,8 @@ model Session {
   expiresAt DateTime
   revokedAt DateTime?
   createdAt DateTime @default(now())
+  staffMfaProof StaffMfaProof?
+  staffMfaRecoveryPermit StaffMfaRecoveryPermit?
   lastSeenAt DateTime?
   @@index([userId, expiresAt])
 }
@@ -791,4 +794,102 @@ model ClosureStatusToken {
   consumedAt DateTime?
   @@index([closureId, createdAt])
   @@index([expiresAt])
+}
+
+// C064: real staff authority is independent of the ordinary User.role flag.
+// Retention/recovery approval is required before removing these identity mappings.
+model StaffIdentity {
+  userId String @id
+  user User @relation(fields: [userId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  subjectId String @unique @db.Uuid
+  revision BigInt
+  mfaEpoch BigInt
+  role UserRole
+  state String
+  expiresAt DateTime @db.Timestamptz(3)
+  currentDirectiveId String @unique @db.Uuid
+  devices StaffMfaDevice[]
+  proofs StaffMfaProof[]
+  recoveryCodes StaffMfaRecoveryCode[]
+  recoveryPermits StaffMfaRecoveryPermit[]
+  attemptWindow StaffMfaAttemptWindow?
+  currentDirective StaffTrustEvent @relation(fields: [currentDirectiveId], references: [directiveId], onDelete: Restrict, onUpdate: NoAction)
+}
+// Exact signed instructions survive revocation; no secret or live session token.
+model StaffTrustEvent {
+  directiveId String @id @db.Uuid
+  userId String
+  subjectId String @db.Uuid
+  revision BigInt
+  mfaEpoch BigInt
+  signedDirective String @db.Text
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  currentFor StaffIdentity?
+  @@unique([subjectId, revision])
+  @@unique([userId, revision])
+}
+
+// C064 MFA state: no plaintext secret, recovery code or session token.
+model StaffMfaDevice {
+ id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+ subjectId String @db.Uuid
+ identity StaffIdentity @relation(fields:[subjectId],references:[subjectId],onDelete:Restrict,onUpdate:NoAction)
+ mfaEpoch BigInt
+ enrollmentSessionId String
+ secretEnvelope String @db.Text
+ state String @default("PENDING")
+ lastCounter BigInt @default(-1)
+ pendingExpiresAt DateTime @db.Timestamptz(3)
+ activatedAt DateTime? @db.Timestamptz(3)
+ revokedAt DateTime? @db.Timestamptz(3)
+ createdAt DateTime @default(now()) @db.Timestamptz(3)
+ proofs StaffMfaProof[]
+ @@index([subjectId,mfaEpoch,state])
+}
+model StaffMfaProof {
+ sessionId String @id
+ session Session @relation(fields:[sessionId],references:[id],onDelete:Cascade,onUpdate:NoAction)
+ subjectId String @db.Uuid
+ identity StaffIdentity @relation(fields:[subjectId],references:[subjectId],onDelete:Restrict,onUpdate:NoAction)
+ deviceId String @db.Uuid
+ device StaffMfaDevice @relation(fields:[deviceId],references:[id],onDelete:Restrict,onUpdate:NoAction)
+ identityRevision BigInt
+ mfaEpoch BigInt
+ verifiedAt DateTime @db.Timestamptz(3)
+ expiresAt DateTime @db.Timestamptz(3)
+}
+model StaffMfaRecoveryCode {
+ hash String @id
+ subjectId String @db.Uuid
+ identity StaffIdentity @relation(fields:[subjectId],references:[subjectId],onDelete:Restrict,onUpdate:NoAction)
+ mfaEpoch BigInt
+ consumedAt DateTime? @db.Timestamptz(3)
+ createdAt DateTime @default(now()) @db.Timestamptz(3)
+ @@index([subjectId,mfaEpoch])
+}
+model StaffMfaRecoveryPermit {
+ sessionId String @id
+ session Session @relation(fields:[sessionId],references:[id],onDelete:Cascade,onUpdate:NoAction)
+ subjectId String @db.Uuid
+ identity StaffIdentity @relation(fields:[subjectId],references:[subjectId],onDelete:Restrict,onUpdate:NoAction)
+ identityRevision BigInt
+ mfaEpoch BigInt
+ expiresAt DateTime @db.Timestamptz(3)
+ consumedAt DateTime? @db.Timestamptz(3)
+}
+model StaffMfaAttemptWindow {
+ subjectId String @id @db.Uuid
+ identity StaffIdentity @relation(fields:[subjectId],references:[subjectId],onDelete:Restrict,onUpdate:NoAction)
+ startedAt DateTime @db.Timestamptz(3)
+ attempts Int
+}
+model StaffMfaEvent {
+ id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+ subjectId String @db.Uuid
+ identityRevision BigInt
+ mfaEpoch BigInt
+ kind String
+ deviceId String? @db.Uuid
+ createdAt DateTime @default(now()) @db.Timestamptz(3)
+ @@index([subjectId,createdAt])
 }
