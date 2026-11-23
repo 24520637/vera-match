@@ -58,6 +58,15 @@ export class EmailService implements OnApplicationShutdown {
       });
     }
   }
+  async sendClosureStatus(email: string, link: string) {
+    try {
+      const result = await this.transport.sendMail({ from: this.environment.values.smtp.from, to: email,
+        subject: "Your restricted VERA Match closure status",
+        text: `Your account access remains closed. This one-time status link expires in 15 minutes and does not restore account access.\n\n${link}\n\nCleanup and retention may remain pending; this email is not proof of permanent erasure.`,
+      });
+      if (!result.accepted?.length) throw new Error("Not accepted");
+    } catch { throw new ServiceUnavailableException({ code: "EMAIL_DELIVERY_UNAVAILABLE", message: "Email delivery is temporarily unavailable." }); }
+  }
   onApplicationShutdown() {
     this.transport.close();
   }

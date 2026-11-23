@@ -33,6 +33,6 @@ import { LogoutService } from "./logout.service";
     LoginService,
     LogoutService,
   ],
-  exports: [PasswordService, SessionService, SessionAuthGuard, RolesGuard],
+  exports: [PasswordService, SessionService, SessionAuthGuard, RolesGuard, EmailService, AuthRateLimiter, AuthRequestGuard],
 })
 export class AuthModule {}

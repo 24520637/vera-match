@@ -56,7 +56,16 @@ export class ConsentService {
   }
   patch(userId: string, input: unknown, header: unknown) {
     const dto = parseConsentPatch(input), keyHash = parseIdempotencyKey(header), fingerprint = consentFingerprint(dto);
-    return consentStorage(() => this.prisma.$transaction(async tx => {
+    return consentStorage(() => this.prisma.$transaction(tx => this.patchInTransaction(tx, userId, dto, keyHash, fingerprint)));
+  }
+  /** Internal coordinator API. Caller owns the same User lock; no nested transaction or provider I/O. */
+  async withdrawForClosure(tx: Prisma.TransactionClient, userId: string, closureId: string) {
+    const ledger = await tx.consentLedger.findUnique({ where: { userId } });
+    const dto = parseConsentPatch({ expectedVersion: Number(ledger?.version ?? 0n),
+      consents: consentPurposes.map(purpose => ({ purpose, granted: false })) });
+    return this.patchInTransaction(tx, userId, dto, parseIdempotencyKey(closureId), consentFingerprint(dto));
+  }
+  private async patchInTransaction(tx: Prisma.TransactionClient, userId: string, dto: ReturnType<typeof parseConsentPatch>, keyHash: string, fingerprint: string) {
       // Same per-account lock order as the existing feature APIs. No automatic retry.
       await tx.$queryRaw`SELECT id FROM "User" WHERE id = ${userId} FOR UPDATE`;
       await requireConsentMember(tx, userId);
@@ -120,6 +129,5 @@ export class ConsentService {
         update: { fingerprint, response: response as unknown as Prisma.InputJsonValue, createdAt: now, expiresAt: new Date(now.getTime() + 86400000) },
       });
       return { response, replayed: false };
-    }));
   }
 }
