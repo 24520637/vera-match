@@ -30,79 +30,41 @@ const { PrismaClient } = require("@prisma/client");
 const {
   S3Client,
   CreateBucketCommand,
-  ListObjectsV2Command,
-  DeleteObjectCommand,
-  DeleteBucketCommand,
   PutBucketLifecycleConfigurationCommand,
 } = require("@aws-sdk/client-s3");
+const { cleanupVideoFixture, fixtureEndpoints, manifestPath, verifyBucketWritable } = require("./video-e2e-fixtures.cjs");
 const schema = `vera_auth_test_${randomUUID().replaceAll("-", "")}`;
 const bucket = `vera-video-e2e-${randomUUID()}`;
 const runId = process.env.VERA_VIDEO_E2E_RUN_ID;
-const metadata = resolve(root, "apps/web/.video-e2e-runtime.json");
+const fixtureEnv = { ...process.env };
 let admin,
   storage,
   app,
   timer,
-  schemaCreated = false,
-  bucketCreated = false;
+  ownsManifest = false;
 async function cleanup() {
   clearInterval(timer);
-  await app?.close();
-  if (bucketCreated) {
-    const list = await storage.send(
-      new ListObjectsV2Command({ Bucket: bucket }),
-    );
-    for (const item of list.Contents || [])
-      await storage.send(
-        new DeleteObjectCommand({ Bucket: bucket, Key: item.Key }),
-      );
-    await storage.send(new DeleteBucketCommand({ Bucket: bucket }));
-    bucketCreated = false;
+  try {
+    await app?.close();
+  } finally {
+    storage?.destroy();
+    try {
+      await admin?.$disconnect();
+    } finally {
+      if (ownsManifest) await cleanupVideoFixture(fixtureEnv);
+    }
   }
-  storage?.destroy();
-  if (schemaCreated) {
-    await admin.$executeRawUnsafe(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
-    schemaCreated = false;
-  }
-  await admin?.$disconnect();
-  if (
-    fs.existsSync(metadata) &&
-    JSON.parse(fs.readFileSync(metadata, "utf8")).runId === runId
-  )
-    fs.unlinkSync(metadata);
 }
 const startup = (async () => {
   if (!/^[a-f0-9-]{36}$/.test(runId || ""))
     throw Error("Test run identifier required");
-  const url = new URL(process.env.DATABASE_URL || "");
-  const endpoint = new URL(
-    process.env.MINIO_ENDPOINT || "http://localhost:9000",
+  const { database: url, minio: endpoint } = fixtureEndpoints(fixtureEnv);
+  fs.writeFileSync(
+    manifestPath,
+    JSON.stringify({ kind: "vera-video-e2e-v1", runId, schema, bucket }),
+    { flag: "wx" },
   );
-  if (
-    !["localhost", "127.0.0.1", "[::1]"].includes(url.hostname) ||
-    url.port !== "5433" ||
-    !["localhost", "127.0.0.1"].includes(endpoint.hostname) ||
-    endpoint.port !== "9000" ||
-    fs.existsSync(metadata)
-  )
-    throw Error("Isolated local services required");
-  admin = new PrismaClient({ log: [] });
-  await admin.$executeRawUnsafe(`CREATE SCHEMA "${schema}"`);
-  schemaCreated = true;
-  url.searchParams.set("schema", schema);
-  process.env.DATABASE_URL = url.toString();
-  process.env.MINIO_BUCKET = bucket;
-  execFileSync(
-    process.execPath,
-    [
-      resolve(root, "node_modules/prisma/build/index.js"),
-      "migrate",
-      "deploy",
-      "--schema",
-      resolve(root, "apps/api/prisma/schema.prisma"),
-    ],
-    { env: process.env, stdio: "pipe", windowsHide: true },
-  );
+  ownsManifest = true;
   storage = new S3Client({
     endpoint: endpoint.origin,
     region: "us-east-1",
@@ -113,7 +75,11 @@ const startup = (async () => {
     },
   });
   await storage.send(new CreateBucketCommand({ Bucket: bucket }));
-  bucketCreated = true;
+  const probe = await verifyBucketWritable(storage, bucket);
+  if (!probe.writable) {
+    console.error("Video fixture storage is not writable" + (probe.detail ? ` (${probe.detail}).` : "."));
+    throw new Error("Storage write probe failed");
+  }
   await storage.send(
     new PutBucketLifecycleConfigurationCommand({
       Bucket: bucket,
@@ -128,6 +94,22 @@ const startup = (async () => {
         ],
       },
     }),
+  );
+  admin = new PrismaClient({ log: [] });
+  await admin.$executeRawUnsafe(`CREATE SCHEMA "${schema}"`);
+  url.searchParams.set("schema", schema);
+  process.env.DATABASE_URL = url.toString();
+  process.env.MINIO_BUCKET = bucket;
+  execFileSync(
+    process.execPath,
+    [
+      resolve(root, "node_modules/prisma/build/index.js"),
+      "migrate",
+      "deploy",
+      "--schema",
+      resolve(root, "apps/api/prisma/schema.prisma"),
+    ],
+    { env: process.env, stdio: "pipe", windowsHide: true },
   );
   const { Test } = require("@nestjs/testing");
   const { AppModule } = require(resolve(root, "apps/api/dist/app.module.js"));
@@ -213,11 +195,6 @@ const startup = (async () => {
       .runOnce()
       .catch(() => undefined);
   }, 500);
-  fs.writeFileSync(
-    metadata,
-    JSON.stringify({ kind: "vera-video-e2e-v1", runId, schema, bucket }),
-    { flag: "wx" },
-  );
   console.log("Synthetic private-video API ready on localhost:4100");
 })().catch(async () => {
   console.error("Private video E2E setup failed; check local test services.");

@@ -47,13 +47,14 @@ function startServer(name: string, args: string[], cwd: string, ready: RegExp, i
     });
   });
   return {
-    name,
     child,
     async wait() {
       await beforeDeadline(Promise.race([
         listening,
         exited.then(code => { throw new Error(`${name} exited before readiness (code ${code})`); }),
       ]), 120_000, `${name} readiness timed out`);
+      if (child.exitCode !== null || child.signalCode !== null)
+        throw new Error(`${name} exited during readiness`);
       console.log(`[${name}] owned PID ${child.pid} ready`);
     },
     async stop() {

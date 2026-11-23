@@ -36,11 +36,13 @@ $ffmpegBin = 'C:\path\to\ffmpeg\bin'
 & "$ffmpegBin\ffmpeg.exe" -version | Select-Object -First 1
 & "$ffmpegBin\ffprobe.exe" -version | Select-Object -First 1
 & "$ffmpegBin\ffmpeg.exe" -hide_banner -encoders 2>$null | Select-String 'libvpx|libx264'
-netstat -ano | Select-String ':(5433|1025|8025|9000|9001|4100|3100)\s+.*LISTENING'
+$busy = netstat -ano | Select-String ':(5433|1025|8025|9000|9001|4100|3100)\s+.*LISTENING'
+if ($busy) { $busy; throw 'Fixture ports must be free before provisioning a new cluster' }
 
 $run = Join-Path (Get-Location).Path ('.venv\t20\' + [guid]::NewGuid().ToString('N'))
 $pgData = Join-Path $run 'pg-data'
-$minioData = Join-Path $run 'minio-data'
+$minioRoot = $run
+$minioData = Join-Path $minioRoot ('minio-data-' + (Split-Path $run -Leaf))
 $minioCerts = Join-Path $run 'minio-certs'
 New-Item -ItemType Directory -Path $run,$minioData,$minioCerts | Out-Null
 $pgPassword = [guid]::NewGuid().ToString('N')
@@ -63,13 +65,19 @@ $psqlArgs = @('-X','-w','-h','127.0.0.1','-p','5433','-U','postgres','-d','vera_
 if ($LASTEXITCODE -ne 0) { throw 'T20 database identity check failed' }
 ```
 
-Confirm the returned database and directory match `vera_match_t20` and `$pgData` before migrating. Apply the committed history to the new database. The baseline has 23 migrations.
+If the checkout volume cannot support MinIO writes, point `$minioRoot` at a separately authorized directory on a writable volume before computing `$minioData`. Keep the generated run-specific subdirectory and use it as MinIO’s data argument. Database, logs and certificates can stay in `$run`.
+
+Confirm the returned database and directory match `vera_match_t20` and `$pgData` before migrating. Apply the history committed at the selected revision. Historical baseline `07e0d23` has 23 migrations. After the C065 merge (`e23a4d9`), the tree has 24.
 
 ```powershell
 npm.cmd run prisma:validate
+if ($LASTEXITCODE -ne 0) { throw 'Prisma validation failed' }
 npm.cmd run prisma:generate
+if ($LASTEXITCODE -ne 0) { throw 'Prisma client generation failed' }
 npm.cmd exec -- prisma migrate deploy --schema apps/api/prisma/schema.prisma
+if ($LASTEXITCODE -ne 0) { throw 'T20 migration deploy failed' }
 npm.cmd exec -- prisma migrate status --schema apps/api/prisma/schema.prisma
+if ($LASTEXITCODE -ne 0) { throw 'T20 migration status failed' }
 ```
 
 Set the remaining variables and start Mailpit and MinIO. The runner itself sets `API_INTERNAL_ORIGIN=http://localhost:4100` and `MAILPIT_BASE_URL=http://127.0.0.1:8025`. It uses production mode for the build; the API fixture sets `NODE_ENV=test`, local SMTP and the session cookie options. `PLAYWRIGHT_BROWSERS_PATH` is optional when Chromium was installed to the standard Playwright cache. If you use a custom browser cache, use the same value for install and execution.
@@ -156,6 +164,8 @@ Test-Path -LiteralPath apps/web/.video-e2e-runtime.json
 
 On Windows, the T20 fix starts the web and API servers as direct children and logs each `owned PID` at startup and exit. The API receives an IPC shutdown request so it can close the app and clean up its fixtures. Check the exit lines, counts and ports even when both projects pass.
 
+The runner records ownership before provisioning the schema and bucket. It writes a small synthetic probe to the owned bucket before creating the schema. A live MinIO endpoint or a successful bucket creation alone cannot verify write capacity. The probe is removed with the bucket during normal fixture cleanup. Cleanup tries PostgreSQL and MinIO independently and retains the manifest on failure. Keep the fixture services running until the runner exits and the final counts are recorded. If clean shutdown fails or a manifest remains after exit, preserve it and verify the recorded run ID and resources before recovery.
+
 On baseline `07e0d23`, the two project results printed, but the runner continued waiting for three Node processes. If a Windows run stalls, open the active run's `demo.log` in a second PowerShell window. Use the `owned PID` entries on the fixed runner or the `[WebServer] (node:<PID>)` entries on the baseline, then use `netstat -ano` to find listeners on 3100 and 4100. Wait for both project results and for the fixture manifest to disappear. Verify each candidate with `Get-Process -Id <PID>`, matching its executable and start time to the current run and its PID to the log or process lineage. Stop only those verified processes with `Stop-Process -Id <verified PID>`. Record the PIDs, runner exit code and final counts. If ownership is unclear, a test is still running or fixture cleanup is incomplete, preserve the log and manifest and record the cleanup failure.
 
 After the counts are recorded, stop only the Mailpit and MinIO processes started for this run, using their recorded process objects. Check that ports 1025, 8025, 9000, 9001, 3100 and 4100 are clear.
@@ -178,6 +188,7 @@ For a cluster created solely for this run, use `& "$pgBin\pg_ctl.exe" stop -D $p
 | --- | --- |
 | Baseline Windows teardown stalls after both tests pass | At `07e0d23`, Playwright uses Windows `taskkill`, which returned access denied on this host. The T20 worktree fix passed the demo and two failure-path probes. Follow the PID procedure above if a run stalls. [Verification](T20-C102-RESULTS.md#windows-teardown-fix-verification) |
 | A binary on disk may still lack a prerequisite | Check PostgreSQL 18 client tools, Chromium from the lockfile, and FFmpeg encoders before running. A minimal PostgreSQL bundle may omit client tools. |
+| MinIO can be live and refuse writes when its disk is low on space | Check free space on the volume holding the build and the MinIO data directory. HTTP 507 `XMinioStorageFull` during the synthetic PUT fails the run. Use a fixture volume with adequate space, then start a fresh run. The integrated replay passed with C: storage after space became available. A D: run remains unverified. [Successful replay](T20-C102-RESULTS.md#successful-integrated-replay) |
 | Port conflicts and existing fixture data stop a clean run | Check both address families, the manifest, schema count, bucket count and inbox. Start a new isolated fixture after the existing listener or fixture owner has been identified. |
 | Public UI still uses development-era copy | The public footer says private review and matching are unavailable. Compare the footer with the working staff and member flows in the joined demo. |
 | Security and operations evidence is limited to the synthetic environment | Public or real-user use requires reviewed staff identity/MFA, consent and retention policy, permitted disclosure, private storage/TLS, SMTP, HTTPS/cookies/proxy, account lifecycle and recovery safeguards. Already issued media links can remain valid until expiry. Hương leads the T17/T19 review and both owners review the release candidate. [Release limitations](RELEASE-NOTES-v0.1.0.md) · [Release gates](TEST-PLAN.md#release-gate) |

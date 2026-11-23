@@ -106,7 +106,10 @@ async function uploadSample(owner: BrowserContext, container: "mp4" | "webm") {
     method: "PUT", headers: { "Content-Type": mimeType }, body: new Uint8Array(bytes),
     signal: AbortSignal.timeout(10000),
   }).catch(() => { throw new Error("Synthetic video PUT failed."); });
-  expect(put.ok).toBe(true);
+  if (!put.ok) {
+    const code = /<Code>([A-Za-z0-9_-]{1,80})<\/Code>/.exec(await put.text())?.[1];
+    throw new Error(`Synthetic video PUT failed (HTTP ${put.status}${code ? `, ${code}` : ""}).`);
+  }
   const confirmed = await owner.request.post(`/api/videos/${id}/confirm`, { headers: mutation, data: {} });
   expect(confirmed.status()).toBe(201);
   return id;
