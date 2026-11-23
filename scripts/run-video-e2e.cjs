@@ -1,6 +1,7 @@
 const { randomUUID } = require("node:crypto");
 const { resolve } = require("node:path");
 const { spawnSync } = require("node:child_process");
+const { cleanupVideoFixture } = require("./video-e2e-fixtures.cjs");
 const root = resolve(__dirname, "..");
 for (const file of ["apps/api/.env", ".env"]) {
   try {
@@ -19,16 +20,6 @@ const env = {
 for (const [file, args, cwd] of [
   ["node_modules/@nestjs/cli/bin/nest.js", ["build"], "apps/api"],
   ["node_modules/next/dist/bin/next", ["build"], "apps/web"],
-  [
-    "node_modules/playwright/cli.js",
-    [
-      "test",
-      "--config",
-      "playwright.video.config.ts",
-      ...process.argv.slice(2),
-    ],
-    "apps/web",
-  ],
 ]) {
   const result = spawnSync(process.execPath, [resolve(root, file), ...args], {
     cwd: resolve(root, cwd),
@@ -38,3 +29,13 @@ for (const [file, args, cwd] of [
   });
   if (result.status !== 0) process.exit(result.status ?? 1);
 }
+const result = spawnSync(process.execPath, [
+  resolve(root, "node_modules/playwright/cli.js"),
+  "test", "--config", "playwright.video.config.ts", ...process.argv.slice(2),
+], { cwd: resolve(root, "apps/web"), env, stdio: "inherit", windowsHide: true });
+process.exitCode = result.status ?? 1;
+// A web server can fail before Playwright registers its global teardown.
+cleanupVideoFixture(env).catch(() => {
+  console.error("Video runner could not clean its fixtures; inspect the owned runtime manifest.");
+  process.exitCode ||= 1;
+});
