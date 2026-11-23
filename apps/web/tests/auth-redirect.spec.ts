@@ -16,6 +16,9 @@ test("only implemented internal destinations can follow sign-in", () => {
   ])
     expect(safeNextPath(target)).toBe("/account");
   expect(safeNextPath("/account")).toBe("/account");
+  expect(safeNextPath("/staff-security")).toBe("/staff-security");
+  expect(safeNextPath("//staff-security")).toBe("/account");
+  expect(safeNextPath("/staff-security/other")).toBe("/account");
   expect(safeNextPath("/account?section=security#sessions")).toBe(
     "/account?section=security#sessions",
   );

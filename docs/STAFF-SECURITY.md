@@ -65,3 +65,5 @@ Load the new active key together with retained old keys in the API first. The op
 Actual PostgreSQL/HTTP tests cover signed identities, real TOTP and role authorization, session/cookie rotation, concurrent replay, restart-persistent quotas, restricted recovery, deprovision/reprovision epochs, audit rollback, expiry clamping, permanent factor history and actual key rewrapping/retirement. Browser acceptance is tracked separately until it completes. Independent restore fencing remains required before claiming production recovery safety.
 
 Standards: [RFC 6238](https://www.rfc-editor.org/rfc/rfc6238), [RFC 4226](https://www.rfc-editor.org/rfc/rfc4226).
+
+Browser acceptance: 4/4 real API desktop/mobile tests PASS, including setup visibility handling, actual TOTP, recovery, role authorization, session/cookie changes, revocation, Retry-After and scoped accessibility. No mock assurance provider is used. Setup/recovery values are memory-only; no MFA secret is placed in browser storage or page URLs.

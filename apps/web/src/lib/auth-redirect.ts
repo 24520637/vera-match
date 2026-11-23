@@ -10,7 +10,7 @@ export function safeNextPath(value: unknown): string {
     return "/account";
   try {
     const url = new URL(value, "https://vera.invalid");
-    return url.origin === "https://vera.invalid" && url.pathname === "/account"
+    return url.origin === "https://vera.invalid" && ["/account", "/staff-security"].includes(url.pathname)
       ? `${url.pathname}${url.search}${url.hash}`
       : "/account";
   } catch {
