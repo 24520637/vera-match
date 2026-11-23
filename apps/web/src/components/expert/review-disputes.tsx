@@ -91,7 +91,7 @@ export function ReviewDisputes({ close }: { close: () => void }) {
     }
   }
 
-  return <main className="container page-heading">
+  return <div className="container page-heading">
     <h1>Review disputes</h1>
     <Button variant="secondary" disabled={saving} onClick={close}>Back to review quality assurance</Button>
     {selected && <Button variant="secondary" disabled={saving} onClick={() => { setCurrent(undefined); setSelected(undefined); }}>Back to disputes</Button>}
@@ -140,5 +140,5 @@ export function ReviewDisputes({ close }: { close: () => void }) {
         <Button variant="secondary" disabled={saving || !!error || !resolution.trim()} onClick={() => void decide("REJECTED")}>Reject dispute</Button>
       </>}
     </section>}
-  </main>;
+  </div>;
 }

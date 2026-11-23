@@ -128,7 +128,7 @@ function QueueWorkspace({ openDisputes }: { openDisputes: () => void }) {
   const speech = review?.observations.filter(note => note.category === "SPEECH") ?? [];
   const missingEvidence = Object.values(claims).some(claim => !claim.observationId || !claim.context.trim());
 
-  return <main className="container page-heading">
+  return <div className="container page-heading">
     <h1>Review quality assurance</h1>
     <Button variant="secondary" disabled={saving} onClick={openDisputes}>Review disputes</Button>
     {loading && <p role="status">Loading reviews…</p>}
@@ -210,5 +210,5 @@ function QueueWorkspace({ openDisputes }: { openDisputes: () => void }) {
       <Button variant="secondary" onClick={() => setConfirming(false)}>Keep reviewing</Button>
       <Button onClick={() => void decide("approve")}>Confirm approval</Button>
     </Modal>
-  </main>;
+  </div>;
 }
