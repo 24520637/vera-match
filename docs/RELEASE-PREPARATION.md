@@ -4,7 +4,7 @@ Status: code preparation only. No hosting, DNS, certificates, public API base UR
 
 ## Scope and dependencies
 
-This branch reuses Phuc's OpenAPI foundation from PR #41; it does not modify or push his branch. Review the combined OpenAPI changes together. Huong adds 27 operations for Auth, Safety, private Video, Closure and Health to the 33 existing Phuc-owned operations: The signed policy-discovery endpoint adds one further operation: 61 actual operations total. Regression tests compare registered routes, security requirements, request schemas, status codes, report enums and selected actual validators.
+The generated OpenAPI contract covers 69 operations across 61 paths, including API discovery, account flows, staff MFA, consent, private video, review, safety and matching. Regression tests compare the generated operations with the registered routes and check summaries, descriptions, security requirements, request schemas, status codes, report enums and selected validators.
 
 No authentication, consent, assignment, cleanup or release gate is relaxed. No legal policy is published. No local database migration or deployment is performed.
 
@@ -15,7 +15,7 @@ Replace YOUR_DOMAIN only when the domain and hosting have been selected. These a
 | Deliverable | Intended path |
 | --- | --- |
 | Live website | https://YOUR_DOMAIN/ |
-| Public API base URL | https://YOUR_DOMAIN/api |
+| Public API base URL and discovery response | https://YOUR_DOMAIN/api |
 | Online Swagger documentation | https://YOUR_DOMAIN/api/docs |
 | OpenAPI JSON | https://YOUR_DOMAIN/api/docs-json |
 | OpenAPI YAML | https://YOUR_DOMAIN/api/docs-yaml |
@@ -63,7 +63,7 @@ After DNS/TLS and both services are live:
 
     npm run release:preflight -- --url https://YOUR_DOMAIN
 
-This performs only public GET checks: web 200, API liveness/readiness 200, Swagger UI/spec 200 with expected routes, and protected Auth/Video 401 without a cookie. It follows no redirects and sends no credentials or writes. It is a smoke check, not full security sign-off. Then run the applicable auth/cookie/proxy, private-media, SMTP and release-candidate browser checks against approved synthetic deployment data. Confirm no public anonymous bucket listing/GET and no publicly exposed administrative ports.
+The smoke check verifies the website, API discovery/liveness/readiness JSON, Swagger UI and its read-only configuration, and expected OpenAPI routes. Protected Auth and Video routes must return 401 without a cookie. It sends only GET requests, follows no redirects, and sends no credentials. Run the applicable auth/cookie/proxy, private-media, SMTP and release-candidate browser checks against approved synthetic deployment data. Confirm no public anonymous bucket listing/GET and no publicly exposed administrative ports.
 
 ## Outstanding work before real-user release
 

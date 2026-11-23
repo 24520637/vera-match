@@ -1,3 +1,4 @@
+import type { OpenAPIObject } from "@nestjs/swagger";
 import { Test } from "@nestjs/testing";
 import { parseEnvironment } from "../config/environment";
 import { EnvironmentService } from "../config/environment.service";
@@ -62,7 +63,16 @@ describe("Swagger exposure", () => {
       expect(results).toEqual(swaggerPaths.flatMap(path =>
         ["GET", "HEAD"].map(method => [method, path, expectedStatus]),
       ));
+      const root = await fetch(base + "/api");
+      expect(root.status).toBe(200);
+      expect(await root.json()).toEqual({
+        service: "vera-api",
+        health: "/api/health",
+        readiness: "/api/health/ready",
+      });
       if (nodeEnv === "production" && mode === "public") {
+        const spec = await (await fetch(base + "/api/docs-json")).json() as OpenAPIObject;
+        expect(spec.paths["/api"]?.get?.responses["200"]).toBeDefined();
         const init = await (await fetch(base + "/api/docs/swagger-ui-init.js")).text();
         expect(init).toMatch(/"persistAuthorization":\s*false/);
         expect(init).toMatch(/"supportedSubmitMethods":\s*\[\]/);

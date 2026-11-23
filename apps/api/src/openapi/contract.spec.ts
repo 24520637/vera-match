@@ -144,6 +144,20 @@ describe("Phúc's generated OpenAPI contract", () => {
     expect(secured.sort()).toEqual([...routes.map(([method, path]) => method + " " + path), ...huongContracts.filter(c => c.security).map(c => c.method + " " + c.path)].sort());
   });
 
+  it("describes every operation and represents an empty JSON body without an empty required list", () => {
+    for (const [path, item] of Object.entries(document.paths)) {
+      for (const method of ["get", "post", "patch", "delete", "put"] as const) {
+        const entry = item[method];
+        if (!entry) continue;
+        expect([method, path, entry.summary?.trim(), entry.description?.trim()]).toEqual([
+          method, path, expect.stringMatching(/\S/), expect.stringMatching(/\S/),
+        ]);
+        const schema = (entry.requestBody as RequestBodyObject | undefined)?.content["application/json"]?.schema as SchemaObject | undefined;
+        if (schema?.required) expect(schema.required.length).toBeGreaterThan(0);
+      }
+    }
+  });
+
   it("serves the existing Swagger UI and YAML without requiring a session", async () => {
     const [ui, yaml] = await Promise.all([
       fetch(base + "/api/docs"),
