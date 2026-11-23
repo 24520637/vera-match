@@ -165,7 +165,11 @@ export const huongContracts: Contract[] = [
     "summary": "Revoke the current session and clear its cookie",
     "status": 204,
     "security": false,
-    "description": "Idempotent. Does not require a valid existing session."
+    "description": "Idempotent. Does not require a valid existing session.",
+    "body": {
+      "type": "object",
+      "additionalProperties": false
+    }
   },
   {
     "method": "post",
@@ -173,7 +177,11 @@ export const huongContracts: Contract[] = [
     "summary": "Revoke all sessions for the authenticated account",
     "status": 204,
     "security": true,
-    "description": ""
+    "description": "",
+    "body": {
+      "type": "object",
+      "additionalProperties": false
+    }
   },
   {
     "method": "post",
@@ -711,7 +719,8 @@ export const huongContracts: Contract[] = [
                 "type": "string"
               },
               "reasonCode": {
-                "type": "string", "nullable": true
+                "type": "string",
+                "nullable": true
               },
               "status": {
                 "type": "string"
@@ -763,7 +772,8 @@ export const huongContracts: Contract[] = [
               "type": "string"
             },
             "reason": {
-              "type": "string", "nullable": true
+              "type": "string",
+              "nullable": true
             },
             "details": {
               "type": "string"
@@ -1092,8 +1102,7 @@ export function addHuongContracts(document: OpenAPIObject) {
     if (contract.path === "/api/moderation/reports" && contract.method === "get") parameters.push({ name: "status", in: "query" as const, required: false, schema: { type: "string", enum: ["OPEN", "IN_REVIEW", "RESOLVED", "DISMISSED"] } });
     if (contract.method !== "get") parameters.push({ name: "Origin", in: "header" as const, required: true, schema: { type: "string" as const, format: "uri" } });
     operation.parameters = parameters;
-    if (contract.path === "/api/auth/logout" || contract.path === "/api/auth/logout-all") operation.requestBody = { required: true, content: { "application/json": { schema: { type: "object", additionalProperties: false } } } };
-    for (const status of [400, 403, 429, 503, ...(contract.security || contract.path === "/api/auth/login" ? [401] : []), ...(contract.body ? [413, 415] : []), ...(/videos|moderation/.test(contract.path) ? [404, 409] : []), ...(contract.path === "/api/account-closure" ? [409] : [])]) {
+    for (const status of [400, 403, 429, 503, ...(contract.security || contract.path === "/api/auth/login" ? [401] : []), ...(contract.body ? [413, 415] : []), ...(/videos|moderation/.test(contract.path) ? [404, 409] : []), ...(contract.path === "/api/account-closure" ? [409] : []), ...(contract.path === "/api/blocks" ? [404] : [])]) {
       operation.responses[status] = { description: ({ 400: "Invalid request, expired token or failed reauthentication.", 401: "No active verified session.", 403: "Origin, role, ownership or assurance denied.", 404: "Resource unavailable to the caller.", 409: "State, generation or revision conflict.", 413: "Request body too large.", 415: "Unsupported JSON content type.", 429: "Quota exceeded. Manual retry only after Retry-After seconds.", 503: "Required service or release gate unavailable." } as Record<number,string>)[status], content: { "application/json": { schema: errorSchema } }, ...(status === 429 ? { headers: { "Retry-After": { description: "Whole seconds until retry is permitted.", schema: { type: "integer", minimum: 1 } } } } : {}) };
     }
   }
