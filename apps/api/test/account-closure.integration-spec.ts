@@ -190,7 +190,14 @@ describe("C065 real account restriction and out-of-band status", () => {
     (SELECT count(*)::int FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE NOT t.tgisinternal AND n.nspname=current_schema()) AS triggers,
     (SELECT count(*)::int FROM "_prisma_migrations" WHERE finished_at IS NOT NULL) AS migrations`;
     console.info(JSON.stringify({code:"C065_DISPOSABLE_CATALOG",...rows[0]}));
-    expect(rows[0]).toEqual({foreignKeys:54,triggers:76,migrations:24});
+    // Keep the exact catalog gate while accounting for reviewed additive staff migrations.
+    const applied=await h.db.client.$queryRaw<{name:string}[]>`SELECT migration_name AS name FROM "_prisma_migrations" WHERE finished_at IS NOT NULL`;
+    const staffAdditions=[
+      {name:"20261124010000_staff_trust",foreignKeys:2,triggers:6},
+      {name:"20261124020000_staff_mfa",foreignKeys:8,triggers:9},
+    ].filter(m=>applied.some(row=>row.name===m.name));
+    const expected=staffAdditions.reduce((catalog,m)=>({foreignKeys:catalog.foreignKeys+m.foreignKeys,triggers:catalog.triggers+m.triggers,migrations:catalog.migrations+1}),{foreignKeys:54,triggers:76,migrations:24});
+    expect(rows[0]).toEqual(expected);
   });
   test("ordinary production release remains fail-closed without a feature-flag override",async()=>{
     const env=h.app.get(EnvironmentService),original=env.values.nodeEnv;
