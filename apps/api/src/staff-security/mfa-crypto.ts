@@ -49,6 +49,7 @@ export class MfaSecretBox {
     if (!/^[a-zA-Z0-9_-]{1,64}$/.test(activeKeyId) || !keys.has(activeKeyId) || keys.size > 8 || keys.size < 1 || [...keys].some(([id, key]) => !/^[a-zA-Z0-9_-]{1,64}$/.test(id) || key.length !== 32)) throw new Error("MFA_KEYRING_INVALID");
     this.keys = new Map([...keys].map(([id, key]) => [id, Buffer.from(key)]));
   }
+  currentKeyId(): string { return this.activeKeyId; }
   seal(secret: Buffer, binding: string): string {
     if (secret.length !== 20 || !binding || binding.length > 512) throw new Error("MFA_SECRET_INVALID");
     const nonce = randomBytes(12);
