@@ -6,6 +6,7 @@ export default defineConfig({
   workers: 1,
   retries: 0,
   reporter: [["list"], ["html", { open: "never" }]],
+  globalSetup: process.platform === "win32" ? "./tests/video-windows-setup.ts" : undefined,
   globalTeardown: "./tests/video-global-teardown.ts",
   // Never record signed URLs/cookies in traces or recordings.
   use: {
@@ -35,7 +36,7 @@ export default defineConfig({
       },
     },
   ],
-  webServer: [
+  webServer: process.platform === "win32" ? undefined : [
     {
       command: "node ../../scripts/video-e2e-server.cjs",
       url: "http://localhost:4100/api/health/ready",

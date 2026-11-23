@@ -2,7 +2,7 @@
 
 An adult matchmaking platform based on member profiles, questionnaires, reciprocal preferences, and consent-controlled expert review of private videos.
 
-**Current implementation:** Next.js landing page and shared UI design-system preview at `/design-system`; NestJS typed configuration, Prisma lifecycle/readiness, Argon2id helper and database-backed session/role guards; Prisma schema and initial migration; CI checks. The preview uses page-local examples. Registration, email activation, login, persistent sessions and protected account access are implemented; private video review and matching remain planned. See [email authentication](docs/EMAIL-AUTH-SESSIONS.md) for operation and limits. See [T01 foundation](docs/AUTH-FOUNDATION.md) for verified scope and limitations.
+**Current implementation:** Email registration and activation, password recovery, member profiles and consent, private video, assignment-scoped expert review, independent QA, owner-controlled claims, reciprocal matching and member safety. The shared design-system preview is at `/design-system`. The joined demo uses synthetic adults and recordings in an isolated test environment. [Demo runbook](docs/T20-DEMO-RUNBOOK.md) · [Release limitations](docs/RELEASE-NOTES-v0.1.0.md)
 
 The browser uses same-origin `/api` via the Next.js proxy. Configure server-only `API_INTERNAL_ORIGIN` (default `http://localhost:4000`) consistently at web build and runtime; SSR uses the same validated origin with explicit cookie forwarding.
 
@@ -13,7 +13,17 @@ The browser uses same-origin `/api` via the Next.js proxy. Configure server-only
 - PostgreSQL 18 and Prisma 6 (`apps/api/prisma`)
 - Private S3-compatible media storage; MinIO and Mailpit for local development
 
-## Local setup
+## Run the internal demo
+
+Start with the [T20 demo runbook](docs/T20-DEMO-RUNBOOK.md). It walks through a clean checkout, builds, dedicated PostgreSQL migrations, Mailpit, MinIO, FFmpeg and Chromium, and explains how to verify cleanup on Windows. From the repository root, after fixture setup:
+
+```powershell
+node scripts/run-video-e2e.cjs --grep "T18 demo"
+```
+
+The filter matches the existing joined test title and runs both Chromium projects. See the [C102 verification record](docs/T20-C102-RESULTS.md) for the two observed runs.
+
+## Local development setup
 
 Install Git, Node.js 24 (see `.nvmrc`), npm, and native PostgreSQL 18 listening on `localhost:5433`. T01 uses no Docker. In PowerShell:
 
@@ -52,7 +62,7 @@ npm run dev:web
 | Mailpit                                | http://localhost:8025                  |
 | MinIO console                          | http://localhost:9001                  |
 
-Mailpit must run as a separately installed native process for registration, email activation and integration/browser auth tests. MinIO remains a separate native service for future media features. Create a private `vera-private` bucket before implementing uploads. Use synthetic test data until the relevant security and privacy controls work.
+Run Mailpit for registration, email activation and integration/browser auth tests. For regular local video development, configure a private MinIO bucket using [the storage setup instructions](docs/PRIVATE-VIDEO.md#local-native-storage). The T20 runner creates and cleans up its own fixture bucket. Use synthetic test data locally.
 
 ## Development workflow
 
