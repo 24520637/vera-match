@@ -182,7 +182,7 @@ function Workspace({ assignmentId }: { assignmentId: string }) {
     edit(current => ({ ...current, notes: current.notes.map((note, i) => i === index ? { ...note, ...update } : note) }));
   }
 
-  return <main className="container page-heading">
+  return <div className="container page-heading">
     <h1>Expert review workspace</h1>
     {error && <Notice tone="error" title="Review request failed">{error}</Notice>}
     <Button disabled={busy || playbackBusy} onClick={() => { setData(undefined); setForm(undefined); reload(n => n + 1); }}>
@@ -250,5 +250,5 @@ function Workspace({ assignmentId }: { assignmentId: string }) {
       <Button onClick={() => void submit()}>Confirm submission</Button>
     </Modal>
     {busy && !data && <p role="status">Loading review…</p>}
-  </main>;
+  </div>;
 }

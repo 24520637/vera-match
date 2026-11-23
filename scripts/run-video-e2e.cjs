@@ -14,6 +14,7 @@ const env = {
   NODE_ENV: "production",
   VERA_VIDEO_E2E_RUN_ID: randomUUID(),
   API_INTERNAL_ORIGIN: "http://localhost:4100",
+  MAILPIT_BASE_URL: "http://127.0.0.1:8025",
 };
 for (const [file, args, cwd] of [
   ["node_modules/@nestjs/cli/bin/nest.js", ["build"], "apps/api"],

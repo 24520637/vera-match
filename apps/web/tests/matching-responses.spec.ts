@@ -32,6 +32,40 @@ test("continues discovery from an empty page and stops at the end", async ({ pag
   await expect(next).toHaveCount(0);
 });
 
+for (const variant of [
+  { button: "Accept", choice: "ACCEPT", historyLabel: "Accepted", receipt: { choice: "ACCEPT", mutual: "false" } },
+  { button: "Decline", choice: "DECLINE", historyLabel: "Declined", receipt: { choice: "DECLINE", mutual: true } },
+] as const) {
+  test(`a malformed ${variant.choice} receipt requires checking history`, async ({ page }) => {
+    await page.route("**/api/auth/me", route => route.fulfill({
+      json: { id: "synthetic-member", role: "MEMBER", email: "member@example.invalid", displayName: null },
+    }));
+    await page.route("**/api/matches/recommendations", route => route.fulfill({ json: valid.recommendations }));
+    let writes = 0;
+    await page.route("**/api/matches/decisions", route => route.fulfill({
+      json: {
+        decisions: writes === 0 ? [] : [{ ...valid.decisions.decisions[0], choice: variant.choice, mutual: false }],
+        nextCursor: null,
+      },
+    }));
+    await page.route("**/api/matches/*/decision", route => {
+      writes++;
+      expect(route.request().postDataJSON()).toEqual({ choice: variant.choice });
+      return route.fulfill({ json: variant.receipt });
+    });
+
+    await page.goto("http://127.0.0.1:3101/matches");
+    const history = page.getByRole("region", { name: "Decision history" });
+    await expect(history.getByText("No decisions on this page")).toBeVisible();
+    await page.getByRole("button", { name: variant.button, exact: true }).press("Enter");
+    await expect(page.getByRole("alert").filter({ hasText: "Your choice could not be confirmed. Check decision history" }))
+      .toBeVisible();
+    await expect(page.getByText(/^(Acceptance|Decline) saved\.$/)).toHaveCount(0);
+    await expect(history).toContainText(variant.historyLabel);
+    expect(writes).toBe(1);
+  });
+}
+
 for (const endpoint of ["recommendations", "decisions"] as const) {
   for (const variant of ["null", "invalid item"] as const) {
     test(`${endpoint} rejects a successful ${variant} response and supports retry`, async ({ page }) => {
