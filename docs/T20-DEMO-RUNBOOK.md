@@ -107,13 +107,17 @@ $mailpit.Id
 $minio.Id
 ```
 
-Wait for both health endpoints to return HTTP 200. Check that the SMTP and Mailpit HTTP ports belong to `$mailpit.Id`, the MinIO ports belong to `$minio.Id`, and all fixture service listeners are on loopback. The web and API ports should still be free.
+From the repository root, run the tracked Windows readiness helper with the PIDs returned by `Start-Process`. It requires HTTP 200 from the local health endpoint and both fixture listeners on loopback under the supplied PID. The MinIO API on port 9000 can report healthy before the console binds to 9001. The helper waits for both listeners, rejects a different PID or a non-loopback bind, and times out with the last observed listeners. Ports 3100 and 4100 should still be free. [Readiness helper](../scripts/wait-t20-fixture-listeners.cjs)
 
 ```powershell
-(Invoke-WebRequest -UseBasicParsing http://127.0.0.1:8025/livez -TimeoutSec 5).StatusCode
-(Invoke-WebRequest -UseBasicParsing http://127.0.0.1:9000/minio/health/live -TimeoutSec 5).StatusCode
+node scripts/wait-t20-fixture-listeners.cjs mailpit $mailpit.Id
+if ($LASTEXITCODE -ne 0) { throw 'Mailpit readiness check failed' }
+node scripts/wait-t20-fixture-listeners.cjs minio $minio.Id
+if ($LASTEXITCODE -ne 0) { throw 'MinIO readiness check failed' }
 netstat -ano | Select-String ':(5433|1025|8025|9000|9001|4100|3100)\s+.*LISTENING'
 ```
+
+If a readiness command fails, stop only the fixture processes started in this run using [the cleanup steps below](#4-verify-cleanup-and-handle-a-windows-teardown-stall) before retrying.
 
 ## 3. Run the guided journey
 
