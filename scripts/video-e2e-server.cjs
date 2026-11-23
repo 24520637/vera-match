@@ -71,7 +71,7 @@ async function cleanup() {
   )
     fs.unlinkSync(metadata);
 }
-(async () => {
+const startup = (async () => {
   if (!/^[a-f0-9-]{36}$/.test(runId || ""))
     throw Error("Test run identifier required");
   const url = new URL(process.env.DATABASE_URL || "");
@@ -223,8 +223,23 @@ async function cleanup() {
   console.error("Private video E2E setup failed; check local test services.");
   await cleanup().catch(() => undefined);
   process.exitCode = 1;
+  if (process.connected) process.disconnect();
 });
-for (const signal of ["SIGINT", "SIGTERM"])
-  process.once(signal, () => {
-    void cleanup().finally(() => process.exit(0));
-  });
+let stopping = false;
+async function stop() {
+  if (stopping) return;
+  stopping = true;
+  await startup;
+  try {
+    if (!process.exitCode) await cleanup();
+  } catch {
+    console.error("Private video E2E cleanup failed; check the owned runtime fixture.");
+    process.exitCode = 1;
+  }
+  process.exit(process.exitCode ?? 0);
+}
+for (const signal of ["SIGINT", "SIGTERM"]) process.once(signal, stop);
+if (process.send) {
+  process.on("message", message => { if (message === "shutdown") void stop(); });
+  process.once("disconnect", stop);
+}
