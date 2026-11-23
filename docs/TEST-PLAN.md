@@ -685,3 +685,16 @@ The nine failures were in T01, which expects migrations in the configured
 schema. After deploying the 23 committed migrations to the disposable audit
 database, the complete T01 suite passed 11 of 11. All 578 integration cases
 passed across the audit runs.
+
+## T18 release preparation (C096–C098)
+
+- Run the review, claims and matching integration suites before triaging release defects.
+- The video browser runner now includes the joined T18 demo, which also needs
+  native Mailpit on loopback SMTP port 1025 and HTTP port 8025. Run
+  `node scripts/run-video-e2e.cjs --grep "T18 demo"` twice with clean local
+  PostgreSQL, Mailpit and MinIO fixtures. The tests exercise the same registered
+  member through video upload, independent QA, claim sharing, matching, block
+  and revocation.
+- See [T18 verification](T18-VERIFICATION.md) for the executed checks and fixture
+  cleanup. See [v0.1.0 release notes](RELEASE-NOTES-v0.1.0.md) for scope, blockers
+  and cross-review items.
