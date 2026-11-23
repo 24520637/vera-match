@@ -37,6 +37,7 @@ const draftResponse = {
   example: { draft: { id: "review-1", version: 1, summary: null, limitations: null, observations: [] }, durationMs: null },
 };
 const receiptFields = { id, version: reviewVersion, submittedAt: timestamp };
+const nullObject = { type: "object", nullable: true, enum: [null] };
 const expertErrors = {
   400: ["INVALID_REQUEST", "VALIDATION_FAILED"],
   403: ["ASSIGNMENT_ACCESS_DENIED", "CONSENT_REQUIRED", "CONSENT_GENERATION_WITHDRAWN"],
@@ -55,7 +56,7 @@ export const ApiReadDraft = () => OwnedOperation({
   response: {
     oneOf: [
       object({ draft: nullable(draft), durationMs }),
-      object({ draft: { type: "object", nullable: true, enum: [null] },
+      object({ draft: nullObject,
         submission: object({ ...receiptFields, status: enumeration("SUBMITTED", "APPROVED") }),
         durationMs: { type: "integer", nullable: true, enum: [null] } }),
     ],
@@ -169,6 +170,8 @@ const claim = {
 const feedbackTarget = enumeration("TRANSCRIPT", "CONTEXT");
 const feedback = object({ target: feedbackTarget, note: string, revision: { type: "integer", minimum: 1 }, updatedAt: timestamp });
 const disputeResponse = object({ dispute });
+const disputeReport = object({ version: reviewVersion, summary: string, limitations: string, approvedAt: timestamp });
+const disputeClaim = object({ statement: string, evidence });
 
 export const ApiListQaDisputes = () => OwnedOperation({
   ...reviewRead, summary: "List open disputes in my QA scope", role: "MODERATOR",
@@ -183,10 +186,12 @@ export const ApiReadQaDispute = () => OwnedOperation({
   ...reviewRead, summary: "Read a private dispute for QA", role: "MODERATOR",
   description: qaPolicy + " Returns the dispute and either its approved report context or its linked claim evidence. The other context field is null.",
   path: path("Dispute identifier."),
-  response: object({ dispute, reviewId: id,
-    report: nullable(object({ version: reviewVersion, summary: string, limitations: string, approvedAt: timestamp })),
-    claim: nullable(object({ statement: string, evidence })),
-  }),
+  response: {
+    oneOf: [
+      object({ dispute, reviewId: id, report: disputeReport, claim: nullObject }),
+      object({ dispute, reviewId: id, report: nullObject, claim: disputeClaim }),
+    ],
+  },
   errors: qaErrors,
 });
 

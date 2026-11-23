@@ -163,6 +163,31 @@ describe("Phúc's generated OpenAPI contract", () => {
     expect(await response.json()).toMatchObject({ code: "UNAUTHENTICATED" });
   });
 
+  it.each([
+    { method: "patch", path: "/api/profile/me", status: 400, contentType: "application/json", body: "{" },
+    { method: "patch", path: "/api/profile/me", status: 413, contentType: "application/json",
+      body: JSON.stringify({ bio: "x".repeat(110_000) }) },
+    { method: "patch", path: "/api/profile/me", status: 415, contentType: "application/json; charset=iso-8859-1", body: "{}" },
+    { method: "get", path: "/api/qa/reviews/{id}", status: 400, requestPath: "/api/qa/reviews/%FF" },
+  ] as const)("matches the framework $status response for $method $path", async (testCase) => {
+    const { method, path, status } = testCase;
+    const result = await fetch(base + (testCase.requestPath ?? path), {
+      method: method.toUpperCase(),
+      ...(testCase.method === "patch" ? { headers: { "Content-Type": testCase.contentType }, body: testCase.body } : {}),
+    });
+    expect(result.status).toBe(status);
+    const payload = await result.json() as Record<string, unknown>;
+    const schema = response(method, path, status).content?.["application/json"].schema as SchemaObject;
+    const framework = (schema.oneOf ?? [schema]).find(candidate =>
+      "properties" in candidate && "statusCode" in (candidate.properties ?? {}),
+    ) as SchemaObject | undefined;
+    const expectedFields = status === 400 ? ["error", "message", "statusCode"] : ["message", "statusCode"];
+    expect(framework?.required?.slice().sort()).toEqual(expectedFields);
+    expect(Object.keys(payload).sort()).toEqual(expectedFields);
+    expect(payload).toMatchObject({ statusCode: status, message: expect.any(String) });
+    if (status === 400) expect(payload.error).toBe("Bad Request");
+  });
+
   it.each(routes)("documents %s %s", (...[method, path, status, validate]) => {
     const found = operation(method, path);
     expect(found.security).toEqual([{ sessionCookie: [] }]);
@@ -209,6 +234,12 @@ describe("Phúc's generated OpenAPI contract", () => {
     expect(operation("patch", "/api/consents/me").parameters).toContainEqual(
       expect.objectContaining({ name: "Idempotency-Key", required: true }),
     );
+    expect(operation("get", "/api/expert-admin/assignments").parameters).toContainEqual(
+      expect.objectContaining({ name: "Origin", in: "header", required: false }),
+    );
+    expect(operation("get", "/api/expert-admin/assignments").parameters).toContainEqual(
+      expect.objectContaining({ name: "Sec-Fetch-Site", in: "header", required: false }),
+    );
     expect(response("patch", "/api/consents/me", 200).headers).toHaveProperty("Idempotency-Replayed");
     expect(response("post", "/api/expert/reviews/{id}/observations", 422).description).toContain("INVALID_OBSERVATION_TIMECODE");
     expect(response("post", "/api/expert/reviews/{id}/observations", 503).description).toContain("REVIEW_DURATION_UNAVAILABLE");
@@ -227,6 +258,17 @@ describe("Phúc's generated OpenAPI contract", () => {
     expect(schema("get", "/api/expert/assignments/{id}/draft", 200).oneOf).toEqual([
       expect.objectContaining({ required: ["draft", "durationMs"] }),
       expect.objectContaining({ required: ["draft", "submission", "durationMs"] }),
+    ]);
+    const nullObject = { type: "object", nullable: true, enum: [null] };
+    expect(schema("get", "/api/qa/reviews/disputes/{id}", 200).oneOf).toEqual([
+      expect.objectContaining({ properties: expect.objectContaining({
+        report: expect.objectContaining({ type: "object", required: ["version", "summary", "limitations", "approvedAt"] }),
+        claim: nullObject,
+      }) }),
+      expect.objectContaining({ properties: expect.objectContaining({
+        report: nullObject,
+        claim: expect.objectContaining({ type: "object", required: ["statement", "evidence"] }),
+      }) }),
     ]);
     expect(schema("post", "/api/expert/assignments/{assignmentId}/playback", 200).required)
       .toEqual(["id", "url", "expiresAt"]);

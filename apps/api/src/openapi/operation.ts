@@ -35,7 +35,7 @@ const statuses = {
   404: "Resource is missing or unavailable to the caller.",
   409: "Current revision, state, or idempotency conflict.",
   413: "Request exceeds the JSON parser body size limit.",
-  415: "Send application/json.",
+  415: "Send application/json with a supported charset and content encoding.",
   422: "Review content does not meet submission or timecode requirements.",
   429: "Request quota exceeded.",
   503: "A required service, provider, or safe processing capacity is unavailable.",
@@ -60,7 +60,11 @@ type Options = {
   errors: Partial<Record<Status, ErrorCase[]>>;
 };
 
-const framework = object({ statusCode: { type: "integer" }, message: string, error: string }, ["statusCode", "message"]);
+function parserError(status: 400 | 413 | 415): SchemaObject {
+  const properties = { statusCode: { type: "integer", enum: [status] }, message: string };
+  return object(status === 400 ? { ...properties, error: enumeration("Bad Request") } : properties);
+}
+
 function businessError(entry: ErrorCase): SchemaObject {
   const code = typeof entry === "string" ? entry : entry.code;
   const properties: Record<string, SchemaObject> = { code: enumeration(code), message: string };
@@ -112,7 +116,9 @@ export function OwnedOperation(options: Options) {
     ...(options.query ?? []).map(param => ApiQuery({ ...param, required: param.required ?? false })),
     ...(options.origin ? [ApiHeader({
       name: "Origin", required: options.origin === "required", schema: { type: "string", format: "uri" },
-      description: "Must match the configured browser origin when supplied.",
+      description: options.origin === "required"
+        ? "Required. Must match the configured browser origin."
+        : "Must match the configured browser origin when supplied.",
     })] : []),
     ...(options.rejectCrossSite ? [ApiHeader({
       name: "Sec-Fetch-Site", required: false, schema: string,
@@ -134,7 +140,9 @@ export function OwnedOperation(options: Options) {
     ...Object.entries(errors).map(([statusKey, cases]) => {
       const status = Number(statusKey) as Status;
       const schemas = cases.map(businessError);
-      if (status === 413 || (status === 400 && options.body)) schemas.push(framework);
+      if (status === 413 || status === 415 || (status === 400 && (options.body || options.path))) {
+        schemas.push(parserError(status));
+      }
       const codes = cases.map(entry => typeof entry === "string" ? entry : entry.code);
       return ApiResponse({
         status,
