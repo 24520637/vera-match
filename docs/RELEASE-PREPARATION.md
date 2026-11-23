@@ -80,3 +80,9 @@ This performs only public GET checks: web 200, API liveness/readiness 200, Swagg
 Prepare and test independent code while these gates remain explicit. Do not advertise the full lifecycle or production recovery as complete.
 
 References: [NestJS OpenAPI](https://docs.nestjs.com/openapi/introduction), [Next.js self-hosting](https://nextjs.org/docs/app/guides/self-hosting), [nginx proxy headers](https://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_set_header), docs/PRIVACY-LIFECYCLE-DECISIONS.md, docs/DEPLOYMENT.md and docs/C095-RESTRICTION-RECOVERY-EVIDENCE.md.
+
+## Verification recorded during code preparation
+
+On 2026-11-23: local Prisma validate/generate, API/web production builds, TypeScript/lint and the full native-decoder unit suite PASS (413 tests). The release-tooling suite PASS (4 tests). The final public-docs test also checks serialized production Swagger settings for disabled submission and disabled authorization persistence. An initial combined-contract assertion expected only Phuc's 33 secured routes; it was expanded to include the actual protected Huong routes, preserving exact security-set comparison. A consumed-body cleanup error in the smoke helper was reproduced and corrected; the final four tooling tests pass.
+
+NOT RUN: systemd/nginx configuration on an actual Linux server, DNS/TLS provisioning, public live URL checks, real provider SMTP, production MFA/policy approval and lifecycle-safe recovery. Those cannot be certified by Windows unit tests or template files. Full PostgreSQL/native MinIO/browser/security integration is delegated to the existing unchanged CI suites on this PR and must be recorded at the final head before merge.
