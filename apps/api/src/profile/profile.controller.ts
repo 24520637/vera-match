@@ -1,4 +1,5 @@
 import { Body, Controller, Get, Header, Patch, Req, UseGuards } from "@nestjs/common";
+import { ApiTags } from "@nestjs/swagger";
 import type { Request } from "express";
 import { UserRole } from "@prisma/client";
 import { CurrentUser } from "../auth/current-user.decorator";
@@ -8,7 +9,9 @@ import { SessionAuthGuard } from "../auth/session-auth.guard";
 import { ProfileRequestGuard } from "./profile-request.guard";
 import { ProfileService } from "./profile.service";
 import { invalidRequest } from "./profile.validation";
+import { ApiReadProfile, ApiUpdateProfile } from "../openapi/member-resources";
 
+@ApiTags("Profile")
 @Controller("profile")
 @UseGuards(SessionAuthGuard, RolesGuard, ProfileRequestGuard)
 @Roles(UserRole.MEMBER)
@@ -18,6 +21,7 @@ export class ProfileController {
     if (Object.keys(request.query).length) invalidRequest([{ field: "_form", messages: ["Query parameters are not supported."] }]);
   }
   @Get("me")
+  @ApiReadProfile()
   @Header("Cache-Control", "private, no-store")
   @Header("Vary", "Cookie")
   get(@CurrentUser() user: SafeUser, @Req() request: Request) {
@@ -25,6 +29,7 @@ export class ProfileController {
     return this.profiles.get(user.id);
   }
   @Patch("me")
+  @ApiUpdateProfile()
   @Header("Cache-Control", "private, no-store")
   @Header("Vary", "Cookie")
   patch(@CurrentUser() user: SafeUser, @Body() input: unknown, @Req() request: Request) {

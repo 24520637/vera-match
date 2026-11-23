@@ -1,0 +1,26 @@
+[Unit]
+Description=VERA Match web and same-origin API proxy
+After=network-online.target vera-api.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=vera
+Group=vera
+WorkingDirectory=/srv/vera-match
+Environment=NODE_ENV=production
+EnvironmentFile=/etc/vera-match/web.env
+ExecStart=/usr/bin/node /srv/vera-match/node_modules/next/dist/bin/next start apps/web --hostname 127.0.0.1 --port 3000
+Restart=on-failure
+RestartSec=5
+KillSignal=SIGTERM
+TimeoutStopSec=45
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/srv/vera-match/apps/web/.next/cache
+
+[Install]
+WantedBy=multi-user.target
