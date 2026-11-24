@@ -131,17 +131,17 @@ success audit. This step defines no new denial-audit taxonomy.
 
 ## Production and integration boundaries
 
-There is no trusted staff-MFA implementation. C033 is therefore unavailable in
-development/production (503 ASSIGNMENT_ASSURANCE_UNAVAILABLE), and even in test
-mode requires both policy evidences to be explicitly testOnly. NODE_ENV=test alone,
-client flags, ordinary real-policy rows or fabricated qualification snapshots do
-not enable real-data assignment. Default qualification registries/evidence sources
-remain empty; test providers exist only in isolated fixtures.
+The C033 creation gate denies requests outside tests
+(`503 ASSIGNMENT_ASSURANCE_UNAVAILABLE`). In tests, both consent policy records
+must be explicitly test-only. Test mode, client flags, ordinary policy rows and
+fabricated qualification snapshots cannot enable real-data assignment. The
+[signed qualification source](EXPERT-QUALIFICATION-SOURCE.md) supports
+operator-installed evidence and fails closed when it is unavailable. Installing
+it leaves the creation gate in place.
 
-This is not a new MFA mechanism. A separately reviewed real assurance integration,
-approved qualification/consent content and evidence sources are required before
-enabling production. Capacity/availability and broader conflict-of-interest rules
-are not implemented or represented as approved. C034/C050 must recheck owner
+Production assignment creation would require review of the assurance and
+consent checks and a change to the creation gate. Capacity/availability and
+broader conflict-of-interest rules remain outside this contract. C034/C050 recheck owner
 consent, generation, video state, expert eligibility and real MFA on every access.
 
 C051 implements source-bound cancellation using revision CAS and exact immutable

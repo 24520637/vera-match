@@ -34,7 +34,7 @@ QA return and resubmission, and an approved review receipt.
 
 **C033 implementation:** [Assignment API](ASSIGNMENT-API.md) defines
 `POST /expert-admin/assignments`, review-consent generation binding and durable
-idempotency. It is synthetic-test-only until real staff assurance is integrated.
+idempotency. Its assignment creation gate limits it to synthetic tests.
 
 **C032 implementation:** The moderator-only expert approval endpoint and its
 fail-closed evidence-source boundary are documented in
@@ -108,7 +108,7 @@ not changes to current auth.
 | POST      | `/videos/:id/playback`             | Owner                   | Owner-only playback; expert access uses the assignment-bound route below                                  |
 | DELETE    | `/videos/:id`                      | Owner                   | Revoke owner access, atomically cancel active assignments (C051), and enqueue cleanup                   |
 | POST      | `/expert-admin/assignments`        | Moderator               | C033: strict DTO, both consents, generation, qualification revision and Idempotency-Key; synthetic only    |
-| POST      | `/expert/assignments/:assignmentId/playback` | Expert | C034 assignment-bound playback; synthetic-only until trusted MFA and approved evidence integrations exist; see [contract](EXPERT-PLAYBACK-API.md) |
+| POST      | `/expert/assignments/:assignmentId/playback` | Expert | C034 assignment-bound playback, limited to synthetic tests by the assignment access gate. See [playback contract](EXPERT-PLAYBACK-API.md). |
 | GET       | `/expert/assignments/me`           | Expert                  | C035 own metadata only, server identity, assurance and cursor pagination; see [queue contract](ASSIGNMENT-QUEUES-API.md) |
 | GET       | `/expert-admin/assignments`        | Moderator               | C035 PA2 grant-filtered metadata/status/cursor reader; production assurance/provisioning gates remain; see [contract](ASSIGNMENT-QUEUES-API.md) |
 | GET       | `/expert-admin/assignments/candidate` | Moderator             | C035 known video/expert pair eligibility check; no public directory/search                               |

@@ -54,9 +54,10 @@ date plus TTL. Bucket privacy protections remain unchanged.
 
 ExpertMfaSource returns no assurance by default; non-test environments are explicitly
 denied. Only isolated tests inject synthetic user/session-bound, expiring assurance
-with testOnly=true. Test mode also requires synthetic consent evidence. Qualification
-registry/source defaults remain empty. Production access needs separately reviewed
-MFA, approved evidence/policies and replacement of these synthetic-only gates.
+with testOnly=true. Test mode also requires synthetic consent evidence. The
+[signed qualification source](EXPERT-QUALIFICATION-SOURCE.md) supports
+operator-installed evidence and fails closed when it is unavailable. Installing
+qualification evidence leaves the independent test-only access gate in place.
 
 C034 denies new issuance on withdrawal/deletion even before C051 updates assignment
 status. It does not cancel, reassign, edit or submit work. C050 beyond this issuance
