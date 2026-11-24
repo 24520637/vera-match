@@ -80,7 +80,7 @@ export class ClosureStatusService implements OnModuleDestroy {
         const user = await tx.user.findUnique({ where: { id: closure.userId } });
         if (!current || current.consumedAt || current.expiresAt <= now || user?.status !== "CLOSED") throw invalid();
         await tx.closureStatusToken.updateMany({ where: { closureId: row.closureId, consumedAt: null }, data: { consumedAt: now } });
-        return { state: closure.state, revision: closure.revision, cleanupPending: true, retentionPending: true };
+        return { state: closure.state, revision: closure.revision, cleanupPending: closure.state === "RESTRICTED", retentionPending: true };
       });
     } catch (error) {
       if (error instanceof BadRequestException) throw error;

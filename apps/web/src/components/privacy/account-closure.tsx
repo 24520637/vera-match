@@ -14,6 +14,8 @@ import { PageHeader } from "../layout/page-layout";
 import { MemberSettingsNav } from "../member/member-settings";
 import "../member/member-settings.css";
 
+const reauthenticationError = "Check your current password and confirmation.";
+
 export function AccountClosure() {
   const { state } = useAuth();
   if (state.status !== "authenticated") return <Notice tone="warning" title="Session unavailable">Sign in again before changing account access.</Notice>;
@@ -33,6 +35,7 @@ function ClosureForm() {
   const [message, setMessage] = useState("");
   const [errors, setErrors] = useState<Record<string,string>>({});
   const key = useRef<string | null>(null), formRef = useRef<HTMLFormElement>(null);
+  const passwordRef = useRef<HTMLInputElement>(null);
   const retry = useRetryAfter();
   useEffect(() => {
     const controller = new AbortController();
@@ -48,6 +51,10 @@ function ClosureForm() {
     window.addEventListener("pagehide",clear);document.addEventListener("visibilitychange",hidden);
     return () => {window.removeEventListener("pagehide",clear);document.removeEventListener("visibilitychange",hidden);};
   },[]);
+  useEffect(() => {
+    // Modal cleanup restores trigger focus. Focus the enabled password field after it runs.
+    if (!confirming && !pending && errors["closure-password"] === reauthenticationError) passwordRef.current?.focus();
+  }, [confirming, pending, errors]);
   async function submit(event?:FormEvent<HTMLFormElement>, confirmed=false) {
     event?.preventDefault(); if(pending || uncertain || retry.seconds || availability !== "available")return;
     const form=event?.currentTarget ?? formRef.current;if(!form)return;
@@ -69,7 +76,7 @@ function ClosureForm() {
       form.reset();retry.fromError(error);
       if(error instanceof ApiError && error.code === "CLOSURE_RELEASE_PENDING") {setAvailability("unreleased");return;}
       if(error instanceof ApiError && error.status === 400) {
-        setErrors({"closure-password":"Check your current password and confirmation."});focusFirstError(form);
+        setErrors({"closure-password":reauthenticationError});
       } else if(error instanceof ApiError && error.status === 429) setMessage("Too many attempts. Wait, then choose whether to submit again.");
       else if(error instanceof ApiError && error.code === "STAFF_DEPROVISIONING_REQUIRED") setMessage("This account needs a separate staff access-removal review. No closure was confirmed.");
       else if(error instanceof ApiError && error.status === 403) setMessage("Your session or permissions could not confirm closure. Sign in again and review your choices before continuing.");
@@ -87,7 +94,7 @@ function ClosureForm() {
     </Notice>
     <Form ref={formRef} noValidate onSubmit={submit} aria-label="Close your account">
       <ErrorSummary errors={Object.entries(errors).map(([id,message])=>({id,message}))} />
-      <PasswordInput id="closure-password" name="password" label="Current password" autoComplete="current-password" required disabled={pending || uncertain} error={errors["closure-password"]} />
+      <PasswordInput ref={passwordRef} id="closure-password" name="password" label="Current password" autoComplete="current-password" required disabled={pending || uncertain} error={errors["closure-password"]} />
       <div translate="no"><Input id="closure-confirmation" name="confirmation" label="Confirm account closure" hint="Type CLOSE MY ACCOUNT to confirm." autoComplete="off" autoCapitalize="none" spellCheck={false} required disabled={pending || uncertain} error={errors["closure-confirmation"]} /></div>
       {message && <Notice tone="warning" title={uncertain ? "Check the outcome before continuing":"Closure was not confirmed"}>{message}</Notice>}
       <FormActions><Button variant="danger" type="submit" loading={pending} loadingLabel="Restricting account access…" disabled={uncertain || retry.seconds>0} aria-describedby={retry.seconds ? "closure-cooldown":undefined}>Close my account</Button></FormActions>

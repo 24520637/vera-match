@@ -1,5 +1,7 @@
 # Public demo and API documentation preparation
 
+Current production preparation adds an independent journal/database binding, receipt-driven closure minimization and operator-approved signed policy artifacts. See [the implementation and host procedure](PRODUCTION-RECOVERY-AND-CLOSURE.md) and [the current audit](DEPLOYMENT-AUDIT.md). The historical preparation notes below do not establish hosted production readiness; final retention/identity minimization, real provider/staff setup and deployment acceptance remain required.
+
 Status: code preparation only. No hosting, DNS, certificates, public API base URL or live website has been provisioned or verified by this change. A domain name alone does not provide an application server, database, SMTP or private object storage.
 
 ## Scope and dependencies
@@ -71,8 +73,8 @@ The smoke check verifies the website, API discovery/liveness/readiness JSON, Swa
 | --- | --- | --- |
 | Published consent | Authorized owner approves exact EN/VI policy content, privacy basis and production registry | No synthetic policies enabled |
 | Staff access | Install trusted staff authority and MFA keys, signed qualifications and approved consent. Verify scoped grants and the joined staff flow on staging. | Assignment and review access requires current staff assurance. QA grants bind the recipient's staff identity and enrollment epoch. |
-| Closure completion | Complete REVIEW_CLAIMS, MATCHING, SAFETY and RECOVERY reconciliation with the approved retention policy. | The MEDIA consumer acknowledges verified storage cleanup and cancellation receipts. Production closure remains gated. |
-| Recovery | Implement the independent restriction journal, authenticated checkpoint and old-backup replay before cutover. | `RECOVERY_MODE=isolated` keeps the API stopped on configured restore targets. Production restore and cutover remain blocked pending independent replay. |
+| Closure completion | Verify the signed-policy receipt worker on the host and finalize retention/purge and post-window identity minimization. | MEDIA keeps its provider proof; the new worker records the other four domain receipts and reaches RETENTION_PENDING only under an exact approval. No final erasure is claimed. |
+| Recovery | Provision the independently protected journal authority, explicitly bind a fresh database and rehearse the actual restored target before cutover. | Code now verifies signed checkpoints and conservatively quarantines missing restrictions. Pre-binding backups and isolated mode remain fenced. Hosted recovery acceptance is NOT RUN. |
 | Retention | Authorized privacy/legal owner approves retention/purge and holds; implement reviewed minimization without tampering with immutable evidence | No automatic hard deletion based on provisional periods |
 | Infrastructure | Hosting owner provisions domain/DNS, TLS, secrets, real SMTP, private storage, isolated DB, monitoring and access controls | Not provisioned by this PR |
 | Release sign-off | Review current T17/T18/T20 evidence and the final release candidate | CI or online docs alone are not production approval |

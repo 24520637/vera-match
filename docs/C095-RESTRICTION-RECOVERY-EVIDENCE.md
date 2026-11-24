@@ -1,5 +1,7 @@
 # C095 — Restriction recovery evidence and closed-fence procedure
 
+Current candidate update (2026-11-24): [independent recovery and closure preparation](PRODUCTION-RECOVERY-AND-CLOSURE.md) implements a separate authenticated journal, signed checkpoints, immutable database binding/receipts and conservative quarantine, with native pre/post-binding restore tests. Deployed journal-host recovery, final retention and cutover acceptance remain unverified. Everything below is the historical original C095 evidence/procedure; its “not implemented” statements describe that original PR rather than the new candidate.
+
 Status: **PARTIAL — rehearsal verified; lifecycle-safe production recovery BLOCKED**. Huong / T17. Stacked on C065 [PR #35](https://github.com/24520637/vera-match/pull/35), commit 3b03632; owner decisions C1–C6 are [PR #34](https://github.com/24520637/vera-match/pull/34). No production restriction journal, recovery fence service or erasure mechanism is implemented by this PR.
 
 ## Actual evidence

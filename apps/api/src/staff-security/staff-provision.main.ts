@@ -9,8 +9,12 @@ import { EnvironmentService } from "../config/environment.service";
 import { DatabaseModule } from "../database/database.module";
 import { StaffAuthority } from "./staff-authority";
 import { StaffIdentityService } from "./staff-identity.service";
+import { RecoveryModule } from "../recovery/recovery.module";
+import { RecoveryJournalService } from "../recovery/recovery-journal.service";
+import { ConsentModule } from "../consent/consent.module";
+import { ConsentService } from "../consent/consent.service";
 
-@Module({imports:[EnvironmentModule,DatabaseModule],providers:[StaffAuthority,StaffIdentityService]})
+@Module({imports:[EnvironmentModule,DatabaseModule,RecoveryModule,ConsentModule],providers:[StaffAuthority,StaffIdentityService]})
 class StaffProvisioningModule {}
 export function staffDatabaseFingerprint(databaseUrl: string): string {
   const url = new URL(databaseUrl);
@@ -24,6 +28,7 @@ export async function runStaffProvisioning(args: string[]) {
   const app = await NestFactory.createApplicationContext(StaffProvisioningModule,{logger:false,abortOnError:false});
   try {
     if (staffDatabaseFingerprint(app.get(EnvironmentService).values.databaseUrl) !== args[3]) throw new Error("STAFF_DATABASE_TARGET_MISMATCH");
+    await app.get(RecoveryJournalService).recoverBeforeListening(app.get(ConsentService));
     const result = await app.get(StaffIdentityService).apply(serialized);
     console.info(JSON.stringify({code:"STAFF_DIRECTIVE_APPLIED",...result}));
   } finally { await app.close(); }

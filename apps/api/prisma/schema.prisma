@@ -768,6 +768,7 @@ model AccountClosure {
   events AccountClosureEvent[]
   consumers AccountClosureConsumer[]
   tokens ClosureStatusToken[]
+  receipts ClosureDomainReceipt[]
 }
 model AccountClosureEvent {
   closureId String @db.Uuid
@@ -892,4 +893,37 @@ model StaffMfaEvent {
  deviceId String? @db.Uuid
  createdAt DateTime @default(now()) @db.Timestamptz(3)
  @@index([subjectId,createdAt])
+}
+
+// A receipt is committed with the source restriction or a recovery quarantine.
+// Its absence after restore requires replay from the independent journal.
+model RecoveryJournalReceipt {
+  journalId String @db.Uuid
+  sequence BigInt
+  entryId String @db.Uuid
+  entryHash String
+  disposition String
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  @@id([journalId, sequence])
+  @@unique([journalId, entryId])
+}
+
+model ClosureDomainReceipt {
+  closureId String @db.Uuid
+  closure AccountClosure @relation(fields: [closureId], references: [id], onDelete: Restrict)
+  name String
+  policyDigest String
+  policyEnvelope Json
+  evidence Json
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  @@id([closureId, name])
+}
+
+// Created only by the explicit new-database initialization command. An older
+// backup without this binding must never silently initialize itself on startup.
+model RecoveryDatabaseBinding {
+  journalId String @id @db.Uuid
+  baselineEntryId String @db.Uuid
+  baselineEntryHash String
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
 }

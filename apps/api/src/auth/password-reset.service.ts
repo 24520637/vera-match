@@ -3,6 +3,7 @@ import {
   Injectable,
   ServiceUnavailableException,
 } from "@nestjs/common";
+import { RecoveryJournalService } from "../recovery/recovery-journal.service";
 import { PrismaService } from "../database/prisma.service";
 import { PasswordService } from "./password.service";
 import { hashResetToken } from "./password-recovery.service";
@@ -13,6 +14,7 @@ export class PasswordResetService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly passwords: PasswordService,
+    private readonly journal?: RecoveryJournalService,
   ) {}
   async reset(input: ResetPasswordDto) {
     const invalid = () =>
@@ -46,6 +48,7 @@ export class PasswordResetService {
           data: { consumedAt: now },
         });
         if (consumed.count !== 1) throw invalid();
+        await this.journal?.record(tx, [user.id], "PASSWORD_RESET");
         await tx.user.update({
           where: { id: user.id },
           data: { passwordHash },

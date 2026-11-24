@@ -21,7 +21,11 @@
     "staff:mfa-rewrap": "node scripts/staff-mfa-rewrap.cjs",
     "consent:policy-candidate": "node scripts/consent-policy-candidate.cjs",
     "release:preflight": "node scripts/release-preflight.cjs",
-    "test:release-config": "node --test scripts/release-preflight.spec.cjs"
+    "test:release-config": "node --test scripts/release-preflight.spec.cjs",
+    "deploy:package": "node scripts/package-deployment.cjs",
+    "test:recovery-journal": "node --test ops/recovery-journal/journal.spec.cjs",
+    "release:preflight:production": "node scripts/release-preflight.cjs --real-users",
+    "recovery:initialize": "node scripts/recovery-initialize.cjs"
   },
   "engines": {
     "node": ">=24"
