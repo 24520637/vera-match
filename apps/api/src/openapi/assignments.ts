@@ -20,7 +20,7 @@ export const assignedExpert = "Requires the assigned expert, current qualificati
 export const ApiApproveExpert = () => OwnedOperation({
   summary: "Approve an expert credential", role: "MODERATOR", status: 201,
   origin: "required", rejectCrossSite: true, path: { name: "userId", schema: id },
-  description: "Revision-checked approval for an active, email-verified EXPERT. The moderator needs current MFA and the evidence must come from the trusted signed qualification publication.",
+  description: "Revision-checked approval for an active, email-verified EXPERT. Outside tests, the moderator needs current session-bound MFA. Training and confidentiality versions and evidence IDs must resolve from a current operator-installed qualification publication verified against a trusted Ed25519 public key. Evidence must match the target expert, version and purpose and remain valid. A non-null expiry must be in the future and within both evidence validity periods. Missing or invalid publication data prevents approval. Approval does not provision MFA.",
   body: {
     ...object({
       expectedRevision: revision, trainingVersion: evidenceId, policyVersion: evidenceId,
@@ -56,13 +56,13 @@ export const ApiCreateAssignment = () => OwnedOperation({
 
 export const ApiExpertAssignments = () => OwnedOperation({
   summary: "List my expert assignments", role: "EXPERT", query: queueQuery, origin: "optional", rejectCrossSite: true,
-  description: "Returns up to 50 assignment metadata entries owned by the session expert. Requires current session-bound MFA.",
+  description: "Returns up to 50 assignment metadata entries owned by the session expert. Excludes assignments whose video owner has closed their account. Requires current session-bound MFA.",
   response: queue, errors: { 400: ["VALIDATION_FAILED"], 403: ["ASSIGNMENT_ASSURANCE_REQUIRED"], 503: queueErrors },
 });
 
 export const ApiModeratorAssignments = () => OwnedOperation({
   summary: "List assignments in my moderator scope", role: "MODERATOR", query: queueQuery, origin: "optional", rejectCrossSite: true,
-  description: "Returns up to 50 metadata entries filtered by current assignment-specific grants before pagination. Requires session-bound MFA and a successful read audit.",
+  description: "Returns up to 50 metadata entries filtered by current assignment-specific grants before pagination. Excludes assignments whose video owner has closed their account. Requires session-bound MFA and a successful read audit. Outside tests, grants must be bound to the moderator's current trusted staff identity and MFA enrollment epoch.",
   response: queue, errors: { 400: ["VALIDATION_FAILED"], 403: ["ASSIGNMENT_ASSURANCE_REQUIRED"],
     503: queueErrors },
 });

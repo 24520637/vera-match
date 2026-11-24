@@ -17,12 +17,12 @@ in [Safety and privacy](SAFETY-PRIVACY.md). Moderator access requires MODERATOR
 plus real session-bound staff assurance from the signed staff identity configured on the host.
 ADMIN does not inherit these permissions. Account closure/deletion remains deferred. T14 applies reciprocal blocking to matching.
 
-**C035 / PA2 implementation (partial).** The [assignment queue contract](ASSIGNMENT-QUEUES-API.md)
+**C035 / PA2 implementation.** The [assignment queue contract](ASSIGNMENT-QUEUES-API.md)
 requires server-derived identity and session-bound staff assurance. Moderator
 queue reads filter by current, unrevoked, unexpired assignment-specific grants
-before pagination and require a successful read audit. Grant/revoke is an internal ADMIN service requiring
-trusted provisioning and MFA. Production gates remain in place and external
-grant administration is pending.
+before pagination and require a successful read audit. The grant and revoke
+endpoints require an active ADMIN session, current MFA and the signed
+`ASSIGNMENT_GRANT_ADMIN` permission.
 
 **T08 / C043–C048 implementation.** The [private draft contract](T08-DELIVERY.md#contract)
 uses the C034 assignment authorization transaction for playback and draft access.
@@ -34,12 +34,12 @@ QA return and resubmission, and an approved review receipt.
 
 **C033 implementation:** [Assignment API](ASSIGNMENT-API.md) defines
 `POST /expert-admin/assignments`, review-consent generation binding and durable
-idempotency. The deployed path requires real session-bound moderator MFA.
+idempotency. Outside tests, it requires real session-bound moderator MFA.
 
 **C032 implementation:** The moderator-only expert approval endpoint and its
 fail-closed evidence-source boundary are documented in
-[Expert approval](EXPERT-APPROVAL.md). It introduces no member video access or MFA
-mechanism and does not change the existing authentication responses below.
+[Expert approval](EXPERT-APPROVAL.md). Outside tests, approval requires
+session-bound moderator MFA and operator-provisioned signed qualification evidence.
 
 **Status:** Health/readiness and `/auth/register`, `/auth/verify-email`, `/auth/resend-verification`, `/auth/login`, `/auth/me`, `/auth/logout`, `/auth/logout-all`, `/auth/forgot-password` and `/auth/reset-password` are implemented. Implemented business scope and release gates are defined by the feature notes above and their linked documents; remaining proposed routes are DESIGN ONLY. See `EMAIL-AUTH-SESSIONS.md` and [Authentication recovery](AUTH-RECOVERY.md) for tested details.
 

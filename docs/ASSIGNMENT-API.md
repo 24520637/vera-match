@@ -129,7 +129,14 @@ success audit. This step defines no new denial-audit taxonomy.
 
 ## Production and integration boundaries
 
-The deployed path resolves MFA from the trusted staff identity under the moderator's User and Session locks. Missing or expired MFA returns 503 `ASSIGNMENT_ASSURANCE_UNAVAILABLE`. The operation rechecks time after the work, including idempotent replays. Isolated test fixtures use synthetic consent evidence. A deployment must supply approved qualification and consent publications and verify the workflow on staging. C034/C050 recheck consent, generation, video state, expert eligibility and MFA on each access.
+Outside tests, the operation resolves MFA from the trusted staff identity under
+the moderator's User and Session locks. Missing or expired MFA returns 503
+`ASSIGNMENT_ASSURANCE_UNAVAILABLE`. The operation rechecks time after the work,
+including idempotent replays. Isolated test fixtures use synthetic consent
+evidence. Operators must provision the [signed qualification source](EXPERT-QUALIFICATION-SOURCE.md)
+and the approved consent publication before verifying the workflow on staging.
+C034/C050 recheck consent, generation, video state, expert eligibility and MFA on
+each access.
 
 C051 implements source-bound cancellation using revision CAS and exact immutable
 transitions, coordinating this lock protocol; see its separate contract. C033

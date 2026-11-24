@@ -100,9 +100,11 @@ integrated from develop; C034 playback authorization and the merged timezone
 regression fix are integrated. C051 tests cover owner deletion, consent withdrawal,
 queue metadata, grant evidence retention and playback denial after cancellation.
 
-C035 remains **PARTIAL**. Production trusted ADMIN provisioning, real
-session-bound MFA and approved evidence providers are unavailable; the external
-grant/revoke HTTP contract and full-stack queue E2E remain open. C050 review
+C035 has authenticated grant and revoke endpoints. Expert and candidate reads
+require current session-bound MFA. Moderator queue reads require MFA and a
+current assignment-specific grant. Outside tests, grants are bound to the
+current staff identity and MFA enrollment epoch. Staging verification with
+operator-provisioned identities and the full-stack queue E2E remain open. C050 review
 editing/submission and Safety Report moderation are outside this feature. Do not
 claim production readiness or weaken the default-deny gates.
 

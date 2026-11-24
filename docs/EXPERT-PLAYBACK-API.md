@@ -52,7 +52,12 @@ date plus TTL. Bucket privacy protections remain unchanged.
 
 ## Release limitations
 
-ExpertMfaSource checks current session-bound TOTP proof through the signed staff identity. The deployed path also requires current signed qualifications and signed owner consent. Synthetic MFA and policy evidence remain scoped to test fixtures. Verify playback and revocation on the target private storage provider before release.
+ExpertMfaSource checks current session-bound TOTP proof through the signed staff
+identity. Outside tests, playback also requires current evidence from the
+[signed qualification source](EXPERT-QUALIFICATION-SOURCE.md) and owner consent
+bound to the approved signed policy publication. Synthetic MFA and policy
+evidence stay in test fixtures. Verify playback and revocation on the target
+private storage provider before release.
 
 C034 denies new issuance on withdrawal/deletion even before C051 updates assignment
 status. It does not cancel, reassign, edit or submit work. C050 beyond this issuance
@@ -71,4 +76,5 @@ MFA and qualification evidence/registry exceptions, including upstream HttpExcep
 bodies, are sanitized to 503 EXPERT_ACCESS_UNAVAILABLE. Private provider payloads
 are not part of the public HTTP contract. Application-owned session/permission
 401/403 and all existing authorization, transaction and signing bounds remain
-unchanged. This does not enable any production source or approve real MFA.
+unchanged. Production staff identities and qualification evidence require
+separate operator provisioning.

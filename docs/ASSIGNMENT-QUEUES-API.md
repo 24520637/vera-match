@@ -77,7 +77,7 @@ The original inspection before PA2 persistence found the following boundaries:
 - PA2 provides explicit assignment/subject scope, grant/revoke history tables,
   and a grant-filtered queue reader.
 
-## Stage 2 internal mutation service (no HTTP endpoint)
+## Stage 2 grant and revoke service
 
 AssignmentGrantsService resolves signed administrator provisioning under the same User lock used to apply or revoke directives. MFA binds the proof to the current session. Missing sources return sanitized 503; invalid, mismatched or expired proofs return 403. Test-only evidence stays in isolated fixtures.
 
@@ -162,7 +162,12 @@ no authority. Session and server assurance are rechecked with a fresh PostgreSQL
 clock after external I/O and before returning. Candidate qualification expiry is
 also checked after the required audit. Minimal read audits contain no evidence/text.
 
-The queue reuses the session-bound StaffAssuranceSource. Candidate reads also check the current signed qualification and consent publications. The moderator queue filters by current, approved grants before pagination.
+The queue uses session-bound StaffAssuranceSource. Outside tests, candidate
+reads also check the [signed qualification source](EXPERT-QUALIFICATION-SOURCE.md)
+and signed consent publication. The moderator queue filters by current grants
+before pagination. Each deployed grant must match the moderator's active staff
+identity and MFA enrollment epoch. Qualification, MFA and grant scope are
+verified separately.
 
 ## UI and C033 creation
 

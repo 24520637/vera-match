@@ -2,15 +2,18 @@
 
 Plan-Step: C032. Ticket: T06.
 Planned subject: `feat(expert-admin): approve eligible expert records`.
-This is the synthetic-data MVP implementation/testing contract. It does not
-approve production training/policies, retention, staff provisioning or MFA.
+This guide describes the expert approval endpoint and its signed qualification
+source. Production training and confidentiality policies, evidence provisioning,
+staff MFA and retention require separate operational approval.
 
 ## HTTP contract
 
 `POST /api/expert-admin/experts/:userId/approvals` requires an existing HttpOnly
-session for an ACTIVE, email-verified MODERATOR. ADMIN does not inherit this role;
+session for an ACTIVE, email-verified MODERATOR. Outside tests it also requires
+current session-bound MFA. ADMIN does not inherit this role;
 MEMBER and EXPERT are denied with 403, including self-approval attempts. Missing,
-revoked, expired, inactive or unverified sessions return 401. The target must
+revoked, expired, inactive or unverified sessions return 401. Missing or invalid
+MFA proof outside tests returns 403 `STAFF_ASSURANCE_REQUIRED`. The target must
 already be an ACTIVE, verified EXPERT (403 otherwise, 404 if absent). No User is
 created, activated, assigned a new role or given access to member data.
 
@@ -33,9 +36,12 @@ a deployment requirement, not implemented here.
 }
 ```
 
-These example version names are placeholders, not approved versions. Identifiers
-are 1-200 ASCII letters/digits/dot/underscore/colon/hyphen, starting with a letter
-or digit. expectedRevision is a nonnegative safe integer. expiresAt is required:
+The example identifiers are placeholders. The request validator accepts 1–200
+ASCII letters, digits, dots, underscores, colons or hyphens, starting with a
+letter or digit. A successful lookup also requires the exact identifier in the
+signed publication. Publication versions and evidence IDs use 1–128 ASCII
+letters, digits, underscores or hyphens. expectedRevision is a nonnegative safe
+integer. expiresAt is required:
 explicit null or an ISO UTC timestamp with milliseconds. No default expiry is
 invented. A supplied expiry must be future and not exceed either evidence's
 validUntil. Null expiry does not make finite evidence perpetual; future access
@@ -70,21 +76,35 @@ No automatic mutation replay or new credential-reading endpoint is introduced.
 
 ## Server-owned evidence and fail-closed operation
 
-ExpertApprovalRegistry provides approved training content and expert
-confidentiality policy content by version. This is separate from member consent.
-ExpertEvidenceSource resolves immutable completion/acceptance records by opaque
-ID. A record must match the target, purpose and version, contain actual evidence
-content, have a non-future recordedAt and be unexpired if validUntil exists.
-Nonempty source/catalog content is limited to 65,536 UTF-16 code units as a
-technical payload bound, not a product retention rule.
+ExpertApprovalRegistry resolves approved training and confidentiality content by
+version. ExpertEvidenceSource resolves completion and acceptance records by ID.
+Both read the current [signed qualification publication](EXPERT-QUALIFICATION-SOURCE.md)
+using the absolute, operator-controlled paths `EXPERT_QUALIFICATION_MANIFEST_PATH`
+and `EXPERT_QUALIFICATION_PUBLIC_KEY_PATH`. The server verifies the publication
+against the trusted authority's Ed25519 public key on each lookup. The source
+and signing authority are separate from member consent.
 
-The production providers are deliberately empty. No environment switch, client
-MFA boolean, client role, uploaded snapshot or client hash enables approvals.
-Unapproved versions return 400; an unavailable approved evidence record/source
-returns 503. Synthetic providers are injected only in disposable PostgreSQL tests.
-Production remains blocked until Huong approves concrete training and policy
-versions and a trusted, authenticated, immutable evidence-source integration.
-Submitted IDs are locators, not proof of completion or acceptance.
+Evidence must match the target expert, purpose and version. The publication
+requires nonempty version and evidence content of at most 65,536 UTF-8 bytes,
+and evidence dates with `recordedAt` no later than publication issuance and
+`validUntil` later than `recordedAt`. Approval requires current evidence.
+The submitted IDs locate these server-side records. A client upload, digest,
+role assertion or MFA flag cannot establish qualification.
+
+The runtime supports operator-installed publications. Production provisioning
+requires an authorized publication with approved versions and actual evidence
+plus a trusted public key installed on the target host. Repository support alone
+does not establish that provisioning has occurred. Approval fails closed with
+unconfigured, invalid or expired publication data. An unapproved version returns
+400. A source failure or unavailable evidence record returns sanitized 503.
+Synthetic providers are injected only in isolated tests.
+
+The server checks the moderator session and current MFA before resolving
+qualification evidence outside tests, then rechecks the proof before commit.
+Qualification approval grants neither MFA nor assignment access. Assignment
+access independently checks session-bound assurance, scope and consent. QA
+requires trusted session-bound staff MFA, a current assignment-specific grant
+and independence from the assigned expert and video owner.
 
 The server stores recoverable SNAPSHOT content containing the evidence content,
 source ID, credential subject, version, original source business timestamps and

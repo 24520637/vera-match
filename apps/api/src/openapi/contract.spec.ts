@@ -264,6 +264,48 @@ describe("Phúc's generated OpenAPI contract", () => {
     expect(response("post", "/api/expert/reviews/{id}/observations", 503).description).toContain("REVIEW_DURATION_UNAVAILABLE");
   });
 
+  it("documents the signed source and separate authorization gates for expert review workflows", () => {
+    const approval = operation("post", "/api/expert-admin/experts/{userId}/approvals");
+    expect(approval.description).toContain("active, email-verified MODERATOR");
+    expect(approval.description).toContain("Outside tests, the moderator needs current session-bound MFA");
+    expect(response("post", "/api/expert-admin/experts/{userId}/approvals", 403).description)
+      .toContain("STAFF_ASSURANCE_REQUIRED");
+    expect(approval.description).toContain("operator-installed qualification publication verified against a trusted Ed25519 public key");
+    expect(approval.description).toContain("Evidence must match the target expert, version and purpose");
+    expect(operation("post", "/api/expert/assignments/{assignmentId}/playback").description)
+      .toContain("Requires the assigned expert, current qualification, session-bound MFA, and matching storage and review consent generations");
+    expect(operation("get", "/api/expert-admin/assignments").description)
+      .toContain("grants must be bound to the moderator's current trusted staff identity and MFA enrollment epoch");
+    expect(operation("get", "/api/qa/reviews").description)
+      .toContain("Trusted staff MFA does not confer assignment scope on its own");
+  });
+
+  it("matches the validator's optional policy binding strings for withdrawals", () => {
+    const request = body("patch", "/api/consents/me");
+    const itemSchema = (variant: unknown) => {
+      const variantSchema = variant as SchemaObject;
+      return (variantSchema.properties?.consents as SchemaObject).items as SchemaObject;
+    };
+    const grant = itemSchema(request.oneOf?.[0]);
+    const withdraw = itemSchema(request.oneOf?.[1]);
+    expect(withdraw.required).toEqual(["purpose", "granted"]);
+    expect(withdraw.properties).toMatchObject({
+      granted: { enum: [false] },
+      locale: { type: "string" },
+      policyDigest: { type: "string" },
+    });
+    expect(withdraw.properties?.locale).toEqual({ type: "string" });
+    expect(withdraw.properties?.policyDigest).toEqual({ type: "string" });
+    expect(grant.required).toEqual(["purpose", "granted", "policyVersion", "locale", "policyDigest"]);
+    expect(grant.properties).toMatchObject({
+      granted: { enum: [true] },
+      locale: { enum: ["en", "vi"] },
+      policyDigest: { pattern: "^[a-f0-9]{64}$" },
+    });
+    const withdrawal = { purpose: "VIDEO_STORAGE", granted: false, locale: "legacy-locale", policyDigest: "legacy-digest" };
+    expect(parseConsentPatch({ expectedVersion: 0, consents: [withdrawal] }).consents).toEqual([withdrawal]);
+  });
+
   it("preserves private response projections, nulls, and documented examples", () => {
     const schema = (method: Method, path: string, status: number) =>
       response(method, path, status).content?.["application/json"].schema as SchemaObject;

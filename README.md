@@ -160,6 +160,6 @@ for remaining real-user policy approvals and provider verification.
 
 ## API documentation and release preparation
 
-See [staging and deployment preparation](docs/RELEASE-PREPARATION.md) for the Swagger contract (71 operations on 63 paths), hosting templates, configuration and release checks. Local docs use `/api/docs` (JSON `/api/docs-json`, YAML `/api/docs-yaml`). Set `API_DOCS_MODE=public` to serve read-only Swagger in production mode.
+See [staging and deployment preparation](docs/RELEASE-PREPARATION.md) for the Swagger contract (71 operations across 63 paths), hosting templates, configuration and release checks. Local docs use `/api/docs` (JSON `/api/docs-json`, YAML `/api/docs-yaml`). Production Swagger defaults to disabled. Set `API_DOCS_MODE=public` to serve read-only Swagger in production mode. Public documentation does not grant API access.
 
 No public domain, live website or API base URL is provisioned by this repository change. After hosting and DNS/TLS are configured, the intended paths are `https://YOUR_DOMAIN/`, `https://YOUR_DOMAIN/api` and `https://YOUR_DOMAIN/api/docs`. These are placeholders, not verified live URLs.

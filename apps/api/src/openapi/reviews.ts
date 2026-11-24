@@ -100,7 +100,7 @@ export const ApiSubmitReview = () => OwnedOperation({
   errors: { ...editErrors, 409: [...editErrors[409], "RESOURCE_REVISION_CONFLICT"], 422: [...editErrors[422], "REVIEW_INCOMPLETE"] },
 });
 
-const qaPolicy = "Requires trusted session-bound staff MFA, an active assignment-specific grant, and independence from the assigned expert and the video owner. Production staff MFA and trusted grant provisioning are pending.";
+const qaPolicy = "Requires trusted session-bound staff MFA, an active assignment-specific grant, and independence from the assigned expert and the video owner. Trusted staff MFA does not confer assignment scope on its own.";
 const qaQueueErrors = {
   400: ["VALIDATION_FAILED"], 403: ["STAFF_ASSURANCE_REQUIRED"],
   503: ["SAFETY_STORE_UNAVAILABLE", "REVIEW_QA_UNAVAILABLE"],

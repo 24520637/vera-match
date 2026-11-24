@@ -11,7 +11,9 @@ const response = object({
   }), purposes.length), minItems: purposes.length },
 });
 const grant = object({ purpose, granted: { type: "boolean", enum: [true] }, policyVersion: string, locale: enumeration("en", "vi"), policyDigest: { type: "string", pattern: "^[a-f0-9]{64}$" } });
-const withdraw = object({ purpose, granted: { type: "boolean", enum: [false] }, policyVersion: string }, ["purpose", "granted"]);
+const withdraw = object({
+  purpose, granted: { type: "boolean", enum: [false] }, policyVersion: string, locale: string, policyDigest: string,
+}, ["purpose", "granted"]);
 
 export const ApiReadConsent = () => OwnedOperation({
   summary: "Read my consent settings", role: "MEMBER",
@@ -21,7 +23,7 @@ export const ApiReadConsent = () => OwnedOperation({
 
 export const ApiUpdateConsent = () => OwnedOperation({
   summary: "Update my consent settings", role: "MEMBER", origin: "required", idempotent: true,
-  description: "Send one to five distinct purposes, all grants or all withdrawals. Each real grant needs the current signed approved policy version, displayed locale and exact UTF-8 SHA-256 policyDigest returned by GET /api/consents/policies. Without an installed, valid approval manifest, grants fail validation. No draft or testOnly fixture is a production publication. Withdrawals remain available and use separate quota capacity. An identical replay returns the saved snapshot.",
+  description: "Send one to five distinct purposes, all grants or all withdrawals. Each real grant needs the current signed approved policy version, displayed locale and exact UTF-8 SHA-256 policyDigest returned by GET /api/consents/policies. Without an installed, valid approval manifest, grants fail validation. No draft or testOnly fixture is a production publication. Withdrawals remain available and use separate quota capacity. For withdrawals, policyVersion, locale and policyDigest are optional strings and are not checked against a publication. An identical replay returns the saved snapshot.",
   body: {
     oneOf: [
       object({ expectedVersion: revision, consents: { ...array(grant, purposes.length), minItems: 1 } }),
