@@ -25,13 +25,17 @@ test("unconnected presentation is explicit, never a fabricated empty queue or st
   await expect(page.getByText("No assignments in this queue", { exact: true })).toHaveCount(0);
   expect(queue.calls).toBe(0);
 });
-test("renders assignment status and UTC deadline without video actions", async ({ page }) => {
+test("renders assignment status, UTC deadline and a review link without inline video actions", async ({ page }) => {
   const { queue } = await setup(page);
   queue.items = [row("job-a", "IN_PROGRESS", "2026-11-18T12:00:00.000Z"), row("job-b")];
   await page.goto(fixture);
   await expect(page.getByText("In progress", { exact: true })).toBeVisible();
   await expect(page.getByText("Due: No deadline set", { exact: true })).toBeVisible();
   await expect(page.locator("time")).toHaveAttribute("datetime", "2026-11-18T12:00:00.000Z");
+  await expect(page.getByRole("link", { name: "Open review for assignment job-a", exact: true }))
+    .toHaveAttribute("href", "/expert/assignments/job-a/review");
+  await expect(page.getByRole("link", { name: "Open review for assignment job-b", exact: true }))
+    .toHaveAttribute("href", "/expert/assignments/job-b/review");
   await expect(page.getByRole("button", { name: /play|cancel|submit/i })).toHaveCount(0);
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
@@ -45,6 +49,7 @@ test("moderator queue reuses the same foundation", async ({ page }) => {
   await setup(page, "MODERATOR"); await page.goto(fixture + "?role=moderator");
   await expect(page.getByRole("heading", { name: "Assignment moderation" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Assignment job-a" })).toBeVisible();
+  await expect(page.getByRole("link", { name: /Open review for assignment/ })).toHaveCount(0);
 });
 for (const role of ["ADMIN", "MEMBER", "MODERATOR"]) test(`${role} cannot load the expert queue`, async ({ page }) => {
   const { queue } = await setup(page, role); await page.goto(fixture);

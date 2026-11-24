@@ -1,6 +1,7 @@
 "use client";
 import Link from "next/link";
 import { useAuth } from "./auth-provider";
+import { staffWorkspaces } from "@/lib/staff-workspaces";
 export function AuthNavigation({ onNavigate }: { onNavigate: () => void }) {
   const { state } = useAuth();
   if (state.status === "checking")
@@ -23,12 +24,12 @@ export function AuthNavigation({ onNavigate }: { onNavigate: () => void }) {
           : "Check account access"}
       </Link>
       {state.status === "authenticated" && state.user.role !== "MEMBER" && <Link href="/staff-security" onClick={onNavigate}>Staff security</Link>}
-      {state.status === "authenticated" && state.user.role === "MODERATOR" && (
-        <>
-          <Link href="/moderation/reports" onClick={onNavigate}>Report queue</Link>
-          <Link href="/qa/reviews" onClick={onNavigate}>Review QA</Link>
-        </>
-      )}
+      {state.status === "authenticated" && state.user.role !== "MEMBER" &&
+        staffWorkspaces[state.user.role].links.map(link => (
+          <Link key={link.href} href={link.href} onClick={onNavigate}>
+            {link.label}
+          </Link>
+        ))}
     </>
   );
 }

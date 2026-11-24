@@ -5,7 +5,7 @@ import { SessionUnavailable } from "../auth/session-boundary";
 import { useRetryAfter } from "../auth/use-retry-after";
 import { RetryAfterFeedback } from "../auth/retry-after-feedback";
 import { PageHeader } from "../layout/page-layout";
-import { Button } from "../ui/button";
+import { Button, ButtonLink } from "../ui/button";
 import { Badge, EmptyState, LoadingState, Notice } from "../ui/status";
 import { assignmentStatusLabels, queueFailure, validateQueueView,
   type AssignmentQueueLoader, type AssignmentQueuePage } from "@/lib/expert-queue-view";
@@ -21,11 +21,11 @@ export function AssignmentQueue({ role, loader }: { role: AssignmentQueueRole; l
       state.status === "unavailable" || state.status === "forbidden" ? <SessionUnavailable denied={state.status === "forbidden"} /> :
       state.status !== "authenticated" ? <Notice title="Sign in required">Sign in to access assignments.</Notice> :
       state.user.role !== role ? <Notice tone="warning" title="Assignment access denied">This queue is available only to {role === "EXPERT" ? "experts" : "moderators"}. Other roles do not inherit access.</Notice> :
-      <QueueContent key={`${state.user.id}:${role}`} loader={loader} />}
+      <QueueContent key={`${state.user.id}:${role}`} loader={loader} role={role} />}
   </div>;
 }
 
-function QueueContent({ loader }: { loader?: AssignmentQueueLoader }) {
+function QueueContent({ loader, role }: { loader?: AssignmentQueueLoader; role: AssignmentQueueRole }) {
   const [page, setPage] = useState<AssignmentQueuePage>();
   const [loading, setLoading] = useState(false), [error, setError] = useState<unknown>();
   const request = useRef<AbortController | undefined>(undefined), sequence = useRef(0), alive = useRef(false);
@@ -78,7 +78,19 @@ function QueueContent({ loader }: { loader?: AssignmentQueueLoader }) {
       {page?.items.map(row => <li key={row.id}>
         <h3>Assignment <span translate="no">{row.id}</span></h3>
         <Badge>{assignmentStatusLabels[row.status]}</Badge>
+
         <p>Due: {row.dueAt === null ? "No deadline set" : <time dateTime={row.dueAt}>{new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short", timeZone: "UTC" }).format(new Date(row.dueAt))} UTC</time>}</p>
+        {role === "EXPERT" && (
+          <div className="form-actions">
+            <ButtonLink
+              variant="secondary"
+              href={`/expert/assignments/${encodeURIComponent(row.id)}/review`}
+              aria-label={`Open review for assignment ${row.id}`}
+            >
+              Open review
+            </ButtonLink>
+          </div>
+        )}
       </li>)}
     </ul>
     {page?.nextCursor && <Button variant="secondary" disabled={loading || retry.seconds > 0} onClick={() => void load(page.nextCursor)}>Load more assignments</Button>}
