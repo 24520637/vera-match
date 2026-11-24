@@ -1,4 +1,4 @@
-import { INestApplication } from "@nestjs/common";
+import { CanActivate, INestApplication } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import { AccountStatus, UserRole } from "@prisma/client";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
@@ -8,7 +8,7 @@ import { configureApplication } from "../src/configure-app";
 import { EnvironmentService } from "../src/config/environment.service";
 import { parseEnvironment } from "../src/config/environment";
 import { PrismaService } from "../src/database/prisma.service";
-import { ExpertApprovalRateLimiter } from "../src/expert-admin/expert-approval-request.guard";
+import { ExpertApprovalRateLimiter, ExpertApprovalRequestGuard } from "../src/expert-admin/expert-approval-request.guard";
 import { ExpertApprovalRegistry, ExpertEvidence, ExpertEvidenceSource } from "../src/expert-admin/expert-approval.sources";
 import { createAuthDatabase } from "./disposable-auth-database";
 import { assign, credentialEvent, seedExpert, transition } from "./expert-db-fixtures";
@@ -147,23 +147,34 @@ describe("C032 moderator expert approval / disposable PostgreSQL", () => {
     expect(await db.client.expertActorIdentity.findUnique({ where: { userId: moderator.id } })).toBeNull();
   });
 
-  it("rechecks moderator eligibility, target eligibility and session revocation after authentication", async () => {
-    for (const scenario of ["moderator", "target", "session"] as const) {
-      const moderator = await user(), expert = await user(UserRole.EXPERT);
-      const body = input(expert.id);
-      const source = app.get(ExpertEvidenceSource);
-      const lookup = jest.spyOn(source, "find").mockImplementation(async id => {
-        if (id === body.trainingEvidenceId) {
-          if (scenario === "session") await db.client.session.updateMany({ where: { userId: moderator.id }, data: { revokedAt: new Date() } });
-          else await db.client.user.update({ where: { id: scenario === "moderator" ? moderator.id : expert.id }, data: { status: "SUSPENDED" } });
-        }
-        return records.get(id);
-      });
-      try {
-        expect((await request(moderator.cookie, expert.id, body)).status).toBe(scenario === "session" ? 401 : 403);
-        expect(await credential(expert.id)).toBeNull();
-        expect(await db.client.expertActorIdentity.findUnique({ where: { userId: moderator.id } })).toBeNull();
-      } finally { lookup.mockRestore(); }
+  it.each([
+    ["moderator suspension", 403, "FORBIDDEN"],
+    ["target suspension", 403, "EXPERT_INELIGIBLE"],
+    ["session revocation", 401, "UNAUTHENTICATED"],
+  ] as const)("rechecks %s after authentication", async (scenario, status, code) => {
+    const moderator = await user(), expert = await user(UserRole.EXPERT);
+    const guard = app.get(ExpertApprovalRequestGuard);
+    const canActivate = guard.canActivate.bind(guard);
+    const recheck = jest.spyOn(guard as CanActivate, "canActivate").mockImplementation(async context => {
+      const allowed = canActivate(context);
+      // Authentication has finished, and the approval transaction has yet to lock these rows.
+      if (scenario === "session revocation") {
+        await db.client.session.updateMany({ where: { userId: moderator.id }, data: { revokedAt: new Date() } });
+      } else {
+        const id = scenario === "moderator suspension" ? moderator.id : expert.id;
+        await db.client.user.update({ where: { id }, data: { status: "SUSPENDED" } });
+      }
+      return allowed;
+    });
+    try {
+      const response = await request(moderator.cookie, expert.id, input(expert.id));
+      expect(response.status).toBe(status);
+      expect(await response.json()).toMatchObject({ code });
+      expect(recheck).toHaveBeenCalledTimes(1);
+      expect(await credential(expert.id)).toBeNull();
+      expect(await db.client.expertActorIdentity.findUnique({ where: { userId: moderator.id } })).toBeNull();
+    } finally {
+      recheck.mockRestore();
     }
   });
 
