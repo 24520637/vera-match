@@ -1,6 +1,7 @@
 import { ConflictException, ForbiddenException, HttpException, Injectable, ServiceUnavailableException } from "@nestjs/common";
 import { AccountStatus, MemberResource, Prisma, Profile, UserRole } from "@prisma/client";
 import { PrismaService } from "../database/prisma.service";
+import { RecoveryJournalService } from "../recovery/recovery-journal.service";
 import { assertStoredProfile, parseProfilePatch, ProfileData, profileFields } from "./profile.validation";
 
 const key = (userId: string) => ({ userId_resource: { userId, resource: MemberResource.PROFILE } });
@@ -27,7 +28,7 @@ function project(row: Profile): ProfileData {
 
 @Injectable()
 export class ProfileService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService, private readonly journal?: RecoveryJournalService) {}
 
   private async authorize(tx: Prisma.TransactionClient, userId: string) {
     const user = await tx.user.findUnique({ where: { id: userId }, select: { status: true, role: true, emailVerifiedAt: true } });
@@ -75,6 +76,7 @@ export class ProfileService {
         if (Object.prototype.hasOwnProperty.call(patch, field)) merged[field] = patch[field];
       }
       assertStoredProfile(merged, current);
+      if (patch.visibilityEnabled === false) await this.journal?.record(tx, [userId], "CONSENT_WITHDRAWAL");
       await tx.memberResourceRevision.upsert({ where: key(userId),
         create: { userId, resource: MemberResource.PROFILE }, update: {},
       });

@@ -1,4 +1,5 @@
 import { ConflictException, ForbiddenException, Injectable } from "@nestjs/common";
+import { RecoveryJournalService } from "../recovery/recovery-journal.service";
 import { Prisma, type StaffIdentity } from "@prisma/client";
 import { PrismaService } from "../database/prisma.service";
 import { StaffAuthority } from "./staff-authority";
@@ -12,7 +13,8 @@ export async function staffDatabaseNow(tx: Prisma.TransactionClient): Promise<Da
 }
 @Injectable()
 export class StaffIdentityService {
-  constructor(private readonly prisma: PrismaService, private readonly authority: StaffAuthority) {}
+  constructor(private readonly prisma: PrismaService, private readonly authority: StaffAuthority,
+    private readonly journal?: RecoveryJournalService) {}
   /** Called by an operator tool, never by a browser role/self-provisioning endpoint. */
   async apply(serialized: string) {
     const candidate = this.authority.verify(serialized,new Date());
@@ -33,6 +35,7 @@ export class StaffIdentityService {
       if (current && payload.state === "ACTIVE" && prior && ((BigInt(payload.mfaEpoch) === current.mfaEpoch && payload.enrollmentKeyHash !== prior.enrollmentKeyHash) || (BigInt(payload.mfaEpoch) > current.mfaEpoch && payload.enrollmentKeyHash === prior.enrollmentKeyHash))) return conflict();
       // Reactivation and role changes require an explicit new enrollment epoch.
       if (current && payload.state === "ACTIVE" && (current.state === "REVOKED" || current.role !== payload.role) && BigInt(payload.mfaEpoch) !== current.mfaEpoch+1n) return conflict();
+      await this.journal?.record(tx, [user.id], "STAFF_RESTRICTION");
       await tx.staffTrustEvent.create({data:{directiveId:payload.directiveId,userId:user.id,subjectId:payload.subjectId,revision:BigInt(payload.revision),mfaEpoch:BigInt(payload.mfaEpoch),signedDirective:serialized}});
       const data = {subjectId:payload.subjectId,revision:BigInt(payload.revision),mfaEpoch:BigInt(payload.mfaEpoch),role:payload.role,state:payload.state,expiresAt:new Date(payload.expiresAt),currentDirectiveId:payload.directiveId};
       if (current) {

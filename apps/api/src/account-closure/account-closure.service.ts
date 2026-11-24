@@ -1,5 +1,7 @@
 import { closureConsumers } from "./closure-consumer.contract";
 import { BadRequestException, ConflictException, ForbiddenException, HttpException, Injectable, ServiceUnavailableException } from "@nestjs/common";
+import { RecoveryJournalService } from "../recovery/recovery-journal.service";
+import { ClosurePolicyRegistry } from "./closure-policy";
 import { AuthContext } from "../auth/auth-context";
 import { PasswordService } from "../auth/password.service";
 import { ConsentService } from "../consent/consent.service";
@@ -7,14 +9,21 @@ import { PrismaService } from "../database/prisma.service";
 import { EnvironmentService } from "../config/environment.service";
 import { closureInput } from "./closure.validation";
 
-/** The production release gate cannot be bypassed by an environment feature flag. */
+/** Exact signed minimization approval and verified recovery, never a boolean flag. */
 @Injectable()
 export class AccountClosureService {
   constructor(private readonly db: PrismaService, private readonly passwords: PasswordService,
-    private readonly consents: ConsentService, private readonly environment: EnvironmentService) {}
-  availability() { return { available: this.environment.values.nodeEnv !== "production" }; }
+    private readonly consents: ConsentService, private readonly environment: EnvironmentService,
+    private readonly journal?: RecoveryJournalService, private readonly policies?: ClosurePolicyRegistry) {}
+  availability() {
+    if (this.environment.values.nodeEnv !== "production") return { available: true };
+    try {
+      if (!this.policies?.current() || !this.journal) return { available: false };
+      this.journal.assertReady(); return { available: true };
+    } catch { return { available: false }; }
+  }
   available() {
-    if (this.environment.values.nodeEnv === "production") throw new ServiceUnavailableException({
+    if (!this.availability().available) throw new ServiceUnavailableException({
       code: "CLOSURE_RELEASE_PENDING", message: "Account closure is awaiting release review. Contact support." });
   }
   async request(auth: AuthContext, input: unknown, key: unknown) {
@@ -55,6 +64,7 @@ export class AccountClosureService {
             await tx.expertAssignment.count({ where: { OR: [{ expertId: user.id }, { assignedById: user.id }] } }) ||
             await tx.report.count({ where: { moderatorId: user.id } })) throw new ConflictException({
           code: "STAFF_DEPROVISIONING_REQUIRED", message: "This account needs a staff deprovisioning review." });
+        await this.journal?.record(tx, [user.id], "ACCOUNT_CLOSURE");
         const closure = await tx.accountClosure.create({ data: { userId: user.id, keyHash: dto.keyHash,
           fingerprint: dto.fingerprint, events: { create: { revision: 1, kind: "RESTRICTED" } },
           consumers: { create: closureConsumers.map(name => ({ name })) } } });

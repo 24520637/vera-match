@@ -1,6 +1,6 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { checkEnvironment, smoke } = require('./release-preflight.cjs');
+const { checkEnvironment, checkRealUserPaths, smoke } = require('./release-preflight.cjs');
 
 function publicResponse(path) {
   if (path === '/api') {
@@ -32,7 +32,13 @@ const productionConfiguration = {
   API_INTERNAL_ORIGIN: 'http://127.0.0.1:4000',
   VIDEO_DURATION_FFPROBE: '/usr/bin/ffprobe',
   MATCHING_HANDLE_KEY: 'ab'.repeat(32),
+  RECOVERY_JOURNAL_CLIENT_CONFIG: '/secure/journal/client.json',
 };
+test('real-user preparation refuses missing signed approval paths', () => {
+  const failures = checkRealUserPaths({});
+  assert.equal(failures.length, 8);
+  assert.ok(failures.some(value => value.includes('CLOSURE_POLICY_MANIFEST_PATH')));
+});
 
 test('accepts a static explicit production documentation configuration', () => {
   assert.deepEqual(checkEnvironment(productionConfiguration), []);

@@ -1,4 +1,5 @@
 import { Injectable, ServiceUnavailableException } from "@nestjs/common";
+import { RecoveryJournalService } from "../recovery/recovery-journal.service";
 import { PrismaService } from "../database/prisma.service";
 import { EnvironmentService } from "../config/environment.service";
 import { hashSessionToken, readSessionToken } from "./session-token";
@@ -7,6 +8,7 @@ export class LogoutService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly environment: EnvironmentService,
+    private readonly journal?: RecoveryJournalService,
   ) {}
   async current(cookie: unknown) {
     const token = readSessionToken(
@@ -15,9 +17,14 @@ export class LogoutService {
     );
     if (!token) return;
     try {
-      await this.prisma.session.updateMany({
-        where: { tokenHash: hashSessionToken(token), revokedAt: null },
-        data: { revokedAt: new Date() },
+      const session = await this.prisma.session.findUnique({ where: { tokenHash: hashSessionToken(token) } });
+      if (!session || session.revokedAt) return;
+      await this.prisma.$transaction(async tx => {
+        await tx.$queryRaw`SELECT id FROM "User" WHERE id=${session.userId} FOR UPDATE`;
+        const current = await tx.session.findUnique({ where: { id: session.id } });
+        if (!current || current.revokedAt) return;
+        await this.journal?.record(tx, [session.userId], "SESSION_REVOCATION");
+        await tx.session.updateMany({ where: { id: session.id, revokedAt: null }, data: { revokedAt: new Date() } });
       });
     } catch {
       throw this.unavailable();
@@ -27,6 +34,7 @@ export class LogoutService {
     try {
       await this.prisma.$transaction(async (tx) => {
         await tx.$queryRaw`SELECT id FROM "User" WHERE id = ${userId} FOR UPDATE`;
+        await this.journal?.record(tx, [userId], "SESSION_REVOCATION");
         await tx.session.updateMany({
           where: { userId, revokedAt: null },
           data: { revokedAt: new Date() },

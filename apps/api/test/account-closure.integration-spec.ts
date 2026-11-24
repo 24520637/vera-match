@@ -220,6 +220,9 @@ describe("C065 real account restriction and out-of-band status", () => {
     const staffAdditions=[
       {name:"20261124010000_staff_trust",foreignKeys:2,triggers:6},
       {name:"20261124020000_staff_mfa",foreignKeys:8,triggers:9},
+      {name:"20261124030000_recovery_journal_receipts",foreignKeys:0,triggers:2},
+      {name:"20261124040000_closure_domain_receipts",foreignKeys:1,triggers:3},
+      {name:"20261124050000_recovery_database_binding",foreignKeys:0,triggers:2},
     ].filter(m=>applied.some(row=>row.name===m.name));
     const expected=staffAdditions.reduce((catalog,m)=>({foreignKeys:catalog.foreignKeys+m.foreignKeys,triggers:catalog.triggers+m.triggers,migrations:catalog.migrations+1}),{foreignKeys:54,triggers:76,migrations:24});
     expect(rows[0]).toEqual(expected);
