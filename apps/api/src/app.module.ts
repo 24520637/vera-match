@@ -1,4 +1,5 @@
 import { StaffSecurityModule } from "./staff-security/staff-security.module";
+import { RecoveryModule } from "./recovery/recovery.module";
 import { AccountClosureModule } from "./account-closure/account-closure.module";
 import { SafetyModule } from "./safety/safety.module";
 import { Module } from "@nestjs/common";
@@ -16,7 +17,7 @@ import { AssignmentQueuesModule } from "./expert-admin/assignment-queues.module"
 import { MatchingModule } from "./matching/matching.module";
 
 @Module({
-  imports: [StaffSecurityModule,
+  imports: [RecoveryModule, StaffSecurityModule,
     AccountClosureModule,
     EnvironmentModule,
     DatabaseModule,

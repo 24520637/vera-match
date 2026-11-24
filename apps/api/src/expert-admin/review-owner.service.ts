@@ -1,4 +1,5 @@
 import { ConflictException, ForbiddenException, Injectable, NotFoundException, UnauthorizedException } from "@nestjs/common";
+import { RecoveryJournalService } from "../recovery/recovery-journal.service";
 import { Prisma } from "@prisma/client";
 import type { AuthContext } from "../auth/auth-context";
 import { ConsentAccessService } from "../consent/consent-access.service";
@@ -36,7 +37,8 @@ function claimConflict(): never {
 
 @Injectable()
 export class ReviewOwnerService {
-  constructor(private readonly access: SafetyAccessService, private readonly consent: ConsentAccessService) {}
+  constructor(private readonly access: SafetyAccessService, private readonly consent: ConsentAccessService,
+    private readonly journal?: RecoveryJournalService) {}
 
   list(auth: AuthContext, after?: string) {
     return this.access.run(auth, "MEMBER", [], async tx => {
@@ -151,6 +153,7 @@ export class ReviewOwnerService {
           break;
         }
         case "REVOKE":
+          await this.journal?.record(tx, [ownerId], "CLAIM_RESTRICTION");
           data = { shareApproved: false, revokedAt: now,
             shareConsentSubjectId: null, shareConsentVersion: null, revision };
           break;

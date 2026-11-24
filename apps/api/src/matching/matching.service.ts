@@ -10,6 +10,7 @@ import { readMatchingClaimsInTransaction } from "../expert-admin/review-matching
 import { BlockAccessService } from "../safety/block-access.service";
 import { SafetyAccessService } from "../safety/safety-access.service";
 import { MatchingHandles, type ConsentStamp } from "./matching-handles";
+import { RecoveryJournalService } from "../recovery/recovery-journal.service";
 import { compareRank, matchingMember, memberSelect, reciprocalEligibility, reciprocalRanks } from "./matching-policy";
 
 type Tx = Prisma.TransactionClient;
@@ -68,6 +69,7 @@ export class MatchingService {
     private readonly consent: ConsentAccessService,
     private readonly blocks: BlockAccessService,
     private readonly handles: MatchingHandles,
+    private readonly journal?: RecoveryJournalService,
   ) {}
 
   async recommendations(auth: AuthContext, query: unknown) {
@@ -195,6 +197,7 @@ export class MatchingService {
         code: "MATCH_DECISION_CONFLICT", message: "A different choice has already been recorded. Refresh your matches.",
       });
       if (!previous) {
+        if (choice === "DECLINE") await this.journal?.record(tx, [actor], "CLAIM_RESTRICTION");
         const decision = await tx.matchDecision.create({ data: { pairId: pair.id, actorUserId: actor, choice } });
         await tx.auditLog.create({ data: {
           actorId: viewerConsent.subjectId, action: "MATCH_DECISION_RECORDED", subjectType: "MatchDecision", subjectId: decision.id,

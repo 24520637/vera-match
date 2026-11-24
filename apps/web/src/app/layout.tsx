@@ -62,6 +62,13 @@ export default function RootLayout({
                 <br />
                 <Link href="/design-system">Explore the design preview</Link>
               </p>
+              <p>
+                Privacy / <span lang="vi">Quyền riêng tư</span>
+                <br />
+                <a href="mailto:buiquynhhuong2101@gmail.com">
+                  buiquynhhuong2101@gmail.com
+                </a>
+              </p>
             </div>
           </footer>
         </AuthProvider>

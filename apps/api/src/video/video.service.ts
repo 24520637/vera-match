@@ -4,6 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
+import { RecoveryJournalService } from "../recovery/recovery-journal.service";
 import { ConsentAccessService } from "../consent/consent-access.service";
 import {
   PrivateStorageService,
@@ -63,6 +64,7 @@ export class VideoService {
             message: "Video not found.",
           });
         if (video.status !== "DELETED") {
+          await this.journal?.record(tx, [ownerId], "VIDEO_REMOVAL");
           const [clock] = await tx.$queryRaw<{ now: Date }[]>`
             SELECT (clock_timestamp() AT TIME ZONE 'UTC')::timestamp(3) AS now`;
           await tx.video.update({
@@ -267,6 +269,7 @@ export class VideoService {
     private readonly consent: ConsentAccessService,
     private readonly storage: PrivateStorageService,
     private readonly cancellation: AssignmentCancellationService,
+    private readonly journal?: RecoveryJournalService,
   ) {}
   intent(ownerId: string, input: unknown) {
     const data = uploadInput(input);

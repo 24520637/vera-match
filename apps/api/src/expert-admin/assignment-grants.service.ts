@@ -1,4 +1,5 @@
 import { ConflictException, ForbiddenException, HttpException, Injectable, NotFoundException, ServiceUnavailableException, UnauthorizedException } from "@nestjs/common";
+import { RecoveryJournalService } from "../recovery/recovery-journal.service";
 import { Prisma } from "@prisma/client";
 import { randomUUID } from "node:crypto";
 import type { AuthContext } from "../auth/auth-context";
@@ -28,7 +29,7 @@ const date = (value: unknown): value is Date => value instanceof Date && Number.
 export class AssignmentGrantsService {
   constructor(private readonly prisma: PrismaService, private readonly environment: EnvironmentService,
     private readonly provisioning: AssignmentGrantProvisioningSource, private readonly assurance: StaffAssuranceSource,
-    private readonly identities?: StaffIdentityService) {}
+    private readonly identities?: StaffIdentityService, private readonly journal?: RecoveryJournalService) {}
 
   private role(auth: AuthContext) {
     if (!auth?.user || typeof auth.user.id !== "string" || !auth.user.id || typeof auth.sessionId !== "string" || !auth.sessionId) authenticated();
@@ -150,6 +151,7 @@ export class AssignmentGrantsService {
         // Revocation may remove expired grants or grants for deleted/ineligible
         // targets; it does not require a live assignment or eligible moderator.
         await now();
+        await this.journal?.record(tx, moderatorId ? [moderatorId] : [auth.user.id], "STAFF_RESTRICTION");
         const changed = await tx.assignmentModeratorScope.updateMany({ where: { id: scope.id, revision: scope.revision, currentGrantId: input.grantId },
           data: { currentGrantId: null, revision: { increment: 1 } } });
         if (changed.count !== 1) conflict();

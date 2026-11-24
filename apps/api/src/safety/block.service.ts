@@ -3,6 +3,7 @@ import {
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
+import { RecoveryJournalService } from "../recovery/recovery-journal.service";
 import { AuthContext } from "../auth/auth-context";
 import { SafetyAccessService } from "./safety-access.service";
 import {
@@ -15,7 +16,7 @@ import {
 } from "./safety.validation";
 @Injectable()
 export class BlockService {
-  constructor(private readonly access: SafetyAccessService) {}
+  constructor(private readonly access: SafetyAccessService, private readonly journal?: RecoveryJournalService) {}
   block(auth: AuthContext, input: unknown) {
     const target = blockInput(input);
     if (target === auth.user.id)
@@ -40,6 +41,7 @@ export class BlockService {
         select: { id: true },
       });
       if (!existing) {
+        await this.journal?.record(tx, [auth.user.id, target], "BLOCK");
         const row = await tx.block.create({
           data: { blockerId: auth.user.id, blockedId: target },
         });

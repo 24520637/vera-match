@@ -1,0 +1,25 @@
+[Unit]
+Description=VERA independent restriction journal
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=vera-journal
+Group=vera-journal
+WorkingDirectory=/srv/vera-journal
+Environment=NODE_ENV=production
+Environment=JOURNAL_SERVER_CONFIG=/etc/vera-journal/server.json
+ExecStart=/usr/bin/node /srv/vera-journal/server.cjs
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=15
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/vera-journal
+
+[Install]
+WantedBy=multi-user.target

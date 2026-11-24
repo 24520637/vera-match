@@ -4,6 +4,7 @@ import type { AuthContext } from "../auth/auth-context";
 import { EnvironmentService } from "../config/environment.service";
 import { ConsentAccessService } from "../consent/consent-access.service";
 import { PrismaService } from "../database/prisma.service";
+import { RecoveryJournalService } from "../recovery/recovery-journal.service";
 import { SafetyAccessService } from "../safety/safety-access.service";
 import { StaffAssuranceSource } from "../safety/staff-assurance.source";
 import { transitionReviewAssignment } from "./review-assignment-transition";
@@ -54,7 +55,7 @@ function unavailable(): never {
 export class ReviewQaService {
   constructor(private readonly prisma: PrismaService, private readonly access: SafetyAccessService,
     private readonly assurance: StaffAssuranceSource, private readonly environment: EnvironmentService,
-    private readonly consent: ConsentAccessService) {}
+    private readonly consent: ConsentAccessService, private readonly journal?: RecoveryJournalService) {}
 
   private async staff(tx: Prisma.TransactionClient, auth: AuthContext) {
     const denied = () => new ForbiddenException({ code: "STAFF_ASSURANCE_REQUIRED", message: "Verified staff assurance is required." });
@@ -288,6 +289,7 @@ export class ReviewQaService {
         claimRows = approvedClaimRows(claims, submitted.observations, assignment.video.ownerId, id, version);
       }
       const decidedAt = await validateTime();
+      if (status === "RETURNED") await this.journal?.record(tx, [assignment.video.ownerId], "CLAIM_RESTRICTION");
       const changed = await tx.expertReview.updateMany({
         where: { ...where, version: expectedVersion, status: "SUBMITTED" },
         data: { status, version, qaById: auth.user.id, qaAt: decidedAt, qaFeedback: reason },

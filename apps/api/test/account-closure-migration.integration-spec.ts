@@ -45,7 +45,9 @@ it("adds closure to the merged schema without changing legacy users, assignment 
     );
     for (const name of readdirSync(join(prisma, "migrations")).filter(
       (name) =>
-        /^\d+_/.test(name) && name !== "20261122133000_account_closure",
+        /^\d+_/.test(name) && name !== "20261122133000_account_closure" &&
+        // Its dependent receipt table cannot exist in the pre-closure fixture.
+        name !== "20261124040000_closure_domain_receipts",
     ))
       cpSync(join(prisma, "migrations", name), join(temp, "migrations", name), {
         recursive: true,
