@@ -15,12 +15,12 @@ const queue = object({
 });
 const queueErrors = ["ASSIGNMENT_QUEUE_UNAVAILABLE", "ASSIGNMENT_ASSURANCE_UNAVAILABLE"];
 const consentErrors = ["CONSENT_REQUIRED", "CONSENT_GENERATION_WITHDRAWN"];
-export const assignedExpert = "Requires the assigned expert, current qualification, session-bound MFA, and matching storage and review consent generations. Access is limited to synthetic tests while trusted production MFA and evidence integrations are absent.";
+export const assignedExpert = "Requires the assigned expert, current qualification, session-bound MFA, and matching storage and review consent generations. The assignment access gate currently limits this workflow to synthetic tests.";
 
 export const ApiApproveExpert = () => OwnedOperation({
   summary: "Approve an expert credential", role: "MODERATOR", status: 201,
   origin: "required", rejectCrossSite: true, path: { name: "userId", schema: id },
-  description: "Revision-checked approval for an active, email-verified EXPERT. Training and confidentiality versions and evidence must resolve from trusted server sources. Production providers have no approved versions or evidence. Approval does not provision MFA.",
+  description: "Revision-checked approval for an active, email-verified EXPERT. Training and confidentiality versions and evidence IDs must resolve from a current operator-installed qualification publication verified against a trusted Ed25519 public key. Evidence must match the target expert, version and purpose and remain valid. A supplied expiry must be in the future and within both evidence validity periods. Missing or invalid publication data prevents approval. Approval does not provision MFA.",
   body: {
     ...object({
       expectedRevision: revision, trainingVersion: evidenceId, policyVersion: evidenceId,
@@ -40,7 +40,7 @@ export const ApiApproveExpert = () => OwnedOperation({
 export const ApiCreateAssignment = () => OwnedOperation({
   summary: "Assign a video to an expert", role: "MODERATOR", status: 201,
   origin: "required", rejectCrossSite: true, idempotent: true,
-  description: "Creates an assignment for a ready video and a qualified expert. Requires current storage and review consent and the current credential revision. A non-null deadline must not exceed expiry. This operation is synthetic-test-only until staff assurance and approved evidence integrations are available.",
+  description: "Creates an assignment for a ready video and a qualified expert. Requires current storage and review consent and the current credential revision. A non-null deadline must not exceed expiry. The assignment creation gate currently limits this operation to synthetic tests.",
   body: {
     ...object({ videoId: id, expertId: id, expectedCredentialRevision: revision, dueAt: nullable(utcTimestamp), expiresAt: nullable(utcTimestamp) }),
     example: { videoId: "video-1", expertId: "expert-1", expectedCredentialRevision: 1, dueAt: null, expiresAt: null },
@@ -56,20 +56,20 @@ export const ApiCreateAssignment = () => OwnedOperation({
 
 export const ApiExpertAssignments = () => OwnedOperation({
   summary: "List my expert assignments", role: "EXPERT", query: queueQuery, origin: "optional", rejectCrossSite: true,
-  description: "Returns up to 50 assignment metadata entries owned by the session expert. Requires current session-bound MFA and is available only with synthetic assurance in tests.",
+  description: "Returns up to 50 assignment metadata entries owned by the session expert. Excludes assignments whose video owner has closed their account. Requires current session-bound MFA and is available only with synthetic assurance in tests.",
   response: queue, errors: { 400: ["VALIDATION_FAILED"], 403: ["ASSIGNMENT_ASSURANCE_REQUIRED"], 503: queueErrors },
 });
 
 export const ApiModeratorAssignments = () => OwnedOperation({
   summary: "List assignments in my moderator scope", role: "MODERATOR", query: queueQuery, origin: "optional", rejectCrossSite: true,
-  description: "Returns up to 50 metadata entries filtered by current assignment-specific grants before pagination. Requires session-bound MFA and a successful read audit. Production MFA and trusted grant provisioning are pending.",
+  description: "Returns up to 50 metadata entries filtered by current assignment-specific grants before pagination. Excludes assignments whose video owner has closed their account. Requires session-bound MFA and a successful read audit. The production queue remains blocked by the grant provisioning gate even with valid MFA.",
   response: queue, errors: { 400: ["VALIDATION_FAILED"], 403: ["ASSIGNMENT_ASSURANCE_REQUIRED"],
     503: [...queueErrors, "MODERATOR_QUEUE_PROVISIONING_UNAVAILABLE"] },
 });
 
 export const ApiAssignmentCandidate = () => OwnedOperation({
   summary: "Check a known video–expert pair", role: "MODERATOR", origin: "optional", rejectCrossSite: true,
-  description: "Checks eligibility for a known pair under session-bound MFA in synthetic tests. Returns the credential revision needed for assignment. Production assurance and provisioning are pending.",
+  description: "Checks eligibility for a known pair under session-bound MFA in synthetic tests. Returns the credential revision needed for assignment. Requests outside the test environment are denied.",
   query: ["videoId", "expertId"].map(name => ({ name, schema: id, required: true })),
   response: object({ candidate: object({ videoId: id, expertId: id, expectedCredentialRevision: revision }) }),
   errors: { 400: ["VALIDATION_FAILED"], 403: ["ASSIGNMENT_ASSURANCE_REQUIRED"], 404: ["ASSIGNMENT_CANDIDATE_UNAVAILABLE"],
