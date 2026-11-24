@@ -15,12 +15,12 @@ const queue = object({
 });
 const queueErrors = ["ASSIGNMENT_QUEUE_UNAVAILABLE", "ASSIGNMENT_ASSURANCE_UNAVAILABLE"];
 const consentErrors = ["CONSENT_REQUIRED", "CONSENT_GENERATION_WITHDRAWN"];
-export const assignedExpert = "Requires the assigned expert, current qualification, session-bound MFA, and matching storage and review consent generations. The assignment access gate currently limits this workflow to synthetic tests.";
+export const assignedExpert = "Requires the assigned expert, current qualification, session-bound MFA, and matching storage and review consent generations.";
 
 export const ApiApproveExpert = () => OwnedOperation({
   summary: "Approve an expert credential", role: "MODERATOR", status: 201,
   origin: "required", rejectCrossSite: true, path: { name: "userId", schema: id },
-  description: "Revision-checked approval for an active, email-verified EXPERT. Training and confidentiality versions and evidence IDs must resolve from a current operator-installed qualification publication verified against a trusted Ed25519 public key. Evidence must match the target expert, version and purpose and remain valid. A supplied expiry must be in the future and within both evidence validity periods. Missing or invalid publication data prevents approval. Approval does not provision MFA.",
+  description: "Revision-checked approval for an active, email-verified EXPERT. Outside tests, the moderator needs current session-bound MFA. Training and confidentiality versions and evidence IDs must resolve from a current operator-installed qualification publication verified against a trusted Ed25519 public key. Evidence must match the target expert, version and purpose and remain valid. A non-null expiry must be in the future and within both evidence validity periods. Missing or invalid publication data prevents approval. Approval does not provision MFA.",
   body: {
     ...object({
       expectedRevision: revision, trainingVersion: evidenceId, policyVersion: evidenceId,
@@ -33,14 +33,14 @@ export const ApiApproveExpert = () => OwnedOperation({
     userId: id, status: enumeration("APPROVED"), approvalId: id, trainingVersion: evidenceId, policyVersion: evidenceId,
     approvedAt: timestamp, expiresAt: nullable(timestamp),
   }) }),
-  errors: { 400: ["VALIDATION_FAILED"], 403: ["EXPERT_INELIGIBLE"], 404: ["EXPERT_NOT_FOUND"],
+  errors: { 400: ["VALIDATION_FAILED"], 403: ["EXPERT_INELIGIBLE", "STAFF_ASSURANCE_REQUIRED"], 404: ["EXPERT_NOT_FOUND"],
     409: [fieldError("RESOURCE_REVISION_CONFLICT")], 503: ["EXPERT_APPROVAL_UNAVAILABLE"] },
 });
 
 export const ApiCreateAssignment = () => OwnedOperation({
   summary: "Assign a video to an expert", role: "MODERATOR", status: 201,
   origin: "required", rejectCrossSite: true, idempotent: true,
-  description: "Creates an assignment for a ready video and a qualified expert. Requires current storage and review consent and the current credential revision. A non-null deadline must not exceed expiry. The assignment creation gate currently limits this operation to synthetic tests.",
+  description: "Creates an assignment for a ready video and a qualified expert. Requires current moderator MFA, storage and review consent, and the current credential revision. A non-null deadline must not exceed expiry.",
   body: {
     ...object({ videoId: id, expertId: id, expectedCredentialRevision: revision, dueAt: nullable(utcTimestamp), expiresAt: nullable(utcTimestamp) }),
     example: { videoId: "video-1", expertId: "expert-1", expectedCredentialRevision: 1, dueAt: null, expiresAt: null },
@@ -56,24 +56,53 @@ export const ApiCreateAssignment = () => OwnedOperation({
 
 export const ApiExpertAssignments = () => OwnedOperation({
   summary: "List my expert assignments", role: "EXPERT", query: queueQuery, origin: "optional", rejectCrossSite: true,
-  description: "Returns up to 50 assignment metadata entries owned by the session expert. Excludes assignments whose video owner has closed their account. Requires current session-bound MFA and is available only with synthetic assurance in tests.",
+  description: "Returns up to 50 assignment metadata entries owned by the session expert. Excludes assignments whose video owner has closed their account. Requires current session-bound MFA.",
   response: queue, errors: { 400: ["VALIDATION_FAILED"], 403: ["ASSIGNMENT_ASSURANCE_REQUIRED"], 503: queueErrors },
 });
 
 export const ApiModeratorAssignments = () => OwnedOperation({
   summary: "List assignments in my moderator scope", role: "MODERATOR", query: queueQuery, origin: "optional", rejectCrossSite: true,
-  description: "Returns up to 50 metadata entries filtered by current assignment-specific grants before pagination. Excludes assignments whose video owner has closed their account. Requires session-bound MFA and a successful read audit. The production queue remains blocked by the grant provisioning gate even with valid MFA.",
+  description: "Returns up to 50 metadata entries filtered by current assignment-specific grants before pagination. Excludes assignments whose video owner has closed their account. Requires session-bound MFA and a successful read audit. Outside tests, grants must be bound to the moderator's current trusted staff identity and MFA enrollment epoch.",
   response: queue, errors: { 400: ["VALIDATION_FAILED"], 403: ["ASSIGNMENT_ASSURANCE_REQUIRED"],
-    503: [...queueErrors, "MODERATOR_QUEUE_PROVISIONING_UNAVAILABLE"] },
+    503: queueErrors },
 });
 
 export const ApiAssignmentCandidate = () => OwnedOperation({
   summary: "Check a known video–expert pair", role: "MODERATOR", origin: "optional", rejectCrossSite: true,
-  description: "Checks eligibility for a known pair under session-bound MFA in synthetic tests. Returns the credential revision needed for assignment. Requests outside the test environment are denied.",
+  description: "Checks eligibility for a known video and expert under session-bound moderator MFA. Returns the credential revision needed for assignment.",
   query: ["videoId", "expertId"].map(name => ({ name, schema: id, required: true })),
   response: object({ candidate: object({ videoId: id, expertId: id, expectedCredentialRevision: revision }) }),
   errors: { 400: ["VALIDATION_FAILED"], 403: ["ASSIGNMENT_ASSURANCE_REQUIRED"], 404: ["ASSIGNMENT_CANDIDATE_UNAVAILABLE"],
     503: [...queueErrors, "ASSIGNMENT_EVIDENCE_UNAVAILABLE", "ASSIGNMENT_UNAVAILABLE"] },
+});
+
+const grantUuid = { type: "string", format: "uuid" };
+const grantErrors = {
+  400: ["VALIDATION_FAILED", "INVALID_REQUEST"],
+  403: ["ASSIGNMENT_GRANT_ADMIN_REQUIRED", "ASSIGNMENT_ADMIN_MFA_REQUIRED", "ASSIGNMENT_ADMIN_PROVISIONING_REQUIRED"],
+  404: ["ASSIGNMENT_GRANT_NOT_FOUND"],
+  409: ["RESOURCE_REVISION_CONFLICT"],
+  503: ["ASSIGNMENT_GRANT_UNAVAILABLE", "ASSIGNMENT_ADMIN_MFA_UNAVAILABLE", "ASSIGNMENT_ADMIN_PROVISIONING_UNAVAILABLE"],
+};
+
+export const ApiGrantModeratorAssignment = () => OwnedOperation({
+  summary: "Grant a moderator access to one assignment", role: "ADMIN", status: 201,
+  origin: "required", rejectCrossSite: true,
+  description: "Requires session-bound MFA and the signed ASSIGNMENT_GRANT_ADMIN permission. Creates an expiring grant for one moderator and one assignment using the current scope revision.",
+  body: { ...object({ assignmentId: id, moderatorId: id, expectedRevision: revision, expiresAt: utcTimestamp }),
+    example: { assignmentId: "assignment-1", moderatorId: "moderator-1", expectedRevision: 0, expiresAt: "2026-11-24T12:00:00.000Z" } },
+  response: object({ scopeId: grantUuid, grantId: grantUuid, revision, kind: enumeration("GRANTED"), expiresAt: timestamp }),
+  errors: grantErrors,
+});
+
+export const ApiRevokeModeratorAssignment = () => OwnedOperation({
+  summary: "Revoke a moderator assignment grant", role: "ADMIN", status: 200,
+  origin: "required", rejectCrossSite: true,
+  description: "Requires session-bound MFA and the signed ASSIGNMENT_GRANT_ADMIN permission. Revokes the specified current grant using the scope revision.",
+  body: { ...object({ scopeId: grantUuid, grantId: grantUuid, expectedRevision: revision }),
+    example: { scopeId: "00000000-0000-4000-8000-000000000001", grantId: "00000000-0000-4000-8000-000000000002", expectedRevision: 1 } },
+  response: object({ scopeId: grantUuid, grantId: grantUuid, revision, kind: enumeration("REVOKED"), expiresAt: timestamp }),
+  errors: grantErrors,
 });
 
 export const ApiAssignmentPlayback = () => OwnedOperation({

@@ -14,15 +14,15 @@ consumer for storage/review withdrawals. It grants no new access or account dele
 
 **T11 implementation:** Block/report and scoped moderator endpoints are described
 in [Safety and privacy](SAFETY-PRIVACY.md). Moderator access requires MODERATOR
-plus real session-bound staff assurance; its production source is not configured.
+plus real session-bound staff assurance from the signed staff identity configured on the host.
 ADMIN does not inherit these permissions. Account closure/deletion remains deferred. T14 applies reciprocal blocking to matching.
 
-**C035 / PA2 implementation (partial).** The [assignment queue contract](ASSIGNMENT-QUEUES-API.md)
+**C035 / PA2 implementation.** The [assignment queue contract](ASSIGNMENT-QUEUES-API.md)
 requires server-derived identity and session-bound staff assurance. Moderator
 queue reads filter by current, unrevoked, unexpired assignment-specific grants
-before pagination and require a successful read audit. Grant/revoke is an internal ADMIN service requiring
-trusted provisioning and MFA. Production gates remain in place and external
-grant administration is pending.
+before pagination and require a successful read audit. The grant and revoke
+endpoints require an active ADMIN session, current MFA and the signed
+`ASSIGNMENT_GRANT_ADMIN` permission.
 
 **T08 / C043–C048 implementation.** The [private draft contract](T08-DELIVERY.md#contract)
 uses the C034 assignment authorization transaction for playback and draft access.
@@ -34,12 +34,12 @@ QA return and resubmission, and an approved review receipt.
 
 **C033 implementation:** [Assignment API](ASSIGNMENT-API.md) defines
 `POST /expert-admin/assignments`, review-consent generation binding and durable
-idempotency. Its assignment creation gate limits it to synthetic tests.
+idempotency. Outside tests, it requires real session-bound moderator MFA.
 
 **C032 implementation:** The moderator-only expert approval endpoint and its
 fail-closed evidence-source boundary are documented in
-[Expert approval](EXPERT-APPROVAL.md). It introduces no member video access or MFA
-mechanism and does not change the existing authentication responses below.
+[Expert approval](EXPERT-APPROVAL.md). Outside tests, approval requires
+session-bound moderator MFA and operator-provisioned signed qualification evidence.
 
 **Status:** Health/readiness and `/auth/register`, `/auth/verify-email`, `/auth/resend-verification`, `/auth/login`, `/auth/me`, `/auth/logout`, `/auth/logout-all`, `/auth/forgot-password` and `/auth/reset-password` are implemented. Implemented business scope and release gates are defined by the feature notes above and their linked documents; remaining proposed routes are DESIGN ONLY. See `EMAIL-AUTH-SESSIONS.md` and [Authentication recovery](AUTH-RECOVERY.md) for tested details.
 
@@ -107,10 +107,12 @@ not changes to current auth.
 | GET       | `/videos/me`                       | Owner                   | Private metadata list                                                                                     |
 | POST      | `/videos/:id/playback`             | Owner                   | Owner-only playback; expert access uses the assignment-bound route below                                  |
 | DELETE    | `/videos/:id`                      | Owner                   | Revoke owner access, atomically cancel active assignments (C051), and enqueue cleanup                   |
-| POST      | `/expert-admin/assignments`        | Moderator               | C033: strict DTO, both consents, generation, qualification revision and Idempotency-Key; synthetic only    |
-| POST      | `/expert/assignments/:assignmentId/playback` | Expert | C034 assignment-bound playback, limited to synthetic tests by the assignment access gate. See [playback contract](EXPERT-PLAYBACK-API.md). |
+| POST      | `/expert-admin/assignments`        | Moderator               | C033: moderator MFA, both consents, generation, qualification revision and Idempotency-Key |
+| POST      | `/expert/assignments/:assignmentId/playback` | Expert | C034 assignment-bound playback using current MFA, qualifications and consent. [Playback contract](EXPERT-PLAYBACK-API.md) |
 | GET       | `/expert/assignments/me`           | Expert                  | C035 own metadata only, server identity, assurance and cursor pagination; see [queue contract](ASSIGNMENT-QUEUES-API.md) |
-| GET       | `/expert-admin/assignments`        | Moderator               | C035 PA2 grant-filtered metadata/status/cursor reader; production assurance/provisioning gates remain; see [contract](ASSIGNMENT-QUEUES-API.md) |
+| GET       | `/expert-admin/assignments`        | Moderator               | C035 PA2 grant-filtered metadata, with current MFA and grant binding. [Queue contract](ASSIGNMENT-QUEUES-API.md) |
+| POST      | `/expert-admin/assignment-grants` | Admin | Grant one moderator scoped access. Requires current MFA and signed `ASSIGNMENT_GRANT_ADMIN` permission. |
+| POST      | `/expert-admin/assignment-grants/revoke` | Admin | Revoke the current scope grant using its revision and ID. Requires the same MFA and permission. |
 | GET       | `/expert-admin/assignments/candidate` | Moderator             | C035 known video/expert pair eligibility check; no public directory/search                               |
 | GET       | `/expert/assignments/:id/draft`    | Assigned expert         | Audit the private draft read without initializing a draft. Return the draft or null with nullable, server-owned `durationMs`, or the submitted or approved receipt while the editor is locked. |
 | POST      | `/expert/assignments/:id/draft`    | Assigned expert         | Empty JSON initializes one DRAFT at version 1 per assignment or returns the existing editable review. A locked submission returns `409`. |

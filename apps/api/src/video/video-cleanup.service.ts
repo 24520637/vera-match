@@ -7,6 +7,7 @@ import {
 import { PrismaService } from "../database/prisma.service";
 import { EnvironmentService } from "../config/environment.service";
 import { PrivateStorageService } from "./private-storage.service";
+import { ClosureMediaService } from "../account-closure/closure-media.service";
 
 /** Durable at-least-once removal. No raw storage/SQL errors or object keys in logs. */
 @Injectable()
@@ -19,6 +20,7 @@ export class VideoCleanupService implements OnModuleInit, OnModuleDestroy {
     private readonly prisma: PrismaService,
     private readonly storage: PrivateStorageService,
     private readonly environment: EnvironmentService,
+    private readonly closureMedia?: ClosureMediaService,
   ) {}
   onModuleInit() {
     // Tests explicitly drive the real worker to exercise failures and restart recovery.
@@ -140,6 +142,7 @@ export class VideoCleanupService implements OnModuleInit, OnModuleDestroy {
         if (retry.count) this.logger.warn("VIDEO_CLEANUP_RETRY_SCHEDULED");
       }
     }
+    await this.closureMedia?.reconcileReady();
   }
   private async enqueueWithdrawals() {
     // A media-only receipt never marks the shared task COMPLETE: matching/report

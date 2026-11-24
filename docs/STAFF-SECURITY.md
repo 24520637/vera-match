@@ -1,6 +1,6 @@
 # Staff security integration
 
-Status: C064 PARTIAL. Cryptographic primitives, signed authority instructions and transactional provisioning persistence are implemented. Real HTTP MFA enrollment/recovery and the Safety assurance adapter are implemented and tested. Expert qualification/queue adapters and independent recovery fencing remain incomplete. Privileged access still requires genuine identity, keys, MFA and each existing business authorization. This document does not assert production readiness.
+Status: C064 PARTIAL. Signed staff provisioning, HTTP MFA, the Safety assurance adapter, and the expert assignment and QA authorization paths are implemented. Privileged access requires trusted identity, keys, MFA and the relevant assignment, consent or grant. The host must supply the actual trust publications. Independent restriction recovery fencing remains open.
 
 ## Cryptographic contract
 
@@ -30,7 +30,7 @@ External public-key file format: JSON with schemaVersion 1 and keys array, each 
 
 The operator-only command is npm run staff:provision -- --directive ABSOLUTE_SIGNED_FILE --database-fingerprint SHA256 --apply. It starts no HTTP listener or background workers. The target fingerprint is SHA-256 of JSON.stringify([URL.protocol, URL.hostname, URL.port, URL.pathname, URL.searchParams.get("schema") ?? "public"]); credentials are excluded. Review the target independently. The command is not run automatically and has not been applied to the developer database. No root private keys or successful real identities are supplied by this repository.
 
-At the authority-foundation boundary MFA HTTP/UI were still pending. The real MFA implementation and remaining integration gates are detailed below. Expert qualification/queue adapters remain closed until genuinely connected. Qualification evidence and independent restriction recovery are not provided by a provisioning signature alone.
+See [expert qualification](EXPERT-QUALIFICATION-SOURCE.md) for the independent signed evidence and [grant administration](ASSIGNMENT-QUEUES-API.md#grant-administration) for moderator scope. Install the corresponding trust publications on the host before staging acceptance.
 
 Initial MFA enrollment also requires an independent 256-bit activation capability delivered through the trusted operator channel. The ACTIVE signed directive binds only its domain-separated enrollmentKeyHash; the API never receives that capability through provisioning evidence. Revoked directives carry null. Changing that hash without an explicit new MFA epoch is rejected, and confirmed device history must prevent reusing it after factor revocation. This requirement is part of the pending enrollment implementation; provisioning itself does not produce MFA assurance.
 
@@ -54,7 +54,7 @@ All routes use /api/auth/staff-mfa and the existing HttpOnly session cookie. Eve
 
 Setup, devices, proof, expiry and recovery are bound to the exact staff subject, signed identity revision/enrollment epoch and current Session. Revoked device history cannot be deleted/recreated or truncated to regain initial enrollment. Missing/revoked/expired factors, consumed counters, foreign devices, another setup session and invalid credentials deny generically. ADMIN does not inherit MODERATOR report access. Session and proof expiry cannot extend the original authenticated session or staff authority expiry. TOTP verification and audit commit atomically; audit failure consumes neither the factor nor the session.
 
-The SafetyModule now injects the genuine StaffMfaService into StaffAssuranceSource. A standalone source with no integration denies; production never reads a role, request header, environment success flag or testOnly fixture as MFA evidence. Existing test overrides remain limited to their isolated test harnesses. Shared Expert providers still require a separate genuine qualification/eligibility integration and are not silently opened by this change.
+Safety, Expert and QA resolve session-bound assurance through StaffMfaService. Expert authorization adds signed qualification and current consent checks. The deployed moderator grant also binds the recipient's staff identity and MFA enrollment epoch. Test-only proof stays in isolated fixtures.
 
 ## Wrapping keys and rotation
 

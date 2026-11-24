@@ -59,6 +59,10 @@ uses --no-owner/--no-acl and therefore cannot certify production role restoratio
    Verify exit status and archive integrity; archive listing alone is not restore proof.
 3. Restore into a newly provisioned, isolated target with no public app/storage access.
    Verify the target identity independently. Do not restore over the live database.
+   Set `RECOVERY_MODE=isolated` in the restore target's API service environment before
+   restoring. The API exits with `RECOVERY_FENCE_CLOSED` before starting workers or
+   opening a listener while this mode is set. Keep the restore target isolated
+   while the independent restriction journal and replay are pending.
    Restore roles/ACLs through an approved procedure; they are excluded by our rehearsal.
 4. Verify migration history/checksums, FK/trigger/index definitions, synthetic integrity
    probes, retained evidence and application readiness using restricted access.

@@ -48,7 +48,8 @@ export class AccountClosureService {
           await tx.reviewDecisionEvidence.count({ where: { moderatorSubjectId: actor.subjectId } }) ||
           await tx.expertCredentialEvent.count({ where: { actorEvidence: { path: ["subject"], equals: actor.subjectId } } }) ||
           await tx.assignmentEvent.count({ where: { actorEvidence: { path: ["subject"], equals: actor.subjectId } } }));
-        if (historicalStaff || await tx.auditLog.count({ where: { actorId: user.id, OR: [
+        if (historicalStaff || await tx.staffIdentity.count({ where: { userId: user.id } }) ||
+          await tx.auditLog.count({ where: { actorId: user.id, OR: [
           { action: { startsWith: "EXPERT_CREDENTIAL_" } }, { action: { startsWith: "ASSIGNMENT_MODERATOR_" } },
         ] } }) || await tx.expertCredential.count({ where: { userId: user.id } }) ||
             await tx.expertAssignment.count({ where: { OR: [{ expertId: user.id }, { assignedById: user.id }] } }) ||

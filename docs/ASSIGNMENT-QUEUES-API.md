@@ -1,8 +1,7 @@
 # C035 assignment metadata and known-pair candidate API
 
 Ticket T06. Planned subject: `feat(expert-ui): build assignment and moderation queues`.
-This is a partial feature pending production assurance/provisioning and reviewed
-external grant administration. Huong approved Option 2: MODERATOR may view assignments
+Huong approved Option 2: MODERATOR may view assignments
 within their server-authorized moderation scope, not merely their own creations.
 PA2 defines explicit per-assignment grants, never global or creator access.
 
@@ -10,9 +9,7 @@ PA2 update: Huong approved explicit per-assignment PostgreSQL grants administere
 by trusted-provisioned ACTIVE/verified ADMIN with real session-bound MFA. Expiry
 is mandatory; regrant creates a new lifecycle. Stage 1 adds persistence and DB
 tests; see [DATABASE.md](DATABASE.md#c035-pa2-persistence-and-reader).
-Stage 2 adds an internal grant/revoke service. Stage 3 connects the moderator queue
-to those grants. Real trusted sources are not implemented; production remains
-closed. No external grant/revoke route is approved here.
+The grant/revoke service is available through the authenticated ADMIN endpoints below. Moderator queue and QA reads check grant expiry, revocation and binding to the recipient's current staff identity and MFA enrollment epoch.
 
 ## Read contracts implemented in this branch
 
@@ -54,13 +51,18 @@ read/copied before a later revoke cannot be recalled. Every page rechecks member
 
 Missing/failing MFA source returns 503 ASSIGNMENT_ASSURANCE_UNAVAILABLE. Invalid or
 expired assurance returns 403; missing/expired/revoked sessions return 401. Synthetic
-proofs are rejected outside test. Even a real-looking MFA proof cannot open production:
-an explicit MODERATOR_QUEUE_PROVISIONING_UNAVAILABLE release gate remains outside
-test until real trusted PA2 provisioning and grant provenance are reviewed/integrated.
-This gate is not a client/environment bypass or an invented provider-readiness API.
-Default sources remain closed. Unexpected DB/audit failures and read-time grant
-expiry return 503 ASSIGNMENT_QUEUE_UNAVAILABLE, never a fake empty success. Existing
-private/no-store headers, strict queries and 429 Retry-After remain unchanged.
+proofs are rejected outside test. Deployed reads exclude synthetic and legacy grants. Reissue them through the authenticated grant flow. Unexpected DB/audit failures and read-time grant expiry return 503 ASSIGNMENT_QUEUE_UNAVAILABLE.
+
+## Grant administration
+
+Both endpoints require an active, verified ADMIN session, current MFA, and the signed `ASSIGNMENT_GRANT_ADMIN` permission. Requests use JSON and the configured exact Origin.
+
+| Method and path | Body | Success |
+| --- | --- | --- |
+| POST `/api/expert-admin/assignment-grants` | `assignmentId`, `moderatorId`, `expectedRevision`, `expiresAt` as a UTC timestamp with milliseconds | 201 |
+| POST `/api/expert-admin/assignment-grants/revoke` | `scopeId`, `grantId`, `expectedRevision` | 200 |
+
+Both return `scopeId`, `grantId`, `revision`, `kind` and `expiresAt`. The first grant uses revision 0. Retain the response revision for the next change on that scope. The recipient must be a currently authorized moderator, and the grant cannot outlive their staff authorization. Verify administration and QA scope on staging before release.
 
 ## Approved PA2 policy and integration boundaries
 
@@ -72,25 +74,12 @@ The original inspection before PA2 persistence found the following boundaries:
   There is no relationship mapping those report cases to assignment authorization.
 - AuthContext provides identity/session/role; StaffAssurance proves session-bound
   assurance. Neither defines which assignments a moderator may view.
-- PA2 provides explicit assignment/subject scope, grant/revoke history tables and
-  an internal mutation service and grant-filtered queue reader. Real trusted
-  provisioning/MFA sources and external administration remain unavailable.
+- PA2 provides explicit assignment/subject scope, grant/revoke history tables,
+  and a grant-filtered queue reader.
 
-## Stage 2 internal mutation service (no HTTP endpoint)
+## Stage 2 grant and revoke service
 
-AssignmentGrantsService exposes grant(auth, input) and revoke(auth, input) only
-inside the server. It is registered through AssignmentQueuesModule; no controller
-or external grant/revoke route exists. ADMIN is exact, ACTIVE and email-verified,
-with a live session. Role is not provisioning or MFA. AssignmentGrantProvisioningSource
-defaults to undefined, as does the existing StaffAssuranceSource. Missing sources
-return sanitized 503; invalid, mismatched or expired proofs return 403. Test-only
-proofs from either provider are rejected outside the isolated test environment.
-No client claim or environment switch supplies a proof.
-
-Provisioning providers must attest current authorization under the ADMIN User lock;
-revocation must coordinate that lock. MFA providers must bind the real session and
-coordinate Session/User locks for invalidation. No production implementation of
-either source is provided or approved by these interfaces.
+AssignmentGrantsService resolves signed administrator provisioning under the same User lock used to apply or revoke directives. MFA binds the proof to the current session. Missing sources return sanitized 503; invalid, mismatched or expired proofs return 403. Test-only evidence stays in isolated fixtures.
 
 Mutation lock order is sorted participating Users, Session, live Assignment (when
 present), then Scope. Target identity/relationships are re-read under those locks.
@@ -149,9 +138,7 @@ The approved scope unit is one assignment and one live moderator identity. Stage
 tests actual PostgreSQL grants through the Stage 2 service and real queue HTTP,
 including creator denial, cross-scope pagination, expiry, revocation and both
 read/revoke transaction orderings. Synthetic providers attest only synthetic test
-identities. They do not establish real provisioning/MFA acceptance. External ADMIN
-grant/revoke APIs, durable HTTP idempotency, real trusted sources and retention/
-de-identification remain open integration/policy work; no broader scope is implied.
+identities. Staging acceptance must exercise the signed provision, MFA and authenticated endpoints against the target deployment. Retention/de-identification and durable HTTP idempotency remain separate work.
 
 `GET /api/expert-admin/assignments/candidate?videoId=...&expertId=...` is a MODERATOR
 known-pair check, not a directory/search or public candidate list. It returns only:
@@ -175,14 +162,12 @@ no authority. Session and server assurance are rechecked with a fresh PostgreSQL
 clock after external I/O and before returning. Candidate qualification expiry is
 also checked after the required audit. Minimal read audits contain no evidence/text.
 
-The queue module reuses the StaffAssuranceSource interface.
-Expert/candidate reads retain their existing test-only gates and synthetic policy
-requirements. Moderator queue reads verify session-bound assurance and real grants,
-but retain the explicit production PA2 provisioning gate described above. The
-[signed qualification source](EXPERT-QUALIFICATION-SOURCE.md) supports
-operator-installed evidence and fails closed when it is unavailable. That
-publication supplies neither session-bound MFA nor moderator scope, and the
-production provisioning gate remains in place.
+The queue uses session-bound StaffAssuranceSource. Outside tests, candidate
+reads also check the [signed qualification source](EXPERT-QUALIFICATION-SOURCE.md)
+and signed consent publication. The moderator queue filters by current grants
+before pagination. Each deployed grant must match the moderator's active staff
+identity and MFA enrollment epoch. Qualification, MFA and grant scope are
+verified separately.
 
 ## UI and C033 creation
 

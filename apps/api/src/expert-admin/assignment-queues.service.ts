@@ -9,6 +9,7 @@ import { nextCursor } from "../safety/safety.validation";
 import { ExpertApprovalRegistry, ExpertEvidenceSource } from "./expert-approval.sources";
 import { assignmentEvidence, requireCurrentAssignmentEvidence } from "./assignment-evidence";
 import { candidateQuery, queueQuery } from "./assignment-queues.validation";
+import { assignmentGrantRuntimeFilter } from "./assignment-grant-scope";
 
 function denied(): never { throw new ForbiddenException({ code: "ASSIGNMENT_ASSURANCE_REQUIRED", message: "Current staff assurance is required for assignment metadata." }); }
 function unavailable(): never { throw new NotFoundException({ code: "ASSIGNMENT_CANDIDATE_UNAVAILABLE", message: "This candidate pair is unavailable." }); }
@@ -34,9 +35,8 @@ export class AssignmentQueuesService {
 
   private async read<T>(auth: AuthContext, role: "EXPERT" | "MODERATOR", peers: string[],
     action: (tx: Prisma.TransactionClient, currentTime: () => Promise<Date>) => Promise<T>): Promise<T> {
-    // No production metadata/assurance publication contract has been approved.
-    // Neither role nor NODE_ENV alone grants access: test overrides must attest MFA.
-    if (this.environment.values.nodeEnv !== "test" || auth.user.role !== role) denied();
+    if (auth.user.role !== role) denied();
+    const testRuntime = this.environment.values.nodeEnv === "test";
     try {
       return await this.prisma.$transaction(async tx => {
         const ids = [...new Set([auth.user.id, ...peers])].sort();
@@ -48,7 +48,7 @@ export class AssignmentQueuesService {
           throw new UnauthorizedException({ code: "UNAUTHENTICATED", message: "A valid session is required." });
         if (actor.role !== role) denied();
         const proof = await this.resolveAssurance(tx, auth);
-        if (!proof || proof.userId !== actor.id || proof.sessionId !== session.id || proof.level !== "MFA" || proof.testOnly !== true ||
+        if (!proof || proof.userId !== actor.id || proof.sessionId !== session.id || proof.level !== "MFA" || proof.testOnly !== testRuntime ||
           !(proof.verifiedAt instanceof Date) || !Number.isFinite(proof.verifiedAt.getTime()) ||
           !(proof.expiresAt instanceof Date) || !Number.isFinite(proof.expiresAt.getTime())) denied();
         const currentTime = async () => {
@@ -116,10 +116,7 @@ export class AssignmentQueuesService {
           return at;
         };
         await now();
-        // No real PA2 provisioning integration exists yet. A real-looking MFA
-        // flag alone must not enable production reads of synthetic/legacy grants.
-        // This explicit release gate requires reviewed integration, not an env flag.
-        if (this.environment.values.nodeEnv !== "test") queueUnavailable("MODERATOR_QUEUE_PROVISIONING_UNAVAILABLE");
+        const realGrant = assignmentGrantRuntimeFilter(this.environment.values.nodeEnv === "test");
         const rows = await tx.$queryRaw<{ id: string; status: AssignmentStatus; dueAt: Date | null; grantExpiresAt: Date }[]>(Prisma.sql`
           WITH clock AS MATERIALIZED (SELECT clock_timestamp() AS at), authorized AS MATERIALIZED (
             SELECT a.id, a.status, a."dueAt", g."expiresAt" AS "grantExpiresAt"
@@ -130,7 +127,7 @@ export class AssignmentQueuesService {
             JOIN "ExpertActorIdentity" i ON i."subjectId"=s."moderatorSubjectId" AND i."userId"=${actor.id}
             JOIN "AssignmentModeratorGrantEvent" g ON g.id=s."currentGrantId" AND g."scopeId"=s.id AND g.kind='GRANTED'
             CROSS JOIN clock
-            WHERE g."expiresAt">clock.at AND NOT EXISTS (
+            WHERE g."expiresAt">clock.at ${realGrant} AND NOT EXISTS (
               SELECT 1 FROM "AssignmentModeratorGrantEvent" r WHERE r."grantId"=g.id AND r.kind='REVOKED')
           )
           SELECT id,status,"dueAt","grantExpiresAt" FROM authorized WHERE TRUE
@@ -150,7 +147,7 @@ export class AssignmentQueuesService {
 
   async candidate(auth: AuthContext, input: unknown) {
     const query = candidateQuery(input);
-    if (this.environment.values.nodeEnv !== "test" || auth.user.role !== "MODERATOR") denied();
+    if (auth.user.role !== "MODERATOR") denied();
     // Locator only. No private fields are projected or authorized before locks.
     const locator = await this.prisma.video.findUnique({ where: { id: query.videoId }, select: { ownerId: true } }).catch(() => {
       throw new ServiceUnavailableException({ code: "ASSIGNMENT_QUEUE_UNAVAILABLE", message: "Candidate access could not be confirmed." });
@@ -163,7 +160,8 @@ export class AssignmentQueuesService {
         const generation = await this.consent.requireInTransaction(tx, video.ownerId, ["VIDEO_STORAGE", "EXPERT_VIDEO_REVIEW"]);
         await this.consent.requireGenerationInTransaction(tx, video.ownerId, generation.subjectId, video.storageConsentVersion, "VIDEO_STORAGE");
         const policies = await tx.consent.findMany({ where: { userId: video.ownerId, purpose: { in: ["VIDEO_STORAGE", "EXPERT_VIDEO_REVIEW"] } }, include: { policyEvidence: true } });
-        if (policies.length !== 2 || policies.some(row => row.policyEvidence?.testOnly !== true)) unavailable();
+        const testRuntime = this.environment.values.nodeEnv === "test";
+        if (policies.length !== 2 || policies.some(row => row.policyEvidence?.testOnly !== testRuntime)) unavailable();
       } catch (error) { if (error instanceof ForbiddenException) unavailable(); throw error; }
       await tx.$queryRaw`SELECT "userId" FROM "ExpertCredential" WHERE "userId"=${query.expertId} FOR UPDATE`;
       const expert = await tx.user.findUnique({ where: { id: query.expertId } });

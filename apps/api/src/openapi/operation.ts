@@ -48,7 +48,7 @@ type Parameter = { name: string; schema: SchemaObject; description?: string; req
 type Options = {
   summary: string;
   description: string;
-  role: "MEMBER" | "EXPERT" | "MODERATOR";
+  role: "MEMBER" | "EXPERT" | "MODERATOR" | "ADMIN";
   response: SchemaObject;
   status?: 200 | 201;
   body?: SchemaObject;
