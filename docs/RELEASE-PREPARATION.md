@@ -4,7 +4,7 @@ Status: code preparation only. No hosting, DNS, certificates, public API base UR
 
 ## Scope and dependencies
 
-The generated OpenAPI contract covers 69 operations across 61 paths, including API discovery, account flows, staff MFA, consent, private video, review, safety and matching. Regression tests compare the generated operations with the registered routes and check summaries, descriptions, security requirements, request schemas, status codes, report enums and selected validators.
+The generated OpenAPI contract covers 71 operations across 63 paths, including API discovery, account flows, staff MFA, moderator grants, consent, private video, review, safety and matching. Regression tests compare the generated operations with the registered routes and check summaries, descriptions, security requirements, request schemas, status codes, report enums and selected validators.
 
 No authentication, consent, assignment, cleanup or release gate is relaxed. No legal policy is published. No local database migration or deployment is performed.
 
@@ -38,7 +38,7 @@ The nginx template forwards web traffic to Next.js, which rewrites /api to serve
 
 ## Environment and build
 
-Store secrets in host-owned files outside the Git checkout, readable only by the service user/root. Do not commit them or paste them into chat. API settings follow apps/api/.env.example and the actual Environment parser. Provide DATABASE_URL; APP_BASE_URL and CORS_ORIGIN as the same public HTTPS origin; secure cookie settings; real authenticated TLS SMTP; HTTPS private storage endpoint and least-privilege credentials; VIDEO_DURATION_FFPROBE pointing to the installed binary; API_DOCS_MODE=public. Native Mailpit verifies local integration only and is not an Internet email provider. Production sender-domain and Gmail/Outlook delivery must be verified separately.
+Use the repository-root [`.env.example`](../.env.example) as the starting point for host configuration. Place secrets in host-owned files outside the checkout, readable only by the service user and root. For staging, use a separate PostgreSQL database, private storage bucket and keys. Configure `DATABASE_URL`, the same staging HTTPS origin in `APP_BASE_URL` and `CORS_ORIGIN`, secure cookies, authenticated TLS SMTP, HTTPS private storage with scoped credentials, `VIDEO_DURATION_FFPROBE` pointing to the installed binary, and `API_DOCS_MODE=public`. Generate a random 32-byte `MATCHING_HANDLE_KEY` encoded as 64 hexadecimal characters and keep it stable across restarts. Verify delivery with the SMTP provider used on the host.
 
 The web needs API_INTERNAL_ORIGIN=http://127.0.0.1:4000 at BOTH build and runtime. A separate web host must use an approved private API origin instead. Never put this server-only variable or storage secrets in NEXT_PUBLIC_* variables. The API and web systemd EnvironmentFile paths are /etc/vera-match/api.env and /etc/vera-match/web.env. Create the vera service account and the .next/cache directory with appropriate ownership before enabling the templates; Next.js needs writable cache storage.
 
@@ -53,7 +53,7 @@ From the pinned release checkout, with host environment loaded privately:
     npm run lint
     npm run release:preflight
 
-Preflight reuses the built API configuration parser, checks documentation mode, API internal origin and native decoder execution. It does not connect to a database, send mail, apply a migration or prove runtime availability. It never prints supplied secret values.
+Preflight uses the built API configuration parser and checks documentation mode, the internal API origin, matching key format and native decoder execution. Run the HTTPS smoke test below after starting the services. For member-flow acceptance on staging, also verify email delivery, private storage, signed consent publication and matching with synthetic accounts.
 
 Before starting a new host, inspect prisma migrate status and have an approved backup/recovery plan. An authorized operator applies the already-reviewed additive migrations with prisma migrate deploy, never migrate reset, and never regenerates history. No startup service in this PR silently migrates a database. Start API and web only after schema compatibility is confirmed. Serve NODE_ENV=production; do not replace it with development to get around a failed gate.
 
@@ -70,9 +70,9 @@ The smoke check verifies the website, API discovery/liveness/readiness JSON, Swa
 | Gate | Required work and owner | Current behavior |
 | --- | --- | --- |
 | Published consent | Authorized owner approves exact EN/VI policy content, privacy basis and production registry | No synthetic policies enabled |
-| Staff access | Trusted MFA/provisioning and approved evidence; Phuc integrates Expert/Queue/Review consumers | Existing providers fail closed |
-| Closure completion | Phuc supplies REVIEW_CLAIMS and MATCHING domain receipts/minimization; Huong completes MEDIA/SAFETY/RECOVERY reconciliation | All aggregate consumers remain PENDING; production closure is gated |
-| Recovery | Huong implements independent restriction journal/checkpoint/fence and verifies old-backup replay before cutover | Production lifecycle-safe restore remains BLOCKED; C095 is a passing negative control |
+| Staff access | Install trusted staff authority and MFA keys, signed qualifications and approved consent. Verify scoped grants and the joined staff flow on staging. | Assignment and review access requires current staff assurance. QA grants bind the recipient's staff identity and enrollment epoch. |
+| Closure completion | Complete REVIEW_CLAIMS, MATCHING, SAFETY and RECOVERY reconciliation with the approved retention policy. | The MEDIA consumer acknowledges verified storage cleanup and cancellation receipts. Production closure remains gated. |
+| Recovery | Implement the independent restriction journal, authenticated checkpoint and old-backup replay before cutover. | `RECOVERY_MODE=isolated` keeps the API stopped on configured restore targets. Production restore and cutover remain blocked pending independent replay. |
 | Retention | Authorized privacy/legal owner approves retention/purge and holds; implement reviewed minimization without tampering with immutable evidence | No automatic hard deletion based on provisional periods |
 | Infrastructure | Hosting owner provisions domain/DNS, TLS, secrets, real SMTP, private storage, isolated DB, monitoring and access controls | Not provisioned by this PR |
 | Release sign-off | Review current T17/T18/T20 evidence and the final release candidate | CI or online docs alone are not production approval |
@@ -83,6 +83,4 @@ References: [NestJS OpenAPI](https://docs.nestjs.com/openapi/introduction), [Nex
 
 ## Verification recorded during code preparation
 
-On 2026-11-23: local Prisma validate/generate, API/web production builds, TypeScript/lint and the full native-decoder unit suite PASS (413 tests). The release-tooling suite PASS (5 tests), including rejection of a frontend HTML fallback at API health paths. The final public-docs test also checks serialized production Swagger settings for disabled submission and disabled authorization persistence. An initial combined-contract assertion expected only Phuc's 33 secured routes; it was expanded to include the actual protected Huong routes, preserving exact security-set comparison. A consumed-body cleanup error in the smoke helper was reproduced and corrected; the final four tooling tests pass.
-
-NOT RUN: systemd/nginx configuration on an actual Linux server, DNS/TLS provisioning, public live URL checks, real provider SMTP, production MFA/policy approval and lifecycle-safe recovery. Those cannot be certified by Windows unit tests or template files. Full PostgreSQL/native MinIO/browser/security integration is delegated to the existing unchanged CI suites on this PR and must be recorded at the final head before merge.
+The [integrated CI baseline](https://github.com/24520637/vera-match/actions/runs/45335511693) passed 37 steps at `c7c4de2`, including PostgreSQL, native MinIO, browser and disposable HTTPS tests. Recheck the candidate SHA after code or configuration changes. Validate the actual hosting configuration, DNS/TLS, SMTP, storage and staff workflow on staging before release.

@@ -1,6 +1,6 @@
 # Local setup and MVP deployment limits
 
-Use the current [README setup](../README.md) and [email authentication guide](EMAIL-AUTH-SESSIONS.md). Development uses Node.js 24, native PostgreSQL 18 at localhost:5433 and native Mailpit SMTP 1025/inbox 8025. No Docker is required. Keep credentials in ignored machine-local environment files. Preserve the committed initial migration; inspect migration status instead of recreating it. MinIO is a separate future media prerequisite.
+For a hosted staging instance, use the [deployment checklist](RELEASE-PREPARATION.md). For local development, use the [README setup](../README.md) and [email authentication guide](EMAIL-AUTH-SESSIONS.md). The local workflow uses Node.js 24, PostgreSQL 18 at localhost:5433, Mailpit at SMTP port 1025 and inbox port 8025, and a private MinIO bucket for video. Keep credentials in ignored machine-local files. Check the status of the committed migrations before applying them.
 
 ## MVP limiter and network model
 
@@ -12,7 +12,9 @@ Before deployment behind a proxy, document the proxy topology and trusted peers/
 
 ## Endpoints
 
-- http://localhost:3000: public site and email-authentication UI; profiles, matching and private review remain separate features.
+- http://localhost:3000: web UI.
+- http://localhost:4000/api: API discovery.
+- http://localhost:4000/api/docs: Swagger UI when enabled.
 - http://localhost:4000/api/health: process liveness.
 - http://localhost:4000/api/health/ready: PostgreSQL readiness.
 - http://localhost:8025: Mailpit test inbox; this is not external delivery.

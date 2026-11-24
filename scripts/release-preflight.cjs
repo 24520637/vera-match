@@ -3,8 +3,14 @@
 const { spawnSync } = require('node:child_process');
 function checkEnvironment(env) {
   const issues = [];
+  if (env.RECOVERY_MODE !== undefined && env.RECOVERY_MODE !== 'normal') {
+    issues.push('RECOVERY_MODE must be normal to start the API');
+  }
   if (env.NODE_ENV !== 'production') issues.push('NODE_ENV must be production');
   if (env.API_DOCS_MODE !== 'public') issues.push('API_DOCS_MODE must be public for this documented public demo');
+  if (!/^[a-f0-9]{64}$/i.test(env.MATCHING_HANDLE_KEY ?? '')) {
+    issues.push('MATCHING_HANDLE_KEY must be a 32-byte key encoded as 64 hexadecimal characters');
+  }
   if (!env.API_INTERNAL_ORIGIN) issues.push('API_INTERNAL_ORIGIN is required at web build and runtime');
   else {
     try { const u = new URL(env.API_INTERNAL_ORIGIN); if (!['http:', 'https:'].includes(u.protocol) || u.username || u.password || u.pathname !== '/' || u.search || u.hash) throw new Error(); }
