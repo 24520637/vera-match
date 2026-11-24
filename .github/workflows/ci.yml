@@ -14,6 +14,8 @@ jobs:
         with:
           node-version-file: .nvmrc
       - run: npm ci
+      - name: Reject high and critical production dependency advisories
+        run: npm audit --omit=dev --audit-level=high
       - name: Validate Prisma (requires DATABASE_URL for CLI parsing)
         run: npm run prisma:validate
         env:
@@ -23,7 +25,9 @@ jobs:
           DATABASE_URL: postgresql://ci:ci@localhost:5432/vera?schema=public
       - run: npm run test
       - run: node --test scripts/release-preflight.spec.cjs
+      - run: npm run test:recovery-journal
       - run: npm run build
+      - run: npm run lint
       - name: Start native PostgreSQL 18 (no Docker)
         shell: bash
         run: |

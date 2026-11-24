@@ -1,4 +1,5 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, UnauthorizedException } from "@nestjs/common";
+import { RecoveryJournalService } from "../recovery/recovery-journal.service";
 import { Prisma, type Session, type StaffIdentity } from "@prisma/client";
 import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import type { AuthContext } from "../auth/auth-context";
@@ -25,7 +26,7 @@ function deviceId(value:unknown):string{const id=text(value,36);if(!/^[a-f0-9]{8
 
 @Injectable()
 export class StaffMfaService{
- constructor(private readonly prisma:PrismaService,private readonly identities:StaffIdentityService,private readonly authority:StaffAuthority,private readonly keys:StaffMfaKeyring,private readonly passwords:PasswordService){}
+ constructor(private readonly prisma:PrismaService,private readonly identities:StaffIdentityService,private readonly authority:StaffAuthority,private readonly keys:StaffMfaKeyring,private readonly passwords:PasswordService,private readonly journal?:RecoveryJournalService){}
  private async run<T>(auth:AuthContext,operation:(tx:Prisma.TransactionClient,access:Access)=>Promise<T|Failure>):Promise<T>{
   const result=await this.prisma.$transaction(async tx=>{
    await tx.$queryRaw`SELECT id FROM "User" WHERE id=${auth.user.id} FOR UPDATE`;
@@ -52,6 +53,7 @@ export class StaffMfaService{
   await tx.staffMfaAttemptWindow.upsert({where:{subjectId:a.identity.subjectId},create:{subjectId:a.identity.subjectId,startedAt:a.now,attempts:1},update:expired?{startedAt:a.now,attempts:1}:{attempts:{increment:1}}});
  }
  private async event(tx:Prisma.TransactionClient,a:Access,kind:string,id?:string){
+  await this.journal?.record(tx,[a.identity.userId],"STAFF_RESTRICTION");
   await tx.staffMfaEvent.create({data:{subjectId:a.identity.subjectId,identityRevision:a.identity.revision,mfaEpoch:a.identity.mfaEpoch,kind,deviceId:id}});
   await tx.auditLog.create({data:{actorId:a.identity.userId,action:"STAFF_"+kind,subjectType:"StaffIdentity",subjectId:a.identity.subjectId}});
  }
@@ -70,6 +72,7 @@ export class StaffMfaService{
   return {pendingEnrollment:pending?{deviceId:pending.id,expiresAt:pending.pendingExpiresAt}:null,devices,verifiedUntil:proof?.expiresAt??null,recoveryEnrollmentAllowed:!!permit&&!permit.consumedAt&&permit.expiresAt>a.now&&permit.identityRevision===a.identity.revision&&permit.mfaEpoch===a.identity.mfaEpoch};
  });}
  private async rotate(tx:Prisma.TransactionClient,a:Access,device?:string){
+  await this.journal?.record(tx,[a.identity.userId],"STAFF_RESTRICTION");
   const now=await staffDatabaseNow(tx); if(a.session.expiresAt<=now||a.identity.expiresAt<=now)return denied();
   const token=randomBytes(32).toString("base64url"); const expiresAt=new Date(Math.min(a.session.expiresAt.getTime(),a.identity.expiresAt.getTime()));
   await tx.session.update({where:{id:a.session.id},data:{revokedAt:now}});
@@ -79,6 +82,7 @@ export class StaffMfaService{
   return {token,sessionId:session.id,expiresAt,verifiedUntil:device?proofExpiry:null};
  }
  private async codes(tx:Prisma.TransactionClient,a:Access){
+  await this.journal?.record(tx,[a.identity.userId],"STAFF_RESTRICTION");
   await tx.staffMfaRecoveryCode.updateMany({where:{subjectId:a.identity.subjectId,mfaEpoch:a.identity.mfaEpoch,consumedAt:null},data:{consumedAt:a.now}});
   const entries=newRecoveryCodes(); await tx.staffMfaRecoveryCode.createMany({data:entries.map(x=>({hash:x.hash,subjectId:a.identity.subjectId,mfaEpoch:a.identity.mfaEpoch}))});return entries.map(x=>x.code);
  }
@@ -98,6 +102,7 @@ export class StaffMfaService{
    }
    if(await tx.staffMfaDevice.count({where:{...where,state:"ACTIVE"}})>=5)return conflict();
    if(await tx.staffMfaDevice.count({where:{...where,state:"PENDING",pendingExpiresAt:{gt:a.now}}}))return conflict();
+   await this.journal?.record(tx,[a.identity.userId],"STAFF_RESTRICTION");
    await tx.staffMfaDevice.updateMany({where:{...where,state:"PENDING"},data:{state:"REVOKED",revokedAt:a.now}});
    const id=randomUUID(),secret=newTotpSecret(),expiresAt=new Date(Math.min(a.now.getTime()+300000,a.session.expiresAt.getTime(),a.identity.expiresAt.getTime()));
    try{

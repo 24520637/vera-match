@@ -1,6 +1,7 @@
 import { PasswordResetService } from "./password-reset.service";
 import { PasswordRecoveryService } from "./password-recovery.service";
 import { Module } from "@nestjs/common";
+import { RecoveryModule } from "../recovery/recovery.module";
 import { EnvironmentModule } from "../config/environment.module";
 import { PasswordService } from "./password.service";
 import { DatabaseModule } from "../database/database.module";
@@ -16,7 +17,7 @@ import { LoginService } from "./login.service";
 import { LogoutService } from "./logout.service";
 
 @Module({
-  imports: [EnvironmentModule, DatabaseModule],
+  imports: [EnvironmentModule, DatabaseModule, RecoveryModule],
   controllers: [AuthController],
   providers: [
     PasswordRecoveryService,

@@ -53,6 +53,30 @@ export class ExpertApprovalService {
   async approve(auth: AuthContext, targetId: string, body: unknown) {
     const input = parseExpertApproval(body);
     try {
+      // Authenticate before consulting external evidence, but do not hold row locks
+      // while it loads. The transaction below rechecks authority after the lookup.
+      const moderatorBeforeLookup = await this.prisma.user.findUnique({ where: { id: auth.user.id },
+        select: { role: true, status: true, emailVerifiedAt: true } });
+      if (!moderatorBeforeLookup || moderatorBeforeLookup.role !== UserRole.MODERATOR ||
+          moderatorBeforeLookup.status !== AccountStatus.ACTIVE || !moderatorBeforeLookup.emailVerifiedAt)
+        throw new ForbiddenException({ code: "FORBIDDEN", message: "An active verified moderator is required." });
+      const sessionBeforeLookup = await this.prisma.session.findUnique({ where: { id: auth.sessionId },
+        select: { userId: true, revokedAt: true, expiresAt: true } });
+      if (!sessionBeforeLookup || sessionBeforeLookup.userId !== auth.user.id || sessionBeforeLookup.revokedAt ||
+          sessionBeforeLookup.expiresAt <= new Date())
+        throw new UnauthorizedException({ code: "UNAUTHENTICATED", message: "A valid session is required." });
+      if (this.environment.values.nodeEnv !== "test") {
+        const proof = await this.trusted(() => this.prisma.$transaction(tx => this.assurance.resolve(tx, auth)));
+        const at = new Date();
+        if (!proof || proof.level !== "MFA" || proof.testOnly !== false || proof.userId !== auth.user.id ||
+            proof.sessionId !== auth.sessionId || !(proof.verifiedAt <= at && proof.expiresAt > at && sessionBeforeLookup.expiresAt > at))
+          throw new ForbiddenException({ code: "STAFF_ASSURANCE_REQUIRED", message: "Verified staff assurance is required." });
+      }
+      const training = version(await this.trusted(() => this.registry.training(input.trainingVersion)), input.trainingVersion, "trainingVersion");
+      const policy = version(await this.trusted(() => this.registry.confidentiality(input.policyVersion)), input.policyVersion, "policyVersion");
+      const [trainingRecord, confidentialityRecord] = await Promise.all([
+        this.trusted(() => this.evidence.find(input.trainingEvidenceId)), this.trusted(() => this.evidence.find(input.confidentialityEvidenceId)),
+      ]);
       return await this.prisma.$transaction(async tx => {
         // Stable lock ordering protects initialization/reapproval and concurrent eligibility changes.
         await tx.$queryRaw`SELECT id FROM "User" WHERE id IN (${auth.user.id}, ${targetId}) ORDER BY id FOR UPDATE`;
@@ -77,12 +101,6 @@ export class ExpertApprovalService {
           }
         };
         checkProof(now);
-        // Resolve signed evidence only after verifying the moderator and session.
-        const training = version(await this.trusted(() => this.registry.training(input.trainingVersion)), input.trainingVersion, "trainingVersion");
-        const policy = version(await this.trusted(() => this.registry.confidentiality(input.policyVersion)), input.policyVersion, "policyVersion");
-        const [trainingRecord, confidentialityRecord] = await Promise.all([
-          this.trusted(() => this.evidence.find(input.trainingEvidenceId)), this.trusted(() => this.evidence.find(input.confidentialityEvidenceId)),
-        ]);
         const target = await tx.user.findUnique({ where: { id: targetId },
           select: { role: true, status: true, emailVerifiedAt: true } });
         if (!target) throw new NotFoundException({ code: "EXPERT_NOT_FOUND", message: "The expert account does not exist." });

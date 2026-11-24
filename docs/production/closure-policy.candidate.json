@@ -1,0 +1,19 @@
+{
+  "payload": {
+    "schemaVersion": 1,
+    "purpose": "CLOSURE_MINIMIZATION",
+    "version": "2026-11-24.v1-draft",
+    "approvedByReference": "REVIEW_REQUIRED",
+    "legalBasisReference": "REVIEW_REQUIRED",
+    "approvedAt": null,
+    "expiresAt": null,
+    "actions": [
+      "ERASE_MUTABLE_MEMBER_DATA",
+      "ERASE_UNSUBMITTED_REVIEW_CONTENT",
+      "RESTRICT_RETAINED_EVIDENCE"
+    ],
+    "retainedEvidence": "RESTRICTED_PENDING_APPROVED_RETENTION",
+    "finalErasureClaim": false
+  },
+  "signature": null
+}

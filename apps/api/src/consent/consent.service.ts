@@ -1,5 +1,6 @@
 import { policyDependencies } from "./consent-policy.catalog";
 import { ConflictException, ForbiddenException, HttpException, Injectable, ServiceUnavailableException } from "@nestjs/common";
+import { RecoveryJournalService } from "../recovery/recovery-journal.service";
 import { AccountStatus, Consent, ConsentEventKind, ConsentPurpose, Prisma, UserRole } from "@prisma/client";
 import { PrismaService } from "../database/prisma.service";
 import { EnvironmentService } from "../config/environment.service";
@@ -35,7 +36,7 @@ function project(rows: Consent[], version: number): ConsentReadDto {
 @Injectable()
 export class ConsentService {
   constructor(private readonly prisma: PrismaService, private readonly registry: ConsentPolicyRegistry,
-    private readonly environment: EnvironmentService) {}
+    private readonly environment: EnvironmentService, private readonly journal?: RecoveryJournalService) {}
   published(locale: unknown) {
     if (locale !== "en" && locale !== "vi") return invalidRequest([{ field: "locale", messages: ["Choose en or vi."] }]);
     return { locale, policies: (this.registry.list?.(locale) ?? []).filter(policy => !policy.testOnly).map(policy => ({ purpose: policy.purpose, policyVersion: policy.policyVersion, locale: policy.locale, content: policy.content, digest: policyDigest(policy.content), optional: true, dependencies: policyDependencies[policy.purpose] })) };
@@ -70,10 +71,19 @@ export class ConsentService {
       consents: consentPurposes.map(purpose => ({ purpose, granted: false })) });
     return this.patchInTransaction(tx, userId, dto, parseIdempotencyKey(closureId), consentFingerprint(dto));
   }
-  private async patchInTransaction(tx: Prisma.TransactionClient, userId: string, dto: ReturnType<typeof parseConsentPatch>, keyHash: string, fingerprint: string) {
+  /** Trusted recovery-only entry point; caller holds User lock and verified an
+   * independent journal record. No HTTP route and no grant/policy bypass. */
+  async withdrawForRecovery(tx: Prisma.TransactionClient, userId: string, entryId: string) {
+    const ledger = await tx.consentLedger.findUnique({ where: { userId } });
+    const dto = parseConsentPatch({ expectedVersion: Number(ledger?.version ?? 0n),
+      consents: consentPurposes.map(purpose => ({ purpose, granted: false })) });
+    return this.patchInTransaction(tx, userId, dto, parseIdempotencyKey(entryId), consentFingerprint(dto), true);
+  }
+  private async patchInTransaction(tx: Prisma.TransactionClient, userId: string, dto: ReturnType<typeof parseConsentPatch>, keyHash: string, fingerprint: string, recovery = false) {
       // Same per-account lock order as the existing feature APIs. No automatic retry.
       await tx.$queryRaw`SELECT id FROM "User" WHERE id = ${userId} FOR UPDATE`;
-      await requireConsentMember(tx, userId);
+      if (!recovery) await requireConsentMember(tx, userId);
+      else if (dto.consents.some(item => item.granted)) throw new Error("RECOVERY_GRANT_FORBIDDEN");
       let ledger = await tx.consentLedger.findUnique({ where: { userId } });
       const now = new Date();
       if (ledger) {
@@ -103,6 +113,7 @@ export class ConsentService {
       if (!ledger) {
         ledger = await tx.consentLedger.create({ data: { user: { connect: { id: userId } }, subject: { create: {} } } });
       }
+      if (!recovery && dto.consents.some(item => !item.granted)) await this.journal?.record(tx, [userId], "CONSENT_WITHDRAWAL");
       const updated = await tx.consentLedger.updateMany({ where: { userId, version: BigInt(dto.expectedVersion) }, data: { version: { increment: 1n } } });
       if (updated.count !== 1) return conflict("VERSION_CONFLICT", "Consent changed. Reload before submitting again.");
       for (const item of dto.consents) {
