@@ -7,11 +7,12 @@ import { SafetyModule } from "../safety/safety.module";
 import { MatchingController } from "./matching.controller";
 import { MatchingHandles } from "./matching-handles";
 import { MatchingRateLimiter, MatchingRequestGuard } from "./matching-request.guard";
+import { MatchConnectionService } from "./match-connection.service";
 import { MatchingService } from "./matching.service";
 
 @Module({
   imports: [AuthModule, EnvironmentModule, ConsentModule, DatabaseModule, SafetyModule],
   controllers: [MatchingController],
-  providers: [MatchingService, MatchingHandles, MatchingRateLimiter, MatchingRequestGuard],
+  providers: [MatchConnectionService, MatchingService, MatchingHandles, MatchingRateLimiter, MatchingRequestGuard],
 })
 export class MatchingModule {}

@@ -67,10 +67,12 @@ export class ClosureReconciliationService implements OnModuleInit, OnModuleDestr
           const answers = await tx.questionnaireAnswer.deleteMany({ where: { userId } });
           await tx.user.update({ where: { id: userId }, data: { displayName: null } });
           const pairs = { OR: [{ userLowId: userId }, { userHighId: userId }] };
+          const shares = await tx.matchConnectionShare.deleteMany({ where: { pair: pairs } });
+          const messages = await tx.matchMessage.updateMany({ where: { pair: pairs, text: { not: null } }, data: { text: null } });
           await tx.matchPair.updateMany({ where: { ...pairs, invalidatedAt: null }, data: { invalidatedAt: new Date() } });
           await tx.matchPair.updateMany({ where: pairs, data: { score: null, reasons: Prisma.DbNull } });
           await acknowledge("MATCHING", { contractVersion: 1, profileRemoved: profile.count, preferencesRemoved: preferences.count,
-            answersRemoved: answers.count, decisions: "RESTRICTED_RETAINED", handles: "DENIED_CLOSED_AND_OLD_GENERATION" });
+            answersRemoved: answers.count, connectionSharesRemoved: shares.count, messageBodiesCleared: messages.count, decisions: "RESTRICTED_RETAINED", handles: "DENIED_CLOSED_AND_OLD_GENERATION" });
         }
         if (closure.consumers.find(c => c.name === "REVIEW_CLAIMS")?.status === "PENDING") {
           if (await tx.expertAssignment.count({ where: { video: { ownerId: userId }, status: { in: ["ASSIGNED", "IN_PROGRESS", "SUBMITTED"] } } }))

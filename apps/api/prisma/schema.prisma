@@ -110,6 +110,8 @@ model User {
   createdAssignments ExpertAssignment[] @relation("AssignmentCreator")
   expertCredential ExpertCredential?
   expertActorIdentity ExpertActorIdentity?
+  connectionShares MatchConnectionShare[]
+  sentMatchMessages MatchMessage[]
   @@index([status, role])
 }
 
@@ -649,8 +651,11 @@ model MatchPair {
   highConsentSubjectId String? @db.Uuid
   highConsentVersion BigInt?
   invalidatedAt DateTime?
+  connectionRevokedAt DateTime?
   createdAt DateTime @default(now())
   decisions MatchDecision[]
+  shares MatchConnectionShare[]
+  messages MatchMessage[]
   @@unique([userLowId, userHighId])
 }
 model MatchDecision {
@@ -926,4 +931,32 @@ model RecoveryDatabaseBinding {
   baselineEntryId String @db.Uuid
   baselineEntryHash String
   createdAt DateTime @default(now()) @db.Timestamptz(3)
+}
+
+// Sharing is explicit per person and mutual pair. Existing matches start private.
+model MatchConnectionShare {
+  pairId String
+  pair MatchPair @relation(fields: [pairId], references: [id], onDelete: Cascade)
+  userId String
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  revision Int @default(1)
+  profileShared Boolean @default(false)
+  contactShared Boolean @default(false)
+  chatEnabled Boolean @default(false)
+  photo Bytes?
+  updatedAt DateTime @updatedAt
+  @@id([pairId, userId])
+}
+
+model MatchMessage {
+  id String @id @default(cuid())
+  pairId String
+  pair MatchPair @relation(fields: [pairId], references: [id], onDelete: Cascade)
+  senderId String
+  sender User @relation(fields: [senderId], references: [id], onDelete: Cascade)
+  clientMessageId String @db.Uuid
+  text String? @db.Text
+  createdAt DateTime @default(now())
+  @@unique([pairId, senderId, clientMessageId])
+  @@index([pairId, createdAt, id])
 }

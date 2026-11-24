@@ -56,7 +56,7 @@ function referenceStamp(stamp: ConsentStamp, blocks: number) {
 }
 
 const pairSelect = {
-  id: true, userLowId: true, userHighId: true, invalidatedAt: true,
+  id: true, userLowId: true, userHighId: true, invalidatedAt: true, connectionRevokedAt: true,
   lowConsentSubjectId: true, lowConsentVersion: true, highConsentSubjectId: true, highConsentVersion: true,
   decisions: { select: { actorUserId: true, choice: true } },
 } satisfies Prisma.MatchPairSelect;
@@ -247,9 +247,14 @@ export class MatchingService {
           const available = !!viewerConsent && !!viewer && !!peer && !blocked.has(peerId) &&
             reciprocalEligibility(viewer, peer) && !!await this.currentConsent(tx, peerId) &&
             await this.currentPair(tx, pair);
+          const mutual = available && choice === "ACCEPT" && this.peerAccepted(pair.decisions, peerId);
+          const connectionAvailable = mutual && !pair.connectionRevokedAt;
           history.push({
             id: this.handles.keyFor(auth, "history", id), choice, createdAt: createdAt.toISOString(), available,
-            mutual: available && choice === "ACCEPT" && this.peerAccepted(pair.decisions, peerId),
+            mutual,
+            connectionId: connectionAvailable ? this.handles.issue(auth, "connection", {
+              id: pair.id, expires: now.getTime() + handleLifetime,
+            }) : null,
           });
         }
         return {
@@ -344,6 +349,31 @@ export class MatchingService {
       if (error instanceof ForbiddenException) return false;
       throw error;
     }
+  }
+
+  async withConnection<T>(auth: AuthContext, handle: string, query: object,
+    action: (tx: Tx, connection: { pairId: string; peerId: string }, now: Date) => Promise<T>) {
+    if (Object.keys(query).length) throw badInput();
+    const reference = this.handles.read(auth, "connection", handle);
+    if (!reference || reference.expires <= Date.now()) throw unavailable();
+    return this.store(async () => {
+      const target = await this.prisma.matchPair.findUnique({ where: { id: reference.id }, select: pairSelect });
+      const actor = auth.user.id;
+      if (!target || ![target.userLowId, target.userHighId].includes(actor)) throw unavailable();
+      const peerId = target.userLowId === actor ? target.userHighId : target.userLowId;
+      return this.access.run(auth, "MEMBER", [peerId], async (tx, now) => {
+        const pair = await tx.matchPair.findUnique({ where: { id: reference.id }, select: pairSelect });
+        if (!pair || reference.expires <= now.getTime() ||
+          !this.peerAccepted(pair.decisions, actor) || !this.peerAccepted(pair.decisions, peerId)) throw unavailable();
+        const members = await this.members(tx, [actor, peerId], now);
+        const viewer = members.get(actor), peer = members.get(peerId);
+        if (!viewer || !peer || !reciprocalEligibility(viewer, peer) ||
+          !await this.currentPair(tx, pair) || pair.connectionRevokedAt) throw unavailable();
+        try { await this.blocks.assertClear(tx, actor, peerId); }
+        catch (error) { if (error instanceof ForbiddenException) throw unavailable(); throw error; }
+        return action(tx, { pairId: pair.id, peerId }, now);
+      }, matchingIsolation);
+    });
   }
 
   private async store<T>(work: () => Promise<T>) {

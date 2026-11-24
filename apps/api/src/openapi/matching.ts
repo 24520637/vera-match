@@ -21,9 +21,9 @@ export const ApiRecommendations = () => OwnedOperation({
 
 export const ApiMatchingHistory = () => OwnedOperation({
   summary: "List my matching decisions", role: "MEMBER", query: [paging],
-  description: "Returns only the caller’s recorded decisions, up to 20 per page in descending decision time. History stays readable after matching consent withdrawal. An unavailable pair has available=false and mutual=false. " + deployment,
+  description: "Returns only the caller’s recorded decisions, up to 20 per page in descending decision time. History stays readable after matching consent withdrawal. Eligible mutual matches include a temporary connectionId for profile sharing and chat. Unavailable connections have connectionId=null. An unavailable pair has available=false and mutual=false. " + deployment,
   response: {
-    ...object({ decisions: array(object({ id: key, choice, createdAt: timestamp, available: boolean, mutual: boolean }), 20), nextCursor: nullable(handle) }),
+    ...object({ decisions: array(object({ id: key, choice, createdAt: timestamp, available: boolean, mutual: boolean, connectionId: nullable(handle) }), 20), nextCursor: nullable(handle) }),
     example: { decisions: [], nextCursor: null },
   },
   errors,

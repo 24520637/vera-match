@@ -4,6 +4,8 @@ import { Prisma, PrismaClient, type ConsentPurpose, type UserRole } from "@prism
 import { randomBytes, randomUUID } from "node:crypto";
 import { createServer, request } from "node:http";
 import { AppModule } from "../src/app.module";
+import sharp from "sharp";
+import { PasswordService } from "../src/auth/password.service";
 import { hashSessionToken } from "../src/auth/session-token";
 import { configureApplication } from "../src/configure-app";
 import { EnvironmentService } from "../src/config/environment.service";
@@ -136,6 +138,142 @@ describe("T14 real matching HTTP and PostgreSQL", () => {
     expect(response.status).toBe(200);
     return (await response.json() as { decisions: { choice: string; available: boolean; mutual: boolean }[] }).decisions;
   }
+
+  async function mutualConnection() {
+    const a = await user(), b = await user();
+    const ah = await recommendation(a), bh = await recommendation(b);
+    expect((await decide(a, ah)).status).toBe(200);
+    expect((await decisions(a))[0]).toMatchObject({ mutual: false, connectionId: null });
+    expect((await decide(b, bh)).status).toBe(200);
+    const handle = async (actor: Actor) => (await (await api("matches/decisions", actor)).json() as
+      { decisions: { connectionId: string }[] }).decisions[0].connectionId;
+    return { a, b, ah: await handle(a), bh: await handle(b) };
+  }
+  const connectionPath = (handle: string) => `matches/connections/${handle}`;
+  const flags = (revision = 0, enabled = true) => ({ expectedRevision: revision,
+    profileShared: enabled, contactShared: enabled, chatEnabled: enabled });
+
+  it("reveals only explicitly shared profile and contact after mutual acceptance, with separate chat opt-in", async () => {
+    const { a, b, ah, bh } = await mutualConnection();
+    const read = await api(connectionPath(ah), a);
+    expect(read.headers.get("cache-control")).toBe("private, no-store");
+    expect(await read.json()).toEqual({ sharing: { revision: 0, profileShared: false, contactShared: false,
+      chatEnabled: false, photo: null }, peer: { profile: null, contactEmail: null, chatEnabled: false }, chatAvailable: false });
+    expect(await db.client.matchConnectionShare.count()).toBe(0);
+    expect((await api(connectionPath(ah) + "/messages", a)).status).toBe(403);
+    const image = await sharp({ create: { width: 20, height: 20, channels: 3, background: "blue" } }).png().toBuffer();
+    expect((await api(connectionPath(bh) + "/sharing", b, json("POST", { ...flags(),
+      photo: "data:image/png;base64," + image.toString("base64") }))).status).toBe(200);
+    const shared = await (await api(connectionPath(ah), a)).json();
+    expect(shared).toMatchObject({ peer: { profile: { displayName: "Private Name", bio: "PRIVATE_BIO", age: expect.any(Number),
+      photo: expect.stringMatching(/^data:image\/webp;base64,/) },
+      contactEmail: expect.stringMatching(/example.invalid$/) }, chatAvailable: false });
+    expect(JSON.stringify(shared)).not.toMatch(/birthDate|passwordHash|1990-01-01/);
+    expect((await api(connectionPath(ah) + "/sharing", a, json("POST", flags()))).status).toBe(200);
+    expect(await (await api(connectionPath(ah), a)).json()).toMatchObject({ chatAvailable: true });
+    expect((await api(connectionPath(bh) + "/sharing", b, json("POST", flags(1, false)))).status).toBe(200);
+    expect(await (await api(connectionPath(ah), a)).json()).toMatchObject({ peer: { profile: null, contactEmail: null }, chatAvailable: false });
+    expect((await api(connectionPath(ah) + "/messages", a)).status).toBe(403);
+  });
+
+  it("binds connections to both participants and the current session, consent generation and visibility", async () => {
+    const { a, b, ah } = await mutualConnection();
+    const stranger = await user();
+    expect((await api(connectionPath(ah), stranger)).status).toBe(404);
+    expect((await api(connectionPath(ah), await newSession(a))).status).toBe(404);
+    expect((await api(connectionPath(ah))).status).toBe(401);
+    const staff = await user("ADMIN", false);
+    expect((await api(connectionPath(ah), staff)).status).toBe(403);
+    await db.client.profile.update({ where: { userId: b.id }, data: { visibilityEnabled: false } });
+    expect((await api(connectionPath(ah), a)).status).toBe(404);
+    await db.client.profile.update({ where: { userId: b.id }, data: { visibilityEnabled: true } });
+    await consent(b, false, 1);
+    expect((await api(connectionPath(ah), a)).status).toBe(404);
+    await consent(b, true, 2);
+    expect((await api(connectionPath(ah), a)).status).toBe(404);
+  });
+
+  it("serializes sharing revisions and rejects third-party fields and cross-origin writes", async () => {
+    const { a, ah } = await mutualConnection();
+    const path = connectionPath(ah) + "/sharing";
+    expect((await api(path, a, json("POST", { ...flags(), userId: "other" }))).status).toBe(400);
+    expect((await api(path, a, json("POST", flags(), "https://foreign.invalid"))).status).toBe(403);
+    const results = await Promise.all([api(path, a, json("POST", flags())), api(path, a, json("POST", flags()))]);
+    expect(results.map(r => r.status).sort()).toEqual([200, 409]);
+    expect(await db.client.matchConnectionShare.count()).toBe(1);
+  });
+
+  it("delivers text to the other member with safe exact retries, immutable content and bounded pagination", async () => {
+    const { a, b, ah, bh } = await mutualConnection();
+    for (const [actor, handle] of [[a, ah], [b, bh]] as const)
+      expect((await api(connectionPath(handle) + "/sharing", actor, json("POST", flags()))).status).toBe(200);
+    const path = connectionPath(ah) + "/messages";
+    const message = { clientMessageId: randomUUID(), text: "Hello, nice to meet you." };
+    const responses = await Promise.all([api(path, a, json("POST", message)), api(path, a, json("POST", message))]);
+    expect(responses.map(r => r.status)).toEqual([201, 201]);
+    const receipt = await responses[0].json() as { message: { id: string } };
+    expect(await responses[1].json()).toEqual(receipt);
+    expect((await api(path, a, json("POST", { ...message, text: "changed" }))).status).toBe(409);
+    expect(await db.client.matchMessage.count()).toBe(1);
+    const peerRead = await api(connectionPath(bh) + "/messages", b);
+    expect(await peerRead.json()).toEqual({ messages: [expect.objectContaining({ sender: "peer", text: message.text,
+      clientMessageId: null })], nextCursor: null });
+    await expect(db.client.matchMessage.update({ where: { id: receipt.message.id }, data: { text: "edited" } })).rejects.toThrow();
+    // Seed only this synthetic pair to exercise the read window without exhausting HTTP write quotas.
+    const pair = await db.client.matchPair.findFirstOrThrow();
+    await db.client.matchMessage.createMany({ data: Array.from({ length: 53 }, (_, i) => ({ pairId: pair.id, senderId: a.id,
+      clientMessageId: randomUUID(), text: `Message ${i}` })) });
+    const page = await (await api(path, a)).json() as { messages: { id: string }[]; nextCursor: string | null };
+    expect(page.messages).toHaveLength(50); expect(page.nextCursor).toEqual(expect.any(String));
+    const older = await (await api(path + "?before=" + page.nextCursor, a)).json() as typeof page;
+    expect(older.messages).toHaveLength(4); expect(older.nextCursor).toBeNull();
+    expect(new Set([...page.messages, ...older.messages].map(m => m.id)).size).toBe(54);
+    const password = "SyntheticClosurePassword_824619";
+    await db.client.user.update({ where: { id: b.id }, data: { passwordHash: await app.get(PasswordService).hash(password) } });
+    const close = json("POST", { confirmation: "CLOSE MY ACCOUNT", password, expectedRevision: 0 });
+    expect((await api("account-closure", b, { ...close, headers: { ...close.headers, "idempotency-key": randomUUID() } })).status).toBe(202);
+    expect((await api(path, a)).status).toBe(404);
+    await db.client.matchMessage.updateMany({ where: { pairId: pair.id }, data: { text: null } });
+    expect(await db.client.matchMessage.count({ where: { text: { not: null } } })).toBe(0);
+  });
+
+  it("denies waiting message reads and sends after committed chat withdrawal", async () => {
+    const { a, b, ah, bh } = await mutualConnection();
+    for (const [actor, handle] of [[a, ah], [b, bh]] as const)
+      expect((await api(connectionPath(handle) + "/sharing", actor, json("POST", flags()))).status).toBe(200);
+    const pair = await db.client.matchPair.findFirstOrThrow();
+    let read!: Promise<Response>, send!: Promise<Response>;
+    await db.client.$transaction(async tx => {
+      await tx.$queryRaw`SELECT id FROM "User" WHERE id IN (${a.id}, ${b.id}) ORDER BY id FOR UPDATE`;
+      read = api(connectionPath(ah) + "/messages", a);
+      send = api(connectionPath(ah) + "/messages", a, json("POST", { clientMessageId: randomUUID(), text: "Must not send" }));
+      const deadline = Date.now() + 2500;
+      let waiting = 0;
+      while (waiting < 2 && Date.now() < deadline) {
+        const [row] = await db.client.$queryRaw<{ count: bigint }[]>`SELECT count(*) FROM pg_stat_activity
+          WHERE wait_event_type = 'Lock' AND query LIKE '%ORDER BY id FOR UPDATE%'`;
+        waiting = Number(row.count);
+        if (waiting < 2) await new Promise(resolve => setTimeout(resolve, 30));
+      }
+      expect(waiting).toBeGreaterThanOrEqual(2);
+      await tx.matchConnectionShare.update({ where: { pairId_userId: { pairId: pair.id, userId: b.id } },
+        data: { chatEnabled: false, revision: { increment: 1 } } });
+    });
+    expect((await read).status).toBe(403); expect((await send).status).toBe(403);
+    expect(await db.client.matchMessage.count()).toBe(0);
+  });
+
+  it("permanently revokes this connection on block even after unblock", async () => {
+    const { a, b, ah } = await mutualConnection();
+    const other = await user();
+    expect((await api("blocks", a, json("POST", { targetUserId: other.id }))).status).toBe(204);
+    expect((await api(connectionPath(ah), a)).status).toBe(200);
+    expect((await api("blocks", a, json("POST", { targetUserId: b.id }))).status).toBe(204);
+    expect((await api(connectionPath(ah), a)).status).toBe(404);
+    await db.client.block.deleteMany({ where: { blockerId: a.id, blockedId: b.id } });
+    expect((await api(connectionPath(ah), a)).status).toBe(404);
+    expect((await decisions(a))[0]).toMatchObject({ connectionId: null });
+  });
 
   it("filters both sides at the API boundary and keeps recommendation GET read-only", async () => {
     const a = await user();
@@ -435,7 +573,7 @@ describe("T14 real matching HTTP and PostgreSQL", () => {
     });
     const history = await decisions(a);
     expect(history).toEqual([{
-      id: expect.stringMatching(/^[0-9a-f]{64}$/), choice: "ACCEPT", createdAt: expect.any(String), available: false, mutual: false,
+      id: expect.stringMatching(/^[0-9a-f]{64}$/), choice: "ACCEPT", createdAt: expect.any(String), available: false, mutual: false, connectionId: null,
     }]);
     expect(JSON.stringify(history)).not.toMatch(/old-choice|historical-pair|LEGACY_SNAPSHOT/);
     expect(await decisions(legacyActor)).toEqual([]);

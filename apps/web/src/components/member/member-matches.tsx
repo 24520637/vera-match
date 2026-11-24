@@ -14,7 +14,7 @@ import { MemberSettingsNav } from "./member-settings";
 
 type Choice = "ACCEPT" | "DECLINE";
 type Recommendation = { key: string; pairId: string; reasons: string[] };
-type Decision = { id: string; choice: Choice; createdAt: string; available: boolean; mutual: boolean };
+type Decision = { id: string; choice: Choice; createdAt: string; available: boolean; mutual: boolean; connectionId?: string | null };
 type Recommendations = { available: boolean; recommendations: Recommendation[]; nextCursor: string | null };
 type History = { decisions: Decision[]; nextCursor: string | null };
 type Load<T> = { kind: "loading" } | { kind: "error"; error: unknown } | { kind: "ready"; data: T };
@@ -41,11 +41,13 @@ function isRecommendations(value: unknown): value is Recommendations {
 function isHistory(value: unknown): value is History {
   if (!hasFields(value, "decisions", "nextCursor") || !Array.isArray(value.decisions) ||
     (value.nextCursor !== null && !isReference(value.nextCursor))) return false;
-  return value.decisions.every((item: unknown) => hasFields(item, "id", "choice", "createdAt", "available", "mutual") &&
+  return value.decisions.every((item: unknown) => hasFields(item, "id", "choice", "createdAt", "available", "mutual",
+      ...(item && typeof item === "object" && Object.hasOwn(item, "connectionId") ? ["connectionId"] : [])) &&
     isReference(item.id) && (item.choice === "ACCEPT" || item.choice === "DECLINE") &&
     typeof item.createdAt === "string" && Number.isFinite(Date.parse(item.createdAt)) &&
     new Date(item.createdAt).toISOString() === item.createdAt &&
     typeof item.available === "boolean" && typeof item.mutual === "boolean" &&
+    (item.connectionId === undefined || item.connectionId === null || isReference(item.connectionId)) &&
     (!item.mutual || (item.available && item.choice === "ACCEPT")));
 }
 
@@ -225,6 +227,12 @@ function MatchesScreen() {
                   {decision.choice === "ACCEPT" ? "Accepted" : "Declined"}
                   {" · "}<time dateTime={decision.createdAt}>{new Date(decision.createdAt).toLocaleDateString()}</time>
                   {decision.mutual ? " · Mutual match" : decision.available ? "" : " · Unavailable"}
+                  {decision.mutual && decision.available && decision.connectionId && (
+                    <div className="form-actions">
+                      <Link className="button button--secondary button--regular"
+                        href={`/account/matches/${decision.connectionId}`}>View profile and chat</Link>
+                    </div>
+                  )}
                 </li>,
               )}
             </ul>

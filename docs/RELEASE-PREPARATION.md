@@ -6,7 +6,7 @@ Status: code preparation only. No hosting, DNS, certificates, public API base UR
 
 ## Scope and dependencies
 
-The generated OpenAPI contract covers 71 operations across 63 paths, including API discovery, account flows, staff MFA, moderator grants, consent, private video, review, safety and matching. Regression tests compare the generated operations with the registered routes and check summaries, descriptions, security requirements, request schemas, status codes, report enums and selected validators.
+The generated OpenAPI contract covers 75 operations across 66 paths, including API discovery, account flows, staff MFA, moderator grants, consent, private video, review, safety and matching. Regression tests compare the generated operations with the registered routes and check summaries, descriptions, security requirements, request schemas, status codes, report enums and selected validators.
 
 No authentication, consent, assignment, cleanup or release gate is relaxed. No legal policy is published. No local database migration or deployment is performed.
 

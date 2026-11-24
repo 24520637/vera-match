@@ -54,6 +54,13 @@ export class BlockService {
           },
         });
       }
+      await tx.matchPair.updateMany({ where: {
+        connectionRevokedAt: null,
+        OR: [
+          { userLowId: auth.user.id, userHighId: target },
+          { userLowId: target, userHighId: auth.user.id },
+        ],
+      }, data: { connectionRevokedAt: new Date() } });
     });
   }
   unblock(auth: AuthContext, value: unknown, input: unknown) {

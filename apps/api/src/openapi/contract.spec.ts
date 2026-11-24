@@ -48,6 +48,10 @@ const routes = [
   ["get", "/api/matches/recommendations", 200],
   ["post", "/api/matches/{pairId}/decision", 200],
   ["get", "/api/matches/decisions", 200],
+  ["get", "/api/matches/connections/{connectionId}", 200],
+  ["post", "/api/matches/connections/{connectionId}/sharing", 200],
+  ["get", "/api/matches/connections/{connectionId}/messages", 200],
+  ["post", "/api/matches/connections/{connectionId}/messages", 201],
   ["get", "/api/profile/me", 200],
   ["patch", "/api/profile/me", 200, parseProfilePatch],
   ["get", "/api/questionnaire/me", 200],
@@ -132,7 +136,7 @@ describe("Phúc's generated OpenAPI contract", () => {
         .filter(method => item[method]?.description?.startsWith("Requires a valid HttpOnly session cookie"))
         .map(method => method + " " + path));
     expect(tagged.sort()).toEqual(routes.map(([method, path]) => method + " " + path).sort());
-    expect(routes).toHaveLength(36);
+    expect(routes).toHaveLength(40);
   });
 
   it("declares the configured cookie and requires it on every documented protected operation", () => {

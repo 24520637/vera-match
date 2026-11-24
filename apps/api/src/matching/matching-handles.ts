@@ -4,7 +4,7 @@ import type { AuthContext } from "../auth/auth-context";
 import { EnvironmentService } from "../config/environment.service";
 
 const encoding = /^[A-Za-z0-9_-]+$/;
-type Purpose = "decision" | "recommendations" | "history";
+type Purpose = "decision" | "recommendations" | "history" | "connection";
 export type ConsentStamp = { subjectId: string; version: bigint };
 type ReferenceStamp = { subjectId: string; version: string; blocks: number };
 type Payload = { id: string; expires: number; createdAt?: string; authorization?: [ReferenceStamp, ReferenceStamp] };
