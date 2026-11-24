@@ -2,7 +2,7 @@ import { ConflictException, ForbiddenException, Injectable } from "@nestjs/commo
 import { Prisma, type StaffIdentity } from "@prisma/client";
 import { PrismaService } from "../database/prisma.service";
 import { StaffAuthority } from "./staff-authority";
-import { staffEmailDigest } from "./staff-directive";
+import { staffEmailDigest, type StaffDirective } from "./staff-directive";
 
 const denied = (): never => { throw new ForbiddenException({code:"STAFF_IDENTITY_REQUIRED",message:"Current trusted staff identity is required."}); };
 const conflict = (): never => { throw new ConflictException({code:"STAFF_DIRECTIVE_CONFLICT",message:"Use an explicit directive for the current identity revision."}); };
@@ -46,12 +46,14 @@ export class StaffIdentityService {
     });
   }
   /** Consumers already hold User -> Session locks; no browser role assertion suffices. */
-  async current(tx: Prisma.TransactionClient, userId: string, now: Date): Promise<StaffIdentity | undefined> {
+  async current(tx: Prisma.TransactionClient, userId: string, now: Date,
+    permission?: StaffDirective["permissions"][number]): Promise<StaffIdentity | undefined> {
     const identity = await tx.staffIdentity.findUnique({where:{userId},include:{currentDirective:true,user:{select:{email:true,role:true,status:true,emailVerifiedAt:true}}}});
     if (!identity || identity.state !== "ACTIVE" || identity.expiresAt <= now || identity.user.status !== "ACTIVE" || !identity.user.emailVerifiedAt) return undefined;
     try {
       const p = this.authority.verify(identity.currentDirective.signedDirective,now);
       if (p.userId !== userId || p.subjectId !== identity.subjectId || p.directiveId !== identity.currentDirectiveId || BigInt(p.revision) !== identity.revision || BigInt(p.mfaEpoch) !== identity.mfaEpoch || p.state !== "ACTIVE" || p.role !== identity.role || p.role !== identity.user.role || p.expiresAt !== identity.expiresAt.toISOString() || p.emailDigest !== staffEmailDigest(identity.user.email)) return undefined;
+      if (permission && !p.permissions.includes(permission)) return undefined;
       return identity;
     } catch { return undefined; }
   }

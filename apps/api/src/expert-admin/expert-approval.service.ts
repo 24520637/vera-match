@@ -3,6 +3,8 @@ import { AccountStatus, Prisma, UserRole } from "@prisma/client";
 import { createHash } from "node:crypto";
 import type { AuthContext } from "../auth/auth-context";
 import { PrismaService } from "../database/prisma.service";
+import { EnvironmentService } from "../config/environment.service";
+import { StaffAssuranceSource } from "../safety/staff-assurance.source";
 import { ApprovedExpertVersion, ExpertApprovalRegistry, ExpertEvidence, ExpertEvidenceSource } from "./expert-approval.sources";
 import { approvalInvalid, parseExpertApproval } from "./expert-approval.validation";
 
@@ -41,7 +43,8 @@ function validateEvidence(record: ExpertEvidence | undefined, id: string, target
 @Injectable()
 export class ExpertApprovalService {
   constructor(private readonly prisma: PrismaService, private readonly registry: ExpertApprovalRegistry,
-    private readonly evidence: ExpertEvidenceSource) {}
+    private readonly evidence: ExpertEvidenceSource, private readonly environment: EnvironmentService,
+    private readonly assurance: StaffAssuranceSource) {}
 
   private async trusted<T>(load: () => T | Promise<T>): Promise<T> {
     try { return await load(); } catch { unavailable(); }
@@ -50,12 +53,6 @@ export class ExpertApprovalService {
   async approve(auth: AuthContext, targetId: string, body: unknown) {
     const input = parseExpertApproval(body);
     try {
-      const training = version(await this.trusted(() => this.registry.training(input.trainingVersion)), input.trainingVersion, "trainingVersion");
-      const policy = version(await this.trusted(() => this.registry.confidentiality(input.policyVersion)), input.policyVersion, "policyVersion");
-      // Trusted source records are immutable snapshots, not client-supplied assertions.
-      const [trainingRecord, confidentialityRecord] = await Promise.all([
-        this.trusted(() => this.evidence.find(input.trainingEvidenceId)), this.trusted(() => this.evidence.find(input.confidentialityEvidenceId)),
-      ]);
       return await this.prisma.$transaction(async tx => {
         // Stable lock ordering protects initialization/reapproval and concurrent eligibility changes.
         await tx.$queryRaw`SELECT id FROM "User" WHERE id IN (${auth.user.id}, ${targetId}) ORDER BY id FOR UPDATE`;
@@ -70,6 +67,22 @@ export class ExpertApprovalService {
         const now = clock.now;
         if (!session || session.userId !== moderator.id || session.revokedAt || session.expiresAt <= now)
           throw new UnauthorizedException({ code: "UNAUTHENTICATED", message: "A valid session is required." });
+        const testRuntime = this.environment.values.nodeEnv === "test";
+        const proof = testRuntime ? undefined : await this.trusted(() => this.assurance.resolve(tx, auth));
+        const checkProof = (at: Date) => {
+          if (!testRuntime && (!proof || proof.level !== "MFA" || proof.testOnly !== false ||
+            proof.userId !== moderator.id || proof.sessionId !== auth.sessionId ||
+            !(proof.verifiedAt <= at && proof.expiresAt > at && session.expiresAt > at))) {
+            throw new ForbiddenException({ code: "STAFF_ASSURANCE_REQUIRED", message: "Verified staff assurance is required." });
+          }
+        };
+        checkProof(now);
+        // Resolve signed evidence only after verifying the moderator and session.
+        const training = version(await this.trusted(() => this.registry.training(input.trainingVersion)), input.trainingVersion, "trainingVersion");
+        const policy = version(await this.trusted(() => this.registry.confidentiality(input.policyVersion)), input.policyVersion, "policyVersion");
+        const [trainingRecord, confidentialityRecord] = await Promise.all([
+          this.trusted(() => this.evidence.find(input.trainingEvidenceId)), this.trusted(() => this.evidence.find(input.confidentialityEvidenceId)),
+        ]);
         const target = await tx.user.findUnique({ where: { id: targetId },
           select: { role: true, status: true, emailVerifiedAt: true } });
         if (!target) throw new NotFoundException({ code: "EXPERT_NOT_FOUND", message: "The expert account does not exist." });
@@ -107,6 +120,10 @@ export class ExpertApprovalService {
           status: "APPROVED", approvalId: approval.id, actorEvidence, trainingVersion: training.version, policyVersion: policy.version,
           verifiedAt: now, expiresAt: input.expiresAt, evidence: snapshot({ operation: "VERIFY_AND_APPROVE", approvalId: approval.id,
             trainingEvidence: approval.trainingEvidence, confidentialityEvidence: approval.confidentialityEvidence }) } });
+        if (!testRuntime) {
+          const [completionClock] = await tx.$queryRaw<{ now: Date }[]>`SELECT clock_timestamp() AS now`;
+          checkProof(completionClock.now);
+        }
         return { revision, credential: { userId: targetId, status: "APPROVED", approvalId: approval.id,
           trainingVersion: training.version, policyVersion: policy.version, approvedAt: now.toISOString(), expiresAt: input.expiresAt?.toISOString() ?? null } };
       }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });

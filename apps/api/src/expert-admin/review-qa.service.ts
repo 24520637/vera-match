@@ -14,6 +14,7 @@ import { approvedReviewSelect, approvedReviewSource, approvedReviewWhere } from 
 import { claimSelect, ownerClaim } from "./review-claim-projection";
 import { disputeConflict, disputeDecision, disputeSelect } from "./review-dispute";
 import { requireReviewSource } from "./review-source-access";
+import { assignmentGrantRuntimeFilter } from "./assignment-grant-scope";
 
 const queueSize = 10;
 const receipt = { id: true, version: true, submittedAt: true } satisfies Prisma.ExpertReviewSelect;
@@ -32,13 +33,14 @@ type DisputeContext = {
 
 // Match the C035 current-grant predicate. The moderator User lock serializes
 // decision checks with PA2 grant/revoke operations.
-function activeModeratorGrants(moderatorId: string) {
+function activeModeratorGrants(moderatorId: string, testRuntime: boolean) {
+  const realGrant = assignmentGrantRuntimeFilter(testRuntime);
   return Prisma.sql`
     SELECT s."assignmentId", g."expiresAt"
     FROM "AssignmentModeratorScope" s
     JOIN "ExpertActorIdentity" i ON i."subjectId"=s."moderatorSubjectId" AND i."userId"=${moderatorId}
     JOIN "AssignmentModeratorGrantEvent" g ON g.id=s."currentGrantId" AND g."scopeId"=s.id AND g.kind='GRANTED'
-    WHERE g."expiresAt">clock_timestamp() AND NOT EXISTS (
+    WHERE g."expiresAt">clock_timestamp() ${realGrant} AND NOT EXISTS (
       SELECT 1 FROM "AssignmentModeratorGrantEvent" r WHERE r."grantId"=g.id AND r.kind='REVOKED'
     )
   `;
@@ -95,7 +97,7 @@ export class ReviewQaService {
       if (assignment.expertId === auth.user.id || assignment.video.ownerId === auth.user.id)
         throw new ForbiddenException({ code: "REVIEW_QA_NOT_INDEPENDENT", message: "An independent moderator must make this decision." });
       const [grant] = await tx.$queryRaw<{ expiresAt: Date }[]>`
-        SELECT "expiresAt" FROM (${activeModeratorGrants(auth.user.id)}) grants WHERE "assignmentId"=${assignment.id}
+        SELECT "expiresAt" FROM (${activeModeratorGrants(auth.user.id, this.environment.values.nodeEnv === "test")}) grants WHERE "assignmentId"=${assignment.id}
       `;
       if (!grant) unavailable();
       const validateTime = async () => {
@@ -127,7 +129,7 @@ export class ReviewQaService {
       const candidates = await this.prisma.$queryRaw<{ id: string }[]>`
         SELECT r.id FROM "ExpertReview" r
         JOIN "ExpertAssignment" a ON a.id=r."assignmentId"
-        JOIN (${activeModeratorGrants(auth.user.id)}) grants ON grants."assignmentId"=a.id
+        JOIN (${activeModeratorGrants(auth.user.id, this.environment.values.nodeEnv === "test")}) grants ON grants."assignmentId"=a.id
         JOIN "Video" v ON v.id=a."videoId"
         WHERE r.status='SUBMITTED' AND r."submittedAt" IS NOT NULL AND a.status='SUBMITTED'
           AND a."expertId"<>${auth.user.id} AND v."ownerId"<>${auth.user.id}
@@ -211,7 +213,7 @@ export class ReviewQaService {
         SELECT d.id FROM "ReviewDispute" d
         JOIN "ExpertReview" r ON r.id=d."reviewId" AND r.version=d."reviewVersion"
         JOIN "ExpertAssignment" a ON a.id=r."assignmentId"
-        JOIN (${activeModeratorGrants(auth.user.id)}) grants ON grants."assignmentId"=a.id
+        JOIN (${activeModeratorGrants(auth.user.id, this.environment.values.nodeEnv === "test")}) grants ON grants."assignmentId"=a.id
         JOIN "Video" v ON v.id=a."videoId" AND v."ownerId"=d."ownerId"
         WHERE d.status IN ('OPEN', 'IN_REVIEW') AND r.status='APPROVED' AND a.status='COMPLETED'
           AND a."expertId"<>${auth.user.id} AND v."ownerId"<>${auth.user.id}

@@ -1,4 +1,5 @@
 import { AssignmentCancellationModule } from "../assignment-cancellation/assignment-cancellation.module";
+import { AccountClosureModule } from "../account-closure/account-closure.module";
 import { Module } from "@nestjs/common";
 import { AuthModule } from "../auth/auth.module";
 import { ConsentModule } from "../consent/consent.module";
@@ -16,6 +17,7 @@ import { VideoRateLimiter, VideoRequestGuard } from "./video-request.guard";
     ConsentModule,
     EnvironmentModule,
     AssignmentCancellationModule,
+    AccountClosureModule,
   ],
   controllers: [VideoController],
   providers: [

@@ -10,9 +10,7 @@ export interface ExpertMfaAssurance {
   testOnly: boolean;
 }
 
-/** Resolve genuine session-bound TOTP proof; never consume request claims as assurance.
- * Synthetic providers are injected only in isolated tests. Production stays denied.
- */
+/** Resolve genuine session-bound TOTP proof from the trusted staff identity. */
 @Injectable()
 export class ExpertMfaSource {
   constructor(private readonly staffMfa?: StaffMfaService) {}

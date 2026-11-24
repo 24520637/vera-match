@@ -2,9 +2,7 @@
 
 Plan-Step: C033. Ticket: T06.
 Planned commit: `feat(assignment-api): assign READY video with consent`.
-This implementation is restricted to isolated synthetic testing. Production
-staff-MFA and qualification/policy publication remain release gates, not approvals
-granted by this API. C051 cancellation remains Huong-owned; see [Assignment cancellation](ASSIGNMENT-CANCELLATION.md).
+The moderator needs session-bound MFA in a deployed instance. The expert qualification and owner consents must resolve against the signed publications installed on the host. See [Assignment cancellation](ASSIGNMENT-CANCELLATION.md) for C051.
 
 ## Request and result
 
@@ -131,18 +129,14 @@ success audit. This step defines no new denial-audit taxonomy.
 
 ## Production and integration boundaries
 
-The C033 creation gate denies requests outside tests
-(`503 ASSIGNMENT_ASSURANCE_UNAVAILABLE`). In tests, both consent policy records
-must be explicitly test-only. Test mode, client flags, ordinary policy rows and
-fabricated qualification snapshots cannot enable real-data assignment. The
-[signed qualification source](EXPERT-QUALIFICATION-SOURCE.md) supports
-operator-installed evidence and fails closed when it is unavailable. Installing
-it leaves the creation gate in place.
-
-Production assignment creation would require review of the assurance and
-consent checks and a change to the creation gate. Capacity/availability and
-broader conflict-of-interest rules remain outside this contract. C034/C050 recheck owner
-consent, generation, video state, expert eligibility and real MFA on every access.
+Outside tests, the operation resolves MFA from the trusted staff identity under
+the moderator's User and Session locks. Missing or expired MFA returns 503
+`ASSIGNMENT_ASSURANCE_UNAVAILABLE`. The operation rechecks time after the work,
+including idempotent replays. Isolated test fixtures use synthetic consent
+evidence. Operators must provision the [signed qualification source](EXPERT-QUALIFICATION-SOURCE.md)
+and the approved consent publication before verifying the workflow on staging.
+C034/C050 recheck consent, generation, video state, expert eligibility and MFA on
+each access.
 
 C051 implements source-bound cancellation using revision CAS and exact immutable
 transitions, coordinating this lock protocol; see its separate contract. C033

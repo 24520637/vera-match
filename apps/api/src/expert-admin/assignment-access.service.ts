@@ -30,8 +30,6 @@ export class AssignmentAccessService {
 
   requireRuntimeExpert(auth: AuthContext) {
     if (auth.user.role !== "EXPERT") denied();
-    // NODE_ENV=test never authorizes real-policy records below. No production MFA source exists.
-    if (this.environment.values.nodeEnv !== "test") denied();
   }
 
   async withAuthorizedAssignment<T>(auth: AuthContext, assignmentId: string,
@@ -44,6 +42,7 @@ export class AssignmentAccessService {
       approvalInvalid("assignmentId", "Send a valid identifier.");
     try {
       return await this.prisma.$transaction(async tx => {
+        const testRuntime = this.environment.values.nodeEnv === "test";
         const locator = await tx.expertAssignment.findUnique({ where: { id: assignmentId }, select: { videoId: true, expertId: true, video: { select: { ownerId: true } } } });
         if (!locator || locator.expertId !== auth.user.id) throw new NotFoundException({ code: "ASSIGNMENT_NOT_FOUND", message: "Assignment not found." });
         const ownerId = locator.video.ownerId;
@@ -55,13 +54,13 @@ export class AssignmentAccessService {
         if (!expert || expert.role !== "EXPERT" || expert.status !== "ACTIVE" || !expert.emailVerifiedAt) denied();
         const assurance = await this.trustedSource(() => this.mfa.resolve(auth, tx));
         if (!assurance || assurance.userId !== expert.id || assurance.sessionId !== session.id ||
-          assurance.testOnly !== true || !(assurance.expiresAt instanceof Date) || !Number.isFinite(assurance.expiresAt.getTime())) denied();
+          assurance.testOnly !== testRuntime || !(assurance.expiresAt instanceof Date) || !Number.isFinite(assurance.expiresAt.getTime())) denied();
         await tx.$queryRaw`SELECT id FROM "Video" WHERE id=${locator.videoId} FOR UPDATE`;
         const video = await tx.video.findUnique({ where: { id: locator.videoId } });
         if (!video || video.status !== "READY" || video.deletedAt || video.ownerId !== ownerId || ownerId === expert.id) denied();
         const generation = await this.consent.requireInTransaction(tx, ownerId, ["VIDEO_STORAGE", "EXPERT_VIDEO_REVIEW"]);
         const policies = await tx.consent.findMany({ where: { userId: ownerId, purpose: { in: ["VIDEO_STORAGE", "EXPERT_VIDEO_REVIEW"] } }, include: { policyEvidence: true } });
-        if (policies.length !== 2 || policies.some(row => row.policyEvidence?.testOnly !== true)) unavailable();
+        if (policies.length !== 2 || policies.some(row => row.policyEvidence?.testOnly !== testRuntime)) unavailable();
         await this.consent.requireGenerationInTransaction(tx, ownerId, generation.subjectId, video.storageConsentVersion, "VIDEO_STORAGE");
         await tx.$queryRaw`SELECT "userId" FROM "ExpertCredential" WHERE "userId"=${expert.id} FOR UPDATE`;
         const credential = await tx.expertCredential.findUnique({ where: { userId: expert.id }, include: { approval: true } });

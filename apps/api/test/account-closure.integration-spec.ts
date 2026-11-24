@@ -61,6 +61,9 @@ describe("C065 real account restriction and out-of-band status", () => {
     expect(await h.db.client.assignmentEvent.count({where:{assignmentId:f.id,toStatus:"CANCELLED"}})).toBe(1);
     expect(await h.finalObjectAbsent(f.videoId)).toBe(true);
     expect((await h.db.client.video.findUniqueOrThrow({where:{id:f.videoId}})).cleanupCompletedAt).toBeNull();
+    expect(await h.db.client.accountClosureConsumer.findUniqueOrThrow({
+      where: { closureId_name: { closureId: closure.id, name: "MEDIA" } },
+    })).toMatchObject({ status: "PENDING" });
     const token=await statusMail(f.owner.email);
     const stored=await h.db.client.closureStatusToken.findUniqueOrThrow({where:{tokenHash:digest(token)}});
     expect(stored.expiresAt.getTime()-stored.createdAt.getTime()).toBeLessThanOrEqual(900100);
@@ -71,6 +74,28 @@ describe("C065 real account restriction and out-of-band status", () => {
     expect((await h.request("","auth/me",undefined,"GET")).status).toBe(401);
     const evidence=JSON.stringify(await h.db.client.auditLog.findMany({where:{subjectId:closure.id}}));
     for(const value of [f.owner.id,f.owner.email,f.owner.password,token,stored.tokenHash]) expect(evidence).not.toContain(value);
+  });
+
+  test("acknowledges media only after both generation-bound consumers finish", async () => {
+    const actor = await h.account();
+    const response = await close(actor);
+    expect(response.status).toBe(202);
+    const { receiptId } = await response.json() as { receiptId: string };
+    const media = () => h.db.client.accountClosureConsumer.findUniqueOrThrow({
+      where: { closureId_name: { closureId: receiptId, name: "MEDIA" } },
+    });
+    await h.app.get(VideoCleanupService).runOnce();
+    expect((await media()).status).toBe("PENDING");
+    await h.app.get(AssignmentCancellationWorker).runOnce();
+    await h.app.get(VideoCleanupService).runOnce();
+    await h.app.get(VideoCleanupService).runOnce();
+    expect((await media()).status).toBe("ACKNOWLEDGED");
+    expect(await h.db.client.accountClosureConsumer.count({
+      where: { closureId: receiptId, status: "PENDING" },
+    })).toBe(4);
+    expect(await h.db.client.accountClosure.findUniqueOrThrow({
+      where: { id: receiptId },
+    })).toMatchObject({ state: "RESTRICTED", revision: 1 });
   });
   test.each(["EXPERT","MODERATOR","ADMIN"] as const)("%s cannot close through member self-service",async role=>{
     const actor=await h.account(role); expect((await close(actor)).status).toBe(403);

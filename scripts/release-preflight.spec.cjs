@@ -26,8 +26,33 @@ test('rejects missing deployment configuration without exposing supplied secrets
   const failures = checkEnvironment({ API_INTERNAL_ORIGIN: 'https://user:secret@host.test', VIDEO_DURATION_FFPROBE: 'ffprobe' });
   assert.ok(failures.length); assert.ok(!failures.join(' ').includes('secret'));
 });
+const productionConfiguration = {
+  NODE_ENV: 'production',
+  API_DOCS_MODE: 'public',
+  API_INTERNAL_ORIGIN: 'http://127.0.0.1:4000',
+  VIDEO_DURATION_FFPROBE: '/usr/bin/ffprobe',
+  MATCHING_HANDLE_KEY: 'ab'.repeat(32),
+};
+
 test('accepts a static explicit production documentation configuration', () => {
-  assert.deepEqual(checkEnvironment({ NODE_ENV: 'production', API_DOCS_MODE: 'public', API_INTERNAL_ORIGIN: 'http://127.0.0.1:4000', VIDEO_DURATION_FFPROBE: '/usr/bin/ffprobe' }), []);
+  assert.deepEqual(checkEnvironment(productionConfiguration), []);
+});
+
+test('rejects missing or malformed matching keys without printing the value', () => {
+  for (const key of [undefined, '', 'invalid-sensitive-value', 'ab'.repeat(31), 'ab'.repeat(33)]) {
+    const failures = checkEnvironment({ ...productionConfiguration, MATCHING_HANDLE_KEY: key });
+    assert.deepEqual(failures, ['MATCHING_HANDLE_KEY must be a 32-byte key encoded as 64 hexadecimal characters']);
+  }
+});
+
+test('rejects isolated recovery and unrecognized recovery modes', () => {
+  for (const mode of ['isolated', 'unrecognized']) {
+    assert.deepEqual(
+      checkEnvironment({ ...productionConfiguration, RECOVERY_MODE: mode }),
+      ['RECOVERY_MODE must be normal to start the API'],
+    );
+  }
+  assert.deepEqual(checkEnvironment({ ...productionConfiguration, RECOVERY_MODE: 'normal' }), []);
 });
 test('HTTPS smoke rejects HTTP and redirects instead of following them', async () => {
   await assert.rejects(smoke('http://host.test', async () => { throw Error('must not connect'); }));

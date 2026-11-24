@@ -6,7 +6,8 @@ import { EnvironmentModule } from "../config/environment.module";
 import { AccountClosureController } from "./account-closure.controller";
 import { AccountClosureService } from "./account-closure.service";
 import { ClosureStatusService } from "./closure-status.service";
+import { ClosureMediaService } from "./closure-media.service";
 
 @Module({ imports: [AuthModule, ConsentModule, DatabaseModule, EnvironmentModule], controllers: [AccountClosureController],
-  providers: [AccountClosureService, ClosureStatusService], exports: [AccountClosureService] })
+  providers: [AccountClosureService, ClosureStatusService, ClosureMediaService], exports: [AccountClosureService, ClosureMediaService] })
 export class AccountClosureModule {}

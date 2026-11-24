@@ -9,9 +9,11 @@ staff MFA and retention require separate operational approval.
 ## HTTP contract
 
 `POST /api/expert-admin/experts/:userId/approvals` requires an existing HttpOnly
-session for an ACTIVE, email-verified MODERATOR. ADMIN does not inherit this role;
+session for an ACTIVE, email-verified MODERATOR. Outside tests it also requires
+current session-bound MFA. ADMIN does not inherit this role;
 MEMBER and EXPERT are denied with 403, including self-approval attempts. Missing,
-revoked, expired, inactive or unverified sessions return 401. The target must
+revoked, expired, inactive or unverified sessions return 401. Missing or invalid
+MFA proof outside tests returns 403 `STAFF_ASSURANCE_REQUIRED`. The target must
 already be an ACTIVE, verified EXPERT (403 otherwise, 404 if absent). No User is
 created, activated, assigned a new role or given access to member data.
 
@@ -97,12 +99,12 @@ unconfigured, invalid or expired publication data. An unapproved version returns
 400. A source failure or unavailable evidence record returns sanitized 503.
 Synthetic providers are injected only in isolated tests.
 
-The moderator session, target eligibility and revision checks still apply.
+The server checks the moderator session and current MFA before resolving
+qualification evidence outside tests, then rechecks the proof before commit.
 Qualification approval grants neither MFA nor assignment access. Assignment
-access retains its own session-bound assurance, scope and consent checks and
-its test-only gate. QA requires trusted session-bound staff MFA, a current
-assignment-specific grant and independence from the assigned expert and video
-owner.
+access independently checks session-bound assurance, scope and consent. QA
+requires trusted session-bound staff MFA, a current assignment-specific grant
+and independence from the assigned expert and video owner.
 
 The server stores recoverable SNAPSHOT content containing the evidence content,
 source ID, credential subject, version, original source business timestamps and

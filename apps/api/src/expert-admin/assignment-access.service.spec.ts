@@ -16,9 +16,19 @@ describe("C034 fail-closed boundary", () => {
     await expect(service("test").withAuthorizedAssignment({ user: { role } } as AuthContext, "id", jest.fn())).rejects.toMatchObject({ status: 403 });
     expect(tx).not.toHaveBeenCalled();
   });
-  test.each(["production", "development"])("%s cannot enable access via policy/provider overrides", async env => {
-    await expect(service(env).withAuthorizedAssignment({ user: { role: "EXPERT" } } as AuthContext, "id", jest.fn())).rejects.toMatchObject({ status: 403 });
-    expect(tx).not.toHaveBeenCalled();
+  test.each(["production", "development"])("%s denies access when session-bound MFA is missing", async env => {
+    const transaction = {
+      expertAssignment: { findUnique: async () => ({ expertId: "expert", video: { ownerId: "owner" } }) },
+      $queryRaw: jest.fn(),
+      session: { findUnique: async () => ({ id: "session", userId: "expert", revokedAt: null }) },
+      user: { findUnique: async () => ({ id: "expert", role: "EXPERT", status: "ACTIVE", emailVerifiedAt: new Date() }) },
+      video: { findUnique: jest.fn() },
+    };
+    tx.mockImplementation(callback => callback(transaction));
+    await expect(service(env).withAuthorizedAssignment({
+      user: { id: "expert", role: "EXPERT" }, sessionId: "session",
+    } as AuthContext, "id", jest.fn())).rejects.toMatchObject({ status: 403 });
+    expect(transaction.video.findUnique).not.toHaveBeenCalled();
   });
   test("default MFA provider never asserts assurance", async () => {
     await expect(new ExpertMfaSource().resolve({} as never, {} as never)).resolves.toBeUndefined();

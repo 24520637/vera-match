@@ -6,6 +6,11 @@ import { configureApplication } from "./configure-app";
 import { configureSwagger } from "./openapi/configure-swagger";
 
 async function bootstrap() {
+  // Restore targets use an isolated service environment. Keep listeners and
+  // background workers stopped while operator-side reconciliation is pending.
+  if (process.env.RECOVERY_MODE !== undefined && process.env.RECOVERY_MODE !== "normal") {
+    throw new Error("RECOVERY_FENCE_CLOSED");
+  }
   const app = await NestFactory.create(AppModule);
   const settings = app.get(EnvironmentService).values;
   app.enableShutdownHooks(["SIGINT", "SIGTERM"]);

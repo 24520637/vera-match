@@ -48,7 +48,7 @@ describe("Huong owned OpenAPI release contracts", () => {
   });
   it("publishes no cookie secret and does not turn docs into an auth bypass", async () => {
     expect(document.components?.securitySchemes?.sessionCookie).toMatchObject({ in: "cookie", name: "vera_contract_session" });
-    expect(Object.values(document.paths).flatMap(path => Object.entries(path ?? {}).filter(([method]) => ["get", "post", "patch", "delete", "put"].includes(method)))).toHaveLength(69);
+    expect(Object.values(document.paths).flatMap(path => Object.entries(path ?? {}).filter(([method]) => ["get", "post", "patch", "delete", "put"].includes(method)))).toHaveLength(71);
     expect(document.servers).toEqual([{ url: "/", description: "Same-origin API; operation paths already include /api" }]);
     expect((await fetch(base + "/api/auth/me")).status).toBe(401);
     expect((await fetch(base + "/api/videos/me")).status).toBe(401);

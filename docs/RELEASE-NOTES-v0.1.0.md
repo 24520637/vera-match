@@ -18,15 +18,15 @@ Matching ranks within each discovery window using that member’s settings. Shar
 
 T20 ran the joined demo twice on integrated `develop` at `07e0d23`. Each run passed both Chromium projects, exited 0 and left zero fixture schemas, buckets and messages after manual Windows process cleanup. A follow-up run with the T20 worktree fix passed both projects and exited 0 after automatically stopping its two owned server processes. Synthetic staff accounts use assignment-scoped grants and test-only staff assurance, training evidence and policies. A fresh-developer run of the updated README remains pending. [T20 demo results](T20-C102-RESULTS.md) · [T20 demo runbook](T20-DEMO-RUNBOOK.md)
 
-GitHub Actions push run `45108417225` passed at historical baseline `07e0d23`, and PR run `45135510851` passed at `a2b1632`. The local review at `18ec228` with the review fixes verified 24 fixture migrations and automatic cleanup on Windows. Two earlier attempts failed on a MinIO storage-full response. The November 24 replay passed both projects after C: storage accepted writes. CI on the updated PR revision, release sign-off, deployed HTTPS/proxy and production recovery verification remain open. [T20 release evidence](T20-RELEASE-EVIDENCE.md) · [Published PR CI](https://github.com/24520637/vera-match/actions/runs/45135510851) · [T18 verification record](T18-VERIFICATION.md)
+GitHub Actions passed all 37 steps on the integrated baseline `c7c4de2`, including web and API builds, PostgreSQL migrations, synthetic restore, browser tests, native MinIO and disposable HTTPS verification. Deployment acceptance and production recovery verification still need evidence from the target environment. [Integrated CI](https://github.com/24520637/vera-match/actions/runs/45335511693) · [T20 release evidence](T20-RELEASE-EVIDENCE.md)
 
-A detached compatibility check on `3c0f813` with the proposed T20 files passed desktop and mobile with automatic fixture cleanup. The review branch has yet to integrate that revision. [Compatibility results](T20-C102-RESULTS.md#compatibility-check-on-updated-develop)
+A detached compatibility check on `3c0f813` with the T20 files passed desktop and mobile with automatic fixture cleanup. [Compatibility results](T20-C102-RESULTS.md#compatibility-check-on-updated-develop)
 
 ## Release blockers and limitations
 
 | Area | Required before public or real-user use |
 | --- | --- |
-| Staff eligibility, access and QA | Provision trusted staff identities and session-bound MFA, approved training/confidentiality evidence, and assignment-scoped grants and revocation. Missing production providers fail closed. The PA2 grant/revoke workflow currently uses an internal service. |
+| Staff eligibility, access and QA | Provision trusted staff identities, MFA and approved training/confidentiality evidence. Test the signed moderator grants and revocation on the target environment. |
 | Consent, retention and disclosure | Publish approved versions of each consent notice, settle permitted field and claim disclosure, and approve retention, deletion deadlines and responsibility for reconciliation. Test-only policy evidence has fixture scope. |
 | Private media | Validate the deployed storage ACL, TLS and signed-capability range, expiry and in-flight behavior. Withdrawal prevents new authorized access. Previously issued links can remain usable until expiry, and already downloaded bytes cannot be recalled. |
 | HTTPS and proxy | Verify Secure cookies, exact allowed origin, trusted proxy boundary and real-client attribution on the deployed path. Current per-process limits reset on restart. A shared proxy address can concentrate limits, and multi-instance protection needs a reviewed shared mechanism. |
