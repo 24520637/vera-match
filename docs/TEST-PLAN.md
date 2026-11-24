@@ -100,9 +100,11 @@ integrated from develop; C034 playback authorization and the merged timezone
 regression fix are integrated. C051 tests cover owner deletion, consent withdrawal,
 queue metadata, grant evidence retention and playback denial after cancellation.
 
-C035 remains **PARTIAL**. Production trusted ADMIN provisioning, real
-session-bound MFA and approved evidence providers are unavailable; the external
-grant/revoke HTTP contract and full-stack queue E2E remain open. C050 review
+C035 remains **PARTIAL**. Expert/candidate reads retain their test-only gates,
+and moderator queue reads retain the production provisioning gate even with
+valid MFA. The [signed qualification source](EXPERT-QUALIFICATION-SOURCE.md)
+does not open either gate. The external grant/revoke HTTP contract and
+full-stack queue E2E remain open. C050 review
 editing/submission and Safety Report moderation are outside this feature. Do not
 claim production readiness or weaken the default-deny gates.
 

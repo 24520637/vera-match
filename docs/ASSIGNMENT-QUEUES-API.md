@@ -175,14 +175,14 @@ no authority. Session and server assurance are rechecked with a fresh PostgreSQL
 clock after external I/O and before returning. Candidate qualification expiry is
 also checked after the required audit. Minimal read audits contain no evidence/text.
 
-The existing StaffAssuranceSource interface is reused in the queue module; no
-Safety Report source or module is changed. Its default provider supplies no MFA.
+The queue module reuses the StaffAssuranceSource interface.
 Expert/candidate reads retain their existing test-only gates and synthetic policy
 requirements. Moderator queue reads verify session-bound assurance and real grants,
-but retain the explicit production PA2 provisioning gate described above. Default
-qualification sources remain empty. Tests cannot enable real production access.
-Real metadata publication, shared provider DI/ownership, MFA and evidence sources
-require Huong's review before replacing these gates. Role or client flags are not MFA.
+but retain the explicit production PA2 provisioning gate described above. The
+[signed qualification source](EXPERT-QUALIFICATION-SOURCE.md) supports
+operator-installed evidence and fails closed when it is unavailable. That
+publication supplies neither session-bound MFA nor moderator scope, and the
+production provisioning gate remains in place.
 
 ## UI and C033 creation
 
