@@ -10,7 +10,6 @@ function uuid(value: unknown, field: string): string {
     invalid(field, "Use a valid scope or grant reference.");
   return (value as string).toLowerCase();
 }
-/** Internal service inputs only; no external route or DTO contract is published. */
 export function grantInput(value: unknown) {
   const body = object(value, ["assignmentId", "moderatorId", "expectedRevision", "expiresAt"]);
   const assignmentId = identifier(body.assignmentId, "assignmentId"), moderatorId = identifier(body.moderatorId, "moderatorId");

@@ -5,6 +5,7 @@ import type { AuthContext } from "../auth/auth-context";
 import { EnvironmentService } from "../config/environment.service";
 import { PrismaService } from "../database/prisma.service";
 import { StaffAssuranceSource } from "../safety/staff-assurance.source";
+import { StaffIdentityService } from "../staff-security/staff-identity.service";
 import { invalid } from "../safety/safety.validation";
 import { AssignmentGrantProvisioningSource } from "./assignment-grant-provisioning.source";
 import { grantInput, revokeInput } from "./assignment-grants.validation";
@@ -22,13 +23,12 @@ function missing(): never { throw new NotFoundException({ code: "ASSIGNMENT_GRAN
 function authenticated(): never { throw new UnauthorizedException({ code: "UNAUTHENTICATED", message: "A valid session is required." }); }
 const date = (value: unknown): value is Date => value instanceof Date && Number.isFinite(value.getTime());
 
-/** Internal PA2 mutation boundary only: no controller, implicit read permission or
- * idempotent HTTP contract. Default provisioning/MFA providers deny all access.
- */
+/** PA2 grant mutations require a currently provisioned administrator with MFA. */
 @Injectable()
 export class AssignmentGrantsService {
   constructor(private readonly prisma: PrismaService, private readonly environment: EnvironmentService,
-    private readonly provisioning: AssignmentGrantProvisioningSource, private readonly assurance: StaffAssuranceSource) {}
+    private readonly provisioning: AssignmentGrantProvisioningSource, private readonly assurance: StaffAssuranceSource,
+    private readonly identities?: StaffIdentityService) {}
 
   private role(auth: AuthContext) {
     if (!auth?.user || typeof auth.user.id !== "string" || !auth.user.id || typeof auth.sessionId !== "string" || !auth.sessionId) authenticated();
@@ -76,7 +76,8 @@ export class AssignmentGrantsService {
         const identity = await tx.expertActorIdentity.findUnique({ where: { userId: actor.id } }) ??
           await tx.expertActorIdentity.create({ data: { userId: actor.id } });
         const evidence: Prisma.InputJsonObject = { subject: identity.subjectId, provisioningReference: provision.reference,
-          assurance: { verifiedAt: proof.verifiedAt.toISOString(), expiresAt: proof.expiresAt.toISOString() } };
+          assurance: { verifiedAt: proof.verifiedAt.toISOString(), expiresAt: proof.expiresAt.toISOString() },
+          testOnly: this.environment.values.nodeEnv === "test" || provision.testOnly || proof.testOnly };
         const result = await work(tx, now, evidence);
         await now();
         return result;
@@ -111,6 +112,12 @@ export class AssignmentGrantsService {
       const at = await now();
       if (input.expiresAt <= at) invalid("expiresAt", "Use an expiry after current database time.");
       if (scope.currentGrant && scope.currentGrant.expiresAt > at) conflict();
+      if (this.environment.values.nodeEnv !== "test") {
+        const staff = await this.identities?.current(tx, moderator.id, at);
+        if (staff?.role !== "MODERATOR") missing();
+        if (input.expiresAt > staff.expiresAt) invalid("expiresAt", "A grant must expire before its moderator authorization.");
+        evidence = { ...evidence, moderatorStaffSubject: staff.subjectId, moderatorMfaEpoch: staff.mfaEpoch.toString() };
+      }
       const id = randomUUID();
       const changed = await tx.assignmentModeratorScope.updateMany({ where: { id: scope.id, revision: scope.revision },
         data: { currentGrantId: id, revision: { increment: 1 } } });

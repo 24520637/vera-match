@@ -211,10 +211,10 @@ describe("C035 PA2 moderator assignment queue", () => {
     const f = await fixture(); await grant(f); Object.assign(app.get(EnvironmentService).values, { nodeEnv: "production" });
     expect((await get(f.moderator.cookie)).status).toBe(403);
     const original = assurance; assurance = async (tx, auth) => ({ ...(await original(tx, auth))!, testOnly: false });
-    const response = await get(f.moderator.cookie); expect(response.status).toBe(503);
-    expect(await response.json()).toMatchObject({ code: "MODERATOR_QUEUE_PROVISIONING_UNAVAILABLE" });
+    const response = await get(f.moderator.cookie); expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ assignments: [], nextCursor: null });
     assurance = (tx, auth) => new StaffAssuranceSource().resolve(tx, auth);
-    expect((await get(f.moderator.cookie)).status).toBe(503); expect(await readCount(f.moderator.auth.user.id)).toBe(0);
+    expect((await get(f.moderator.cookie)).status).toBe(503); expect(await readCount(f.moderator.auth.user.id)).toBe(1);
   });
   it.each(["scopeId=forged", "moderatorId=another", "assignedById=another", "grantId=forged", "wildcard=true", "scope=*"])("rejects client scope claim %s", async query => {
     const f = await fixture(), response = await get(f.moderator.cookie, "?" + query);

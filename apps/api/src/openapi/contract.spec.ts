@@ -6,6 +6,7 @@ import { configureApplication } from "../configure-app";
 import { parseConsentPatch } from "../consent/consent.validation";
 import { PrismaService } from "../database/prisma.service";
 import { parseAssignment } from "../expert-admin/assignment.validation";
+import { grantInput, revokeInput } from "../expert-admin/assignment-grants.validation";
 import { parseExpertApproval } from "../expert-admin/expert-approval.validation";
 import { claimFeedback, claimUpdate, reviewApproval } from "../expert-admin/review-claim.validation";
 import { disputeDecision, disputeInput } from "../expert-admin/review-dispute";
@@ -24,6 +25,8 @@ const routes = [
   ["post", "/api/expert-admin/assignments", 201, parseAssignment],
   ["get", "/api/expert-admin/assignments", 200],
   ["get", "/api/expert-admin/assignments/candidate", 200],
+  ["post", "/api/expert-admin/assignment-grants", 201, grantInput],
+  ["post", "/api/expert-admin/assignment-grants/revoke", 200, revokeInput],
   ["get", "/api/expert/assignments/me", 200],
   ["post", "/api/expert/assignments/{assignmentId}/playback", 200, requireEmpty],
   ["get", "/api/expert/assignments/{id}/draft", 200],
@@ -129,7 +132,7 @@ describe("Phúc's generated OpenAPI contract", () => {
         .filter(method => item[method]?.description?.startsWith("Requires a valid HttpOnly session cookie"))
         .map(method => method + " " + path));
     expect(tagged.sort()).toEqual(routes.map(([method, path]) => method + " " + path).sort());
-    expect(routes).toHaveLength(34);
+    expect(routes).toHaveLength(36);
   });
 
   it("declares the configured cookie and requires it on every documented protected operation", () => {
@@ -209,7 +212,7 @@ describe("Phúc's generated OpenAPI contract", () => {
     expect(found.security).toEqual([{ sessionCookie: [] }]);
     expect(found.tags).toHaveLength(1);
     expect(found.summary).toBeTruthy();
-    expect(found.description).toMatch(/active, email-verified (MEMBER|MODERATOR|EXPERT) account/);
+    expect(found.description).toMatch(/active, email-verified (MEMBER|MODERATOR|EXPERT|ADMIN) account/);
     expect(Object.keys(found.responses).filter(code => code.startsWith("2"))).toEqual([String(status)]);
     expect(response(method, path, status).content?.["application/json"].schema).toBeDefined();
     expect(Object.keys(found.responses)).toEqual(expect.arrayContaining(["400", "401", "403", "429", "503"]));

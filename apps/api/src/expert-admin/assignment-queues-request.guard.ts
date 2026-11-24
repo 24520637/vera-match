@@ -1,4 +1,4 @@
-import { CanActivate, ExecutionContext, ForbiddenException, Injectable } from "@nestjs/common";
+import { BadRequestException, CanActivate, ExecutionContext, ForbiddenException, HttpException, Injectable } from "@nestjs/common";
 import type { AuthenticatedRequest } from "../auth/auth-context";
 import { AuthRateLimiter } from "../auth/auth-request.guard";
 import { EnvironmentService } from "../config/environment.service";
@@ -10,8 +10,13 @@ export class AssignmentQueuesRequestGuard implements CanActivate {
   constructor(private readonly environment: EnvironmentService, private readonly limiter: AssignmentQueuesLimiter) {}
   canActivate(context: ExecutionContext) {
     const request = context.switchToHttp().getRequest<AuthenticatedRequest>();
-    if ((request.headers.origin && request.headers.origin !== this.environment.values.corsOrigin) || request.headers["sec-fetch-site"] === "cross-site")
+    const mutation = request.method !== "GET";
+    if (((mutation || request.headers.origin) && request.headers.origin !== this.environment.values.corsOrigin) || request.headers["sec-fetch-site"] === "cross-site")
       throw new ForbiddenException({ code: "ORIGIN_DENIED", message: "This request origin is not allowed." });
+    if (mutation && !request.is("application/json"))
+      throw new HttpException({ code: "JSON_REQUIRED", message: "Send a JSON request." }, 415);
+    if (mutation && Object.keys(request.query).length)
+      throw new BadRequestException({ code: "INVALID_REQUEST", message: "Query parameters are not supported for changes." });
     this.limiter.consume("assignment-queues:ip", request.socket.remoteAddress ?? "unknown", 600, 60000);
     this.limiter.consume("assignment-queues:actor", request.auth!.user.id, 60, 60000);
     return true;

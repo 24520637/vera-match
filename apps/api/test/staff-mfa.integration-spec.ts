@@ -50,8 +50,8 @@ describe("C064 real TOTP / HTTP / PostgreSQL (no assurance override)",()=>{
   await app.get(StaffIdentityService).apply(wire(p));return {user,p,activationKey,cookie:await login(user.email)};
  }
  const code=(secret:string,offset=0n)=>hotp(decodeTotpSecret(secret),BigInt(Math.floor(Date.now()/30000))+offset);
- async function enrolled(){
-  const f=await fixture();const setup=await mfa(f.cookie,"enrollment",{password,activationKey:f.activationKey});expect(setup.status).toBe(201);const d=await setup.json() as {deviceId:string,secret:string};
+ async function enrolled(role:"MODERATOR"|"ADMIN"|"EXPERT"="MODERATOR"){
+  const f=await fixture(role);const setup=await mfa(f.cookie,"enrollment",{password,activationKey:f.activationKey});expect(setup.status).toBe(201);const d=await setup.json() as {deviceId:string,secret:string};
   const submittedCode=code(d.secret);const response=await mfa(f.cookie,"enrollment/confirm",{deviceId:d.deviceId,code:submittedCode});expect(response.status).toBe(200);
   return {...f,...d,submittedCode,elevated:cookie(response),result:await response.json() as {recoveryCodes:string[],verifiedUntil:string}};
  }
@@ -77,6 +77,23 @@ describe("C064 real TOTP / HTTP / PostgreSQL (no assurance override)",()=>{
   expect((await mfa(f.elevated,"verify",{password,deviceId:f.deviceId,code:f.submittedCode})).status).toBe(403);
   const response=await mfa(f.elevated,"verify",{password,deviceId:f.deviceId,code:code(f.secret,1n)});expect(response.status).toBe(200);expect(response.headers.get("set-cookie")).toContain("HttpOnly");
   expect(await response.text()).not.toMatch(/token|sessionId|secret|recoveryCodes/);expect(await auth(f.elevated)).toBeNull();
+ });
+ it("allows real expert MFA to read the scoped queue outside test mode and requires signed grant permission",async()=>{
+  const expert=await enrolled("EXPERT"),admin=await enrolled("ADMIN");
+  const values=app.get(EnvironmentService).values;
+  const original=values.nodeEnv;
+  Object.assign(values,{nodeEnv:"production"});
+  try{
+   const queue=await request(expert.elevated,"expert/assignments/me");
+   expect(queue.status).toBe(200);
+   expect(await queue.json()).toEqual({assignments:[],nextCursor:null});
+   const denied=await request(admin.elevated,"expert-admin/assignment-grants",{
+    assignmentId:"synthetic-assignment",moderatorId:"synthetic-moderator",expectedRevision:0,
+    expiresAt:new Date(Date.now()+60000).toISOString(),
+   });
+   expect(denied.status).toBe(503);
+   expect(await denied.json()).toMatchObject({code:"ASSIGNMENT_ADMIN_PROVISIONING_UNAVAILABLE"});
+  }finally{Object.assign(values,{nodeEnv:original});}
  });
  it("binds setup confirmation to the exact initiating session and owner",async()=>{
   const f=await fixture(),second=await login(f.user.email);const setup=await mfa(f.cookie,"enrollment",{password,activationKey:f.activationKey});const d=await setup.json() as {deviceId:string,secret:string};

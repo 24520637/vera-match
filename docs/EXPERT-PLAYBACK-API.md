@@ -52,11 +52,7 @@ date plus TTL. Bucket privacy protections remain unchanged.
 
 ## Release limitations
 
-ExpertMfaSource returns no assurance by default; non-test environments are explicitly
-denied. Only isolated tests inject synthetic user/session-bound, expiring assurance
-with testOnly=true. Test mode also requires synthetic consent evidence. Qualification
-registry/source defaults remain empty. Production access needs separately reviewed
-MFA, approved evidence/policies and replacement of these synthetic-only gates.
+ExpertMfaSource checks current session-bound TOTP proof through the signed staff identity. The deployed path also requires current signed qualifications and signed owner consent. Synthetic MFA and policy evidence remain scoped to test fixtures. Verify playback and revocation on the target private storage provider before release.
 
 C034 denies new issuance on withdrawal/deletion even before C051 updates assignment
 status. It does not cancel, reassign, edit or submit work. C050 beyond this issuance

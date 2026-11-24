@@ -14,7 +14,7 @@ consumer for storage/review withdrawals. It grants no new access or account dele
 
 **T11 implementation:** Block/report and scoped moderator endpoints are described
 in [Safety and privacy](SAFETY-PRIVACY.md). Moderator access requires MODERATOR
-plus real session-bound staff assurance; its production source is not configured.
+plus real session-bound staff assurance from the signed staff identity configured on the host.
 ADMIN does not inherit these permissions. Account closure/deletion remains deferred. T14 applies reciprocal blocking to matching.
 
 **C035 / PA2 implementation (partial).** The [assignment queue contract](ASSIGNMENT-QUEUES-API.md)
@@ -34,7 +34,7 @@ QA return and resubmission, and an approved review receipt.
 
 **C033 implementation:** [Assignment API](ASSIGNMENT-API.md) defines
 `POST /expert-admin/assignments`, review-consent generation binding and durable
-idempotency. It is synthetic-test-only until real staff assurance is integrated.
+idempotency. The deployed path requires real session-bound moderator MFA.
 
 **C032 implementation:** The moderator-only expert approval endpoint and its
 fail-closed evidence-source boundary are documented in
@@ -107,10 +107,12 @@ not changes to current auth.
 | GET       | `/videos/me`                       | Owner                   | Private metadata list                                                                                     |
 | POST      | `/videos/:id/playback`             | Owner                   | Owner-only playback; expert access uses the assignment-bound route below                                  |
 | DELETE    | `/videos/:id`                      | Owner                   | Revoke owner access, atomically cancel active assignments (C051), and enqueue cleanup                   |
-| POST      | `/expert-admin/assignments`        | Moderator               | C033: strict DTO, both consents, generation, qualification revision and Idempotency-Key; synthetic only    |
-| POST      | `/expert/assignments/:assignmentId/playback` | Expert | C034 assignment-bound playback; synthetic-only until trusted MFA and approved evidence integrations exist; see [contract](EXPERT-PLAYBACK-API.md) |
+| POST      | `/expert-admin/assignments`        | Moderator               | C033: moderator MFA, both consents, generation, qualification revision and Idempotency-Key |
+| POST      | `/expert/assignments/:assignmentId/playback` | Expert | C034 assignment-bound playback using current MFA, qualifications and consent. [Playback contract](EXPERT-PLAYBACK-API.md) |
 | GET       | `/expert/assignments/me`           | Expert                  | C035 own metadata only, server identity, assurance and cursor pagination; see [queue contract](ASSIGNMENT-QUEUES-API.md) |
-| GET       | `/expert-admin/assignments`        | Moderator               | C035 PA2 grant-filtered metadata/status/cursor reader; production assurance/provisioning gates remain; see [contract](ASSIGNMENT-QUEUES-API.md) |
+| GET       | `/expert-admin/assignments`        | Moderator               | C035 PA2 grant-filtered metadata, with current MFA and grant binding. [Queue contract](ASSIGNMENT-QUEUES-API.md) |
+| POST      | `/expert-admin/assignment-grants` | Admin | Grant one moderator scoped access. Requires current MFA and signed `ASSIGNMENT_GRANT_ADMIN` permission. |
+| POST      | `/expert-admin/assignment-grants/revoke` | Admin | Revoke the current scope grant using its revision and ID. Requires the same MFA and permission. |
 | GET       | `/expert-admin/assignments/candidate` | Moderator             | C035 known video/expert pair eligibility check; no public directory/search                               |
 | GET       | `/expert/assignments/:id/draft`    | Assigned expert         | Audit the private draft read without initializing a draft. Return the draft or null with nullable, server-owned `durationMs`, or the submitted or approved receipt while the editor is locked. |
 | POST      | `/expert/assignments/:id/draft`    | Assigned expert         | Empty JSON initializes one DRAFT at version 1 per assignment or returns the existing editable review. A locked submission returns `409`. |

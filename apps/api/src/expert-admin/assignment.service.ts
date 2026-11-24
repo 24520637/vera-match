@@ -5,6 +5,7 @@ import { PrismaService } from "../database/prisma.service";
 import { EnvironmentService } from "../config/environment.service";
 import { ConsentAccessService } from "../consent/consent-access.service";
 import { parseIdempotencyKey } from "../consent/consent.validation";
+import { StaffAssuranceSource } from "../safety/staff-assurance.source";
 import { ExpertApprovalRegistry, ExpertEvidenceSource } from "./expert-approval.sources";
 import { assignmentFingerprint, parseAssignment } from "./assignment.validation";
 import { approvalInvalid } from "./expert-approval.validation";
@@ -20,15 +21,12 @@ function forbidden(): never { throw new ForbiddenException({ code: "ASSIGNMENT_I
 export class AssignmentService {
   constructor(private readonly prisma: PrismaService, private readonly consent: ConsentAccessService,
     private readonly environment: EnvironmentService, private readonly registry: ExpertApprovalRegistry,
-    private readonly evidence: ExpertEvidenceSource) {}
+    private readonly evidence: ExpertEvidenceSource, private readonly assurance: StaffAssuranceSource) {}
   async create(auth: AuthContext, body: unknown, header: unknown) {
     const input = parseAssignment(body), keyHash = parseIdempotencyKey(header), fingerprint = assignmentFingerprint(input);
     try {
-      // No trusted staff-MFA source is implemented. Do not expose real member
-      // data by enabling this route through a role/client/environment bypass.
-      if (this.environment.values.nodeEnv !== "test")
-        throw new ServiceUnavailableException({ code: "ASSIGNMENT_ASSURANCE_UNAVAILABLE", message: "Real-data assignment requires approved staff assurance and evidence integrations." });
       return await this.prisma.$transaction(async tx => {
+        const testRuntime = this.environment.values.nodeEnv === "test";
         const locator = await tx.video.findUnique({ where: { id: input.videoId }, select: { ownerId: true } });
         const ownerId = locator?.ownerId ?? "";
         await tx.$queryRaw`SELECT id FROM "User" WHERE id IN (${auth.user.id}, ${input.expertId}, ${ownerId}) ORDER BY id FOR UPDATE`;
@@ -38,6 +36,20 @@ export class AssignmentService {
         const session = await tx.session.findUnique({ where: { id: auth.sessionId }, select: { userId: true, revokedAt: true, expiresAt: true } });
         if (!session || session.userId !== auth.user.id || session.revokedAt)
           throw new UnauthorizedException({ code: "UNAUTHENTICATED", message: "A valid session is required." });
+        const proof = testRuntime ? undefined : await this.assurance.resolve(tx, auth);
+        const checkModeratorTime = (now: Date) => {
+          if (session.expiresAt <= now)
+            throw new UnauthorizedException({ code: "UNAUTHENTICATED", message: "A valid session is required." });
+          if (!testRuntime && (!proof || proof.level !== "MFA" || proof.testOnly !== false ||
+            proof.userId !== auth.user.id || proof.sessionId !== auth.sessionId ||
+            !(proof.verifiedAt <= now && proof.expiresAt > now))) {
+            throw new ServiceUnavailableException({ code: "ASSIGNMENT_ASSURANCE_UNAVAILABLE", message: "Current moderator assurance is required." });
+          }
+        };
+        if (!testRuntime) {
+          const [authorizationClock] = await tx.$queryRaw<{ now: Date }[]>`SELECT (clock_timestamp() AT TIME ZONE 'UTC')::timestamp(3) AS now`;
+          checkModeratorTime(authorizationClock.now);
+        }
         const actor = await tx.expertActorIdentity.findUnique({ where: { userId: auth.user.id } });
         if (actor) {
           const previous = await tx.assignmentIdempotency.findUnique({ where: { actorSubjectId_operation_keyHash: {
@@ -46,8 +58,7 @@ export class AssignmentService {
           if (previous) {
             if (previous.fingerprint !== fingerprint) conflict("IDEMPOTENCY_KEY_REUSED");
             const [clock] = await tx.$queryRaw<{ now: Date }[]>`SELECT (clock_timestamp() AT TIME ZONE 'UTC')::timestamp(3) AS now`;
-            if (session.expiresAt <= clock.now)
-              throw new UnauthorizedException({ code: "UNAUTHENTICATED", message: "A valid session is required." });
+            checkModeratorTime(clock.now);
             // Historical receipt only, never a new authorization or mutation.
             return { response: previous.response, replayed: true };
           }
@@ -62,8 +73,7 @@ export class AssignmentService {
         await this.consent.requireGenerationInTransaction(tx, ownerId, generation.subjectId, generation.version, "EXPERT_VIDEO_REVIEW");
         const policies = await tx.consent.findMany({ where: { userId: ownerId, purpose: { in: ["VIDEO_STORAGE", "EXPERT_VIDEO_REVIEW"] } },
           select: { policyEvidence: { select: { testOnly: true } } } });
-        // NODE_ENV=test alone cannot authorize ordinary real-policy records.
-        if (policies.length !== 2 || policies.some(row => row.policyEvidence?.testOnly !== true)) assignmentUnavailable();
+        if (policies.length !== 2 || policies.some(row => row.policyEvidence?.testOnly !== testRuntime)) assignmentUnavailable();
         if (video.storageConsentVersion === null || video.storageConsentVersion > generation.version ||
           await tx.consentWithdrawalTask.count({ where: { subjectId: generation.subjectId, purpose: "VIDEO_STORAGE", version: { gt: video.storageConsentVersion } } }))
           conflict("VIDEO_WITHDRAWN");
@@ -87,8 +97,7 @@ export class AssignmentService {
         // clock time at the mutation decision, never transaction_timestamp/now().
         const [clock] = await tx.$queryRaw<{ now: Date }[]>`SELECT (clock_timestamp() AT TIME ZONE 'UTC')::timestamp(3) AS now`;
         const now = clock.now;
-        if (session.expiresAt <= now)
-          throw new UnauthorizedException({ code: "UNAUTHENTICATED", message: "A valid session is required." });
+        checkModeratorTime(now);
         requireCurrentAssignmentEvidence(credential.approval, limits, now);
         for (const [field, value] of [["dueAt", input.dueAt], ["expiresAt", input.expiresAt]] as const)
           if (value && value <= now) approvalInvalid(field, "Use a future UTC timestamp or null.");
@@ -106,6 +115,10 @@ export class AssignmentService {
           credentialApprovalId: credential.approval.id, dueAt: input.dueAt?.toISOString() ?? null, expiresAt: input.expiresAt?.toISOString() ?? null } };
         await tx.assignmentIdempotency.create({ data: { actorSubjectId: retainedActor.subjectId, operation, keyHash, fingerprint,
           assignmentId: assignment.id, response } });
+        if (!testRuntime) {
+          const [completionClock] = await tx.$queryRaw<{ now: Date }[]>`SELECT (clock_timestamp() AT TIME ZONE 'UTC')::timestamp(3) AS now`;
+          checkModeratorTime(completionClock.now);
+        }
         return { response, replayed: false };
       }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted, timeout: 10000 });
     } catch (error) {
