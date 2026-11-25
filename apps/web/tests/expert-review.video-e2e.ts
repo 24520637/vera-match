@@ -646,7 +646,7 @@ test("T18 demo connects registration, private review, independent QA, owner clai
     const history = await peerContext.request.get("/api/matches/decisions");
     expect(history.status()).toBe(200);
     expect(await history.json()).toEqual({ decisions: [{
-      id: expect.any(String), choice: "ACCEPT", createdAt: expect.any(String), available: false, mutual: false,
+      id: expect.any(String), choice: "ACCEPT", createdAt: expect.any(String), available: false, mutual: false, connectionId: null,
     }], nextCursor: null });
     expect(await db.matchDecision.count({ where: { actorUserId: { in: members } } })).toBe(2);
   } finally {
