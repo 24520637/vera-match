@@ -107,7 +107,7 @@ function MatchesScreen() {
     useMatchPage("/matches/recommendations", isRecommendations);
   const { state: history, load: loadHistory, clear: clearHistory } = useMatchPage("/matches/decisions", isHistory);
   const [pending, setPending] = useState(false);
-  const [view, setView] = useState<"discover" | "connections" | "all">("all");
+  const [view, setView] = useState<"discover" | "connections" | "all">("discover");
   const decisionQuota = useRetryAfter();
   const decisionDisabled = pending || decisionQuota.seconds > 0;
   useEffect(() => {
@@ -178,13 +178,13 @@ function MatchesScreen() {
   return (
     <div className="container member-settings dating-workspace stack">
       <MemberSettingsNav />
-      <PageHeader title="A little closer to someone new." description="Explore thoughtful introductions. A connection starts when you both say yes.">
+      <PageHeader title="Meet someone new." description="Start with common ground. Connect when the interest is mutual.">
         <Button variant="secondary" disabled={pending} onClick={refreshMatches}>Refresh matches</Button>
       </PageHeader>
-      <div className="dating-path" aria-label="How connections work"><span>01 · Discover</span><span>02 · Both accept</span><span>03 · Share & talk</span></div>
+      <details className="dating-guide"><summary>How introductions work</summary><div className="dating-path"><span>01 · Explore common ground</span><span>02 · Both accept</span><span>03 · Choose what to share & talk</span></div><p className="small muted">Recommendations use your matching settings. An introduction is not a compatibility score.</p></details>
       <div className="dating-tabs" role="group" aria-label="Match views">
         <Button variant={view === "discover" ? "primary" : "secondary"} aria-pressed={view === "discover"} onClick={() => setView("discover")}>Discover</Button>
-        <Button variant={view === "connections" ? "primary" : "secondary"} aria-pressed={view === "connections"} onClick={() => setView("connections")}>Connections</Button>
+        <Button aria-label="Connections" variant={view === "connections" ? "primary" : "secondary"} aria-pressed={view === "connections"} onClick={() => setView("connections")}>Connections{history.kind === "ready" ? ` (${history.data.decisions.filter(d => d.mutual).length} on this page)` : ""}</Button>
         <Button variant={view === "all" ? "primary" : "secondary"} aria-pressed={view === "all"} onClick={() => setView("all")}>All activity</Button>
       </div>
       <div ref={status} tabIndex={-1}>
@@ -215,9 +215,9 @@ function MatchesScreen() {
                 <div className="dating-introduction__art" aria-hidden="true">✦</div>
                 <div className="dating-introduction__body">
                 <span className="dating-eyebrow">A new possibility</span>
-                <h3>Recommendation {index + 1}</h3>
-                <p>A thoughtful introduction, at your pace.</p>
-                <ul>{item.reasons.map(reason => <li key={reason}>{reason}</li>)}</ul>
+                <h3>Introduction {index + 1}</h3>
+                <p className="dating-introduction__label">Why this introduction</p>
+                <ul>{item.reasons.length ? item.reasons.map(reason => <li key={reason}>{reason}</li>) : <li>Based on your current matching settings.</li>}</ul>
                 <div className="form-actions">
                   <Button aria-label="Accept" disabled={decisionDisabled} onClick={() => void decide(item, "ACCEPT")}>Accept · Interested</Button>
                   <Button aria-label="Decline" variant="secondary" disabled={decisionDisabled} onClick={() => void decide(item, "DECLINE")}>Decline · Pass</Button>
@@ -246,9 +246,9 @@ function MatchesScreen() {
             <ul>
               {history.data.decisions.filter(d => view !== "connections" || d.mutual).map(decision =>
                 <li key={decision.id} className={`dating-decision ${decision.mutual ? "dating-decision--mutual" : ""}`}>
-                  {decision.choice === "ACCEPT" ? "Accepted" : "Declined"}
+                  <span className="dating-decision__status">{decision.choice === "ACCEPT" ? "Accepted" : "Declined"}</span>
                   {" · "}<time dateTime={decision.createdAt}>{new Date(decision.createdAt).toLocaleDateString()}</time>
-                  {decision.mutual ? " · Mutual match" : decision.available ? "" : " · Unavailable"}
+                  {decision.mutual ? " · Mutual match" : decision.available ? decision.choice === "ACCEPT" ? " · Interest saved — no mutual connection yet" : " · You passed on this introduction" : " · Unavailable"}
                   {decision.mutual && decision.available && decision.connectionId && (
                     <div className="form-actions">
                       <Link className="button button--secondary button--regular"

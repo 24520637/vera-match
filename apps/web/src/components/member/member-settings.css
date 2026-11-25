@@ -12,3 +12,6 @@
 .member-tools { padding: 0 0 1rem; }
 .member-tools summary { cursor: pointer; font-size: .9rem; }
 .member-tools .member-nav { margin-top: .5rem; }
+.member-settings .page-heading { padding-block: 1.25rem; gap: .75rem; }
+.member-settings .page-heading h1 { font-size: clamp(2rem, 4vw, 3rem); }
+.member-settings .page-heading .lede { font-size: 1rem; }
