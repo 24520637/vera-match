@@ -36,6 +36,9 @@ async function signIn(page: Page, email?: string) {
   await form.getByRole("button", { name: "Sign in", exact: true }).click();
   const login = await response;
   expect(login.status()).toBe(200);
+  await expect(page).toHaveURL(origin + "/account/matches");
+  // Members land on Discover; account identity and logout assertions belong on Account.
+  await page.goto(origin + "/account");
   await expect(page.getByText(email, { exact: true })).toBeVisible();
   return { email, setCookie: (await login.allHeaders())["set-cookie"] || "" };
 }
