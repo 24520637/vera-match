@@ -160,7 +160,8 @@ function ConnectionScreen({ connectionId, email }: { connectionId: string; email
   const profile = data?.peer.profile;
   return <div className="container match-connection stack">
     <Link href="/account/matches">Back to Your matches</Link>
-    <PageHeader title="Your mutual connection" description="Choose what to share with this person after you have both accepted." />
+    <PageHeader title="You both said yes." description="Get to know each other at your own pace. You choose what to share." />
+    <nav className="form-actions" aria-label="Connection sections"><Link href="#match-profile-heading">Their profile</Link><Link href="#match-sharing-heading">Your sharing choices</Link><Link href="#match-chat-heading">Conversation</Link></nav>
     <Button variant="secondary" disabled={working} onClick={() => void refresh()}>Refresh connection</Button>
     {loading && <LoadingState label="Checking connection…" />}
     {error && <Notice tone="error" title="Connection needs attention">{error}</Notice>}

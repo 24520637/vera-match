@@ -28,6 +28,10 @@ export function AccountOverview() {
             <dd style={{ margin: 0 }}>{state.user.role.toLowerCase()}</dd>
           </div>
         </dl>
+        {state.user.role === "MEMBER" && <section className="section">
+          <h2>Your next connection starts here.</h2><p>Tell your story, choose what matters to you, then explore introductions.</p>
+          <div className="form-actions"><ButtonLink href="/account/matches">Discover people</ButtonLink><ButtonLink variant="secondary" href="/account/profile">Complete your profile</ButtonLink><ButtonLink variant="secondary" href="/account/preferences">Set your preferences</ButtonLink></div>
+        </section>}
         <LogoutControls />
         {workspace && (
           <section className="section" aria-labelledby="account-work-heading">

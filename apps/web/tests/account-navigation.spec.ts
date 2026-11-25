@@ -19,6 +19,8 @@ for (const entry of cases) {
     await expect(main.getByRole("link", { name: entry.label, exact: true })).toHaveAttribute("href", entry.href);
     await expect(main.getByText(/still in development/)).toHaveCount(0);
     if (entry.role === "MEMBER") {
+      await expect(main.getByRole("link", { name: "Discover people" })).toHaveAttribute("href", "/account/matches");
+      await main.getByText("Preferences, privacy & more", { exact: true }).click();
       await expect(main.getByRole("navigation", { name: "Member settings" })).toBeVisible();
       await expect(main.getByRole("navigation", { name: "Staff tools" })).toHaveCount(0);
     } else {

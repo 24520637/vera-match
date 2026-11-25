@@ -4,10 +4,13 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "../ui/button";
+import { useAuth } from "../auth/auth-provider";
 import { AuthNavigation } from "../auth/auth-navigation";
 
 export function SiteHeader() {
   const pathname = usePathname();
+  const { state } = useAuth();
+  const isMember = state.status === "authenticated" && state.user.role === "MEMBER";
   const [expanded, setExpanded] = useState(false);
   const toggleRef = useRef<HTMLButtonElement>(null);
   useEffect(() => setExpanded(false), [pathname]);
@@ -53,6 +56,7 @@ export function SiteHeader() {
           className={`site-nav ${expanded ? "site-nav--open" : ""}`}
         >
           <AuthNavigation onNavigate={() => setExpanded(false)} />
+          {!isMember && <>
           <Link href="/#approach" onClick={() => setExpanded(false)}>
             Our approach
           </Link>
@@ -66,6 +70,7 @@ export function SiteHeader() {
           >
             Design preview
           </Link>
+          </>}
         </nav>
       </div>
     </header>

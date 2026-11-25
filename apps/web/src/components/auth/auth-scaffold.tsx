@@ -15,8 +15,7 @@ export function AuthScaffold({
         <h1>{title}</h1>
         <p className="lede">{description}</p>
         <p className="small muted">
-          Your choices matter. Private video reviews and matching tools are
-          still in development.
+          Your choices matter. Discover introductions and share only what feels right for you.
         </p>
       </div>
       <Card className="auth-panel">{children}</Card>
