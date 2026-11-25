@@ -425,7 +425,8 @@ test("T18 demo connects registration, private review, independent QA, owner clai
       await login.getByLabel("Email address").fill(email);
       await login.getByLabel(/^Password \(required\)$/).fill(password);
       await login.getByRole("button", { name: "Sign in", exact: true }).click();
-      await expect(ownerPage).toHaveURL("/account");
+      await expect(ownerPage).toHaveURL("/account/matches");
+      await ownerPage.goto("/account");
       await ownerPage.reload();
       await expect(ownerPage.getByText(email, { exact: true })).toBeVisible();
     });

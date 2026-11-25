@@ -44,6 +44,7 @@ test("real member screens persist through refresh, safely recover from conflict 
     await expect(page.getByText("Your changes were saved.")).toBeVisible();
     expect((await db.memberResourceRevision.findUniqueOrThrow({ where: { userId_resource: { userId: user.id, resource: "PROFILE" } } })).revision).toBe(3n);
 
+    await page.getByText("Preferences, privacy & more", { exact: true }).click();
     await page.getByRole("link", { name: "Your questionnaire", exact: true }).click();
     for (const q of questions) await page.getByLabel(q.prompt).fill(`Synthetic ${q.key}`);
     await page.getByRole("button", { name: "Save changes", exact: true }).click();
@@ -52,6 +53,7 @@ test("real member screens persist through refresh, safely recover from conflict 
     for (const q of questions) await expect(page.getByLabel(q.prompt)).toHaveValue(`Synthetic ${q.key}`);
     expect(await db.questionnaireAnswer.count({ where: { userId: user.id, questionnaireVersion: 1 } })).toBe(3);
 
+    await page.getByText("Preferences, privacy & more", { exact: true }).click();
     await page.getByRole("link", { name: "Your preferences", exact: true }).click();
     await page.getByLabel("Minimum age").fill("30"); await page.getByLabel("Maximum age").fill("45");
     await page.getByLabel("Relationship goal", { exact: true }).selectOption("exploring");
@@ -69,6 +71,7 @@ test("real member screens persist through refresh, safely recover from conflict 
 
     // Synthetic legacy rows exercise withdrawal without inventing an approved policy.
     await db.consent.createMany({ data: purposes.map(purpose => ({ userId: user.id, purpose, granted: true, grantedAt: new Date() })) });
+    await page.getByText("Preferences, privacy & more", { exact: true }).click();
     await page.getByRole("link", { name: "Your consent choices", exact: true }).click();
     for (const purpose of purposes) {
       await expect(page.getByRole("button", { name: `Grant ${purposeLabels[purpose].toLowerCase()}`, exact: true })).toBeDisabled();

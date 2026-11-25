@@ -80,7 +80,8 @@ test("uses real sign-in, rejects external next targets and remembers only explic
     await form.getByLabel("Password", { exact: false }).fill(password);
     await form.getByLabel("Remember email on this device").check();
     await form.getByRole("button", { name: "Sign in", exact: true }).click();
-    await expect(page).toHaveURL("/account");
+    await expect(page).toHaveURL("/account/matches");
+    await page.goto("/account");
     await expect(page.getByText(email, { exact: true })).toBeVisible();
     expect(await page.evaluate(() => Object.entries(localStorage))).toEqual([
       ["vera.rememberedEmail", email],
@@ -209,7 +210,8 @@ test("registers, verifies a real email link and signs in through accessible form
     await login.getByLabel("Email address").fill(email);
     await login.getByLabel(/^Password \(required\)$/).fill(password);
     await login.getByRole("button", { name: "Sign in", exact: true }).click();
-    await expect(page).toHaveURL("/account");
+    await expect(page).toHaveURL("/account/matches");
+    await page.goto("/account");
     await expect(page.getByText(email, { exact: true })).toBeVisible();
     await page.reload();
     await expect(page).toHaveURL("/account");

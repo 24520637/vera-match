@@ -98,7 +98,7 @@ test("recovers through real SMTP and forms, revokes two independent browser sess
       .getByRole("form", { name: "Sign in", exact: true })
       .getByRole("button", { name: "Sign in", exact: true })
       .click();
-    await expect(page).toHaveURL("/account");
+    await expect(page).toHaveURL("/account/matches");
     await page.goto(mail.link);
     await page.getByLabel(/^New password/).fill(newPassword);
     await page.getByLabel(/^Confirm new password/).fill(newPassword);

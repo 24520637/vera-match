@@ -58,8 +58,8 @@ test("members accept, reload history and lose the mutual state after a real bloc
     await peerContext.addCookies([cookie(b.token)]);
     const peer = await peerContext.newPage();
     await page.goto("http://localhost:3100/account");
-    await page.getByRole("link", { name: "Your matches" }).click();
-    await expect(page.getByRole("heading", { name: "Your matches" })).toBeVisible();
+    await page.getByRole("link", { name: "Discover & matches" }).click();
+    await expect(page.getByRole("heading", { name: "Meet someone new." })).toBeVisible();
     await expect(page.getByText("Private Fixture Name")).toHaveCount(0);
     await page.getByRole("button", { name: "Accept", exact: true }).click();
     await expect(page.getByText("Acceptance saved.")).toBeVisible();
@@ -67,8 +67,10 @@ test("members accept, reload history and lose the mutual state after a real bloc
 
     await peer.goto("/account/matches");
     await peer.getByRole("button", { name: "Accept", exact: true }).click();
+    await peer.getByRole("button", { name: "All activity", exact: true }).click();
     await expect(peer.getByText("Accepted ·", { exact: false })).toContainText("Mutual match");
     await page.reload();
+    await page.getByRole("button", { name: "All activity", exact: true }).click();
     await expect(page.getByText("Accepted ·", { exact: false })).toContainText("Mutual match");
     expect((await new AxeBuilder({ page }).include(".member-settings").analyze()).violations).toEqual([]);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
@@ -95,7 +97,7 @@ test("members accept, reload history and lose the mutual state after a real bloc
       await expect.poll(() => page.evaluate(() => document.visibilityState)).toBe("visible");
       await reauthorized;
       await backgroundTab.close();
-    } else await page.reload();
+    } else { await page.reload(); await page.getByRole("button", { name: "All activity", exact: true }).click(); }
     await expect(page.getByText("Accepted ·", { exact: false })).toContainText("Unavailable");
     await expect(page.getByText("Mutual match")).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Accept", exact: true })).toHaveCount(0);
@@ -103,6 +105,7 @@ test("members accept, reload history and lose the mutual state after a real bloc
     // A fresh history navigation must reauthorize; cached mutual state is not authority.
     await page.goto("http://localhost:3100/account/profile");
     await page.goBack();
+    await page.getByRole("button", { name: "All activity", exact: true }).click();
     await expect(page.getByText("Accepted ·", { exact: false })).toContainText("Unavailable");
     expect((await peer.request.delete("/api/blocks/" + a.id, {
       data: {}, headers: { origin: "http://localhost:3100" },
