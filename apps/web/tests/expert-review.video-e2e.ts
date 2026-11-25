@@ -633,12 +633,15 @@ test("T18 demo connects registration, private review, independent QA, owner clai
     await expect(matches.getByText("Mutual match", { exact: false })).toHaveCount(0);
     await ownerPage.goto("/account/matches");
     await ownerPage.getByRole("button", { name: "Accept", exact: true }).press("Enter");
-    await expect(ownerPage.getByText("Mutual match", { exact: false })).toBeVisible();
+    await ownerPage.getByRole("button", { name: "All activity", exact: true }).click();
+    await expect(ownerPage.getByRole("region", { name: "Decision history", exact: true }).getByText("Mutual match", { exact: false })).toBeVisible();
     await matches.reload();
-    await expect(matches.getByText("Mutual match", { exact: false })).toBeVisible();
+    await matches.getByRole("button", { name: "All activity", exact: true }).click();
+    await expect(matches.getByRole("region", { name: "Decision history", exact: true }).getByText("Mutual match", { exact: false })).toBeVisible();
     await setConsent(ownerContext, 3, ["PROFILE_MATCHING"], false);
     await matches.reload();
-    await expect(matches.getByText("Accepted ·", { exact: false })).toContainText("Unavailable");
+    await matches.getByRole("button", { name: "All activity", exact: true }).click();
+    await expect(matches.getByRole("region", { name: "Decision history", exact: true }).getByText("Accepted ·", { exact: false })).toContainText("Unavailable");
     await expect(matches.getByText("Mutual match", { exact: false })).toHaveCount(0);
     const history = await peerContext.request.get("/api/matches/decisions");
     expect(history.status()).toBe(200);
