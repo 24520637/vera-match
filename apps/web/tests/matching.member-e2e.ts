@@ -159,6 +159,7 @@ test("members accept, reload history and lose the mutual state after a real bloc
     await page.getByRole("button", { name: "Decline", exact: true }).click();
     await expect(page.getByText("Decline saved.")).toBeVisible();
     await page.reload();
+    await page.getByRole("button", { name: "All activity", exact: true }).click();
     await expect(page.getByText("Declined ·", { exact: false })).toBeVisible();
   } finally {
     await peerContext.close();
