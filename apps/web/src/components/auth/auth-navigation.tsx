@@ -18,6 +18,11 @@ export function AuthNavigation({ onNavigate }: { onNavigate: () => void }) {
     );
   return (
     <>
+      {state.status === "authenticated" && state.user.role === "MEMBER" && <>
+        <Link href="/account/matches" onClick={onNavigate}>Discover</Link>
+        <Link href="/account/matches#connections" onClick={onNavigate}>Connections</Link>
+        <Link href="/account/profile" onClick={onNavigate}>My profile</Link>
+      </>}
       <Link href="/account" onClick={onNavigate}>
         {state.status === "authenticated"
           ? "Your account"

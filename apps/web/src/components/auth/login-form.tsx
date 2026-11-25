@@ -43,10 +43,10 @@ export function LoginForm({ nextPath }: { nextPath: string }) {
   }, []);
   useEffect(() => {
     if (state.status === "authenticated") {
-      router.replace(nextPath);
+      router.replace(nextPath === "/account" && state.user.role === "MEMBER" ? "/account/matches" : nextPath);
       router.refresh();
     }
-  }, [state.status, nextPath, router]);
+  }, [state, nextPath, router]);
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (pending || retry.seconds > 0) return;

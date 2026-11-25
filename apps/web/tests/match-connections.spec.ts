@@ -13,6 +13,7 @@ test("mutual history offers the connection link", async ({ page }) => {
   await page.route("**/api/matches/decisions", route => route.fulfill({ json: { decisions: [{ id: "decision", choice: "ACCEPT",
     createdAt: "2026-11-25T00:00:00.000Z", available: true, mutual: true, connectionId: "synthetic-connection" }], nextCursor: null } }));
   await page.goto("http://127.0.0.1:3101/matches");
+  await page.getByRole("button", { name: "Connections", exact: true }).click();
   await expect(page.getByRole("link", { name: "View profile and chat" })).toHaveAttribute("href", "/account/matches/synthetic-connection");
 });
 test("sharing starts off and saves only explicit choices", async ({ page }) => {
@@ -65,4 +66,28 @@ test("reads the shared profile and conversation, sends plain text and clears con
   await expect(page.getByText("Demo Peer, 28")).toHaveCount(0);
   await expect(page.getByText("Hello!", { exact: true })).toHaveCount(0);
   await expect(page.getByRole("link", { name: "peer@example.invalid" })).toHaveCount(0);
+});
+
+test("failed delivery explains recovery and retries the same message after refresh", async ({ page }) => {
+  const data = blank(); data.sharing.chatEnabled = true; data.peer.chatEnabled = true; data.chatAvailable = true;
+  let attempt = 0; let original: unknown;
+  await page.route(endpoint, route => route.fulfill({ json: data }));
+  await page.route(endpoint + '/messages', route => {
+    if (route.request().method() !== 'POST') return route.fulfill({ json: { messages: [], nextCursor: null } });
+    const input = route.request().postDataJSON();
+    if (attempt++ === 0) { original = input; return route.fulfill({ status: 503, json: { code: 'SERVICE_UNAVAILABLE' } }); }
+    expect(input).toEqual(original);
+    return route.fulfill({ status: 201, json: { message: { id: 'msg-retry', ...input, sender: 'me', createdAt: '2026-11-25T00:00:01Z' } } });
+  });
+  await page.goto('http://127.0.0.1:3101/match-connection');
+  await page.getByLabel('Message', { exact: true }).fill('Hello again.');
+  await page.getByRole('button', { name: 'Send message', exact: true }).click();
+  await expect(page.locator('main').getByRole('alert')).toContainText('HTTP 503');
+  await expect(page.locator('main').getByRole('alert')).toContainText('Delivery is not confirmed');
+  await expect(page.getByRole('button', { name: 'Send message', exact: true })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Check connection again', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Retry message', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Retry message', exact: true }).click();
+  await expect(page.getByRole('status')).toContainText('Message sent.');
+  expect(attempt).toBe(2);
 });

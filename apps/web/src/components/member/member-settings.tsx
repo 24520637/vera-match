@@ -16,18 +16,24 @@ const titles: Record<Screen, string> = {
 };
 export function MemberSettingsNav() {
   return (
-    <nav className="member-nav container" aria-label="Member settings">
-      {(Object.keys(titles) as Screen[]).map((screen) => (
-        <Link key={screen} href={`/account/${screen}`}>
-          {titles[screen]}
-        </Link>
-      ))}
-      <Link href="/account/videos">Your videos</Link>
-      <Link href="/account/reviews">Your review reports</Link>
-      <Link href="/account/matches">Your matches</Link>
-      <Link href="/account/safety">Safety choices</Link>
-      <Link href="/account/closure">Close your account</Link>
-    </nav>
+    <div className="member-hub-nav">
+      <nav className="member-nav container" aria-label="Member navigation">
+        <Link href="/account/matches">Discover & matches</Link>
+        <Link href="/account/matches#connections">Connections & chat</Link>
+        <Link href="/account/profile">Your profile</Link>
+        <Link href="/account">Account</Link>
+      </nav>
+      <details className="container member-tools">
+        <summary>Preferences, privacy & more</summary>
+        <nav className="member-nav" aria-label="Member settings">
+          {(Object.keys(titles) as Screen[]).map(screen => <Link key={screen} href={`/account/${screen}`}>{titles[screen]}</Link>)}
+          <Link href="/account/videos">Your videos</Link>
+          <Link href="/account/reviews">Your review reports</Link>
+          <Link href="/account/safety">Safety choices</Link>
+          <Link href="/account/closure">Close your account</Link>
+        </nav>
+      </details>
+    </div>
   );
 }
 export function MemberSettings({
@@ -57,7 +63,7 @@ export function MemberSettings({
       <MemberSettingsNav />
       <PageHeader
         title={titles[screen]}
-        description="Your choices stay private. Save only the changes you intend to make."
+        description={screen === "profile" ? "Tell your story: what you enjoy, what matters to you, and the relationship you’re looking for." : screen === "preferences" ? "Choose what matters in your next connection. Both people’s preferences must be respected." : screen === "questionnaire" ? "Take a moment to reflect. These answers are saved privately and do not currently affect recommendations." : "Choose how your information is used. Each permission is yours to grant or withdraw."}
       />
       {screen === "consents" ? (
         <ConsentSettings

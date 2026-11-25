@@ -24,6 +24,7 @@ test("continues discovery from an empty page and stops at the end", async ({ pag
   });
 
   await page.goto("http://127.0.0.1:3101/matches");
+  await page.getByRole("button", { name: "All activity", exact: true }).click();
   const section = page.getByRole("region", { name: "Recommendations" });
   const next = section.getByRole("button", { name: "Next recommendations" });
   await expect(section.getByText("No recommendations on this page")).toBeVisible();
@@ -55,6 +56,7 @@ for (const variant of [
     });
 
     await page.goto("http://127.0.0.1:3101/matches");
+  await page.getByRole("button", { name: "All activity", exact: true }).click();
     const history = page.getByRole("region", { name: "Decision history" });
     await expect(history.getByText("No decisions on this page")).toBeVisible();
     await page.getByRole("button", { name: variant.button, exact: true }).press("Enter");
@@ -91,6 +93,7 @@ for (const endpoint of ["recommendations", "decisions"] as const) {
         }));
       }
       await page.goto("http://127.0.0.1:3101/matches");
+  await page.getByRole("button", { name: "All activity", exact: true }).click();
       const section = page.getByRole("region", { name: heading });
       await expect(section.getByText(previous)).toBeVisible();
 
@@ -108,3 +111,22 @@ for (const endpoint of ["recommendations", "decisions"] as const) {
     });
   }
 }
+
+test("dating views keep discovery separate from connection activity without exposing a peer", async ({ page }) => {
+  await page.route("**/api/auth/me", route => route.fulfill({ json: {
+    id: "synthetic-member", role: "MEMBER", email: "member@example.invalid", displayName: null,
+  } }));
+  await page.route("**/api/matches/recommendations", route => route.fulfill({ json: valid.recommendations }));
+  await page.route("**/api/matches/decisions", route => route.fulfill({ json: valid.decisions }));
+  await page.goto("http://127.0.0.1:3101/matches");
+  await page.getByRole("button", { name: "All activity", exact: true }).click();
+  await page.getByRole("button", { name: "Discover", exact: true }).click();
+  await expect(page.getByRole("region", { name: "Recommendations" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Decision history" })).toHaveCount(0);
+  await expect(page.locator(".dating-introduction img")).toHaveCount(0);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.screenshot({ path: test.info().outputPath("dating-discover.png"), fullPage: true });
+  await page.getByRole("button", { name: "Connections", exact: true }).click();
+  await expect(page.getByRole("region", { name: "Recommendations" })).toHaveCount(0);
+  await expect(page.getByRole("region", { name: "Your connections" })).toBeVisible();
+});

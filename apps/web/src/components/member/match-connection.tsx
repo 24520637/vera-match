@@ -17,6 +17,11 @@ const emptyFlags: Flags = { profileShared: false, contactShared: false, chatEnab
 function failure(error: unknown) {
   if (error instanceof ApiError) {
     if (error.status === 404 || error.status === 400) return "This connection is unavailable or its link expired. Return to Your matches and refresh the list.";
+    if (error.kind === "invalid-response") return "The server returned an unexpected response. Refresh to check the connection; if it continues, report this error with the API response.";
+    if (error.kind === "aborted") return "The request timed out. Check your connection and refresh to verify access.";
+    if (error.kind === "network") return "The server could not be reached. Check your connection, then refresh.";
+    if (error.status && error.status >= 500) return `The service is temporarily unavailable (HTTP ${error.status}). Refresh when the server is ready.`;
+    if (error.status === 403 && error.code !== "CHAT_NOT_ENABLED") return "Access is not currently authorized. Return to your matches and check your current permissions.";
     if (error.status === 409) return "The connection changed. Refresh and review your settings before trying again.";
     if (error.status === 429) return `Too many requests. Wait ${error.retryAfterSeconds ?? 60} seconds, then refresh.`;
     if (error.status === 401) return "Sign in again, then refresh Your matches.";
@@ -56,11 +61,11 @@ function ConnectionScreen({ connectionId, email }: { connectionId: string; email
     const timeout = setTimeout(() => controller.abort(), 15000);
     try {
       const value = await apiJson<unknown>(path, { signal: controller.signal });
-      if (!isMatchConnection(value)) throw new Error("Invalid connection response");
+      if (!isMatchConnection(value)) throw new ApiError("invalid-response", "Invalid connection response");
       let page: ConnectionMessages | undefined;
       if (value.chatAvailable) {
         const result = await apiJson<unknown>(path + "/messages", { signal: controller.signal });
-        if (!isConnectionMessages(result)) throw new Error("Invalid messages response");
+        if (!isConnectionMessages(result)) throw new ApiError("invalid-response", "Invalid messages response");
         page = result;
       }
       if (!alive.current || generation !== epoch.current || document.hidden) return;
@@ -131,12 +136,12 @@ function ConnectionScreen({ connectionId, email }: { connectionId: string; email
     const generation = epoch.current;
     try {
       const result = await apiJson<{ message: unknown }>(path + "/messages", { method: "POST", signal: AbortSignal.timeout(15000), json: message });
-      if (!result || !isConnectionMessage(result.message)) throw new Error("Invalid message receipt");
+      if (!result || !isConnectionMessage(result.message)) throw new ApiError("invalid-response", "Invalid message receipt");
       if (!alive.current || generation !== epoch.current || document.hidden) return;
       setMessages(current => mergeMessages(current, [result.message as ConnectionMessage]));
       setPending(null); setDraft(""); setNotice("Message sent.");
     } catch (err) {
-      if (alive.current) { setError(failure(err) + " Your message reference is retained for an exact retry."); setData(null); setMessages([]); paused.current = true; }
+      if (alive.current) { setError(failure(err) + " Delivery is not confirmed. Refresh first, then use Retry message; do not create a new copy."); setData(null); setMessages([]); paused.current = true; }
     } finally {
       busy.current = false;
       if (alive.current) setWorking(false);
@@ -160,13 +165,16 @@ function ConnectionScreen({ connectionId, email }: { connectionId: string; email
   const profile = data?.peer.profile;
   return <div className="container match-connection stack">
     <Link href="/account/matches">Back to Your matches</Link>
-    <PageHeader title="Your mutual connection" description="Choose what to share with this person after you have both accepted." />
-    <Button variant="secondary" disabled={working} onClick={() => void refresh()}>Refresh connection</Button>
+    <div className="match-connection__hero">
+      <div><span className="match-connection__eyebrow">A mutual connection</span><PageHeader title="Make room for a hello." description="A conversation, at your own pace. Your sharing choices stay in your hands." /></div>
+      <Button variant="secondary" disabled={working || loading} onClick={() => void refresh()}>Refresh connection</Button>
+    </div>
+    <nav className="form-actions" aria-label="Connection sections"><Link href="#match-profile-heading">Their profile</Link><Link href="#match-sharing-heading">Your sharing choices</Link><Link href="#match-chat-heading">Conversation</Link></nav>
     {loading && <LoadingState label="Checking connection…" />}
-    {error && <Notice tone="error" title="Connection needs attention">{error}</Notice>}
+    {error && <Notice tone="error" title="Connection needs attention"><p>{error}</p><div className="form-actions"><Button variant="secondary" disabled={working} onClick={() => void refresh()}>Check connection again</Button><Link href="/account/matches#connections">Return to connections</Link></div></Notice>}
     {notice && <p role="status">{notice}</p>}
-    {data && <>
-      <section className="stack" aria-labelledby="match-profile-heading">
+    {data && <div className="match-connection__layout">
+      <section className="stack match-connection__profile" aria-labelledby="match-profile-heading">
         <h2 id="match-profile-heading">Their profile</h2>
         {profile ? <>
           {profile.photo && <img className="match-connection__photo" src={profile.photo} alt={`Photo shared by ${profile.displayName ?? "your match"}`} width={160} height={160} />}
@@ -183,7 +191,30 @@ function ConnectionScreen({ connectionId, email }: { connectionId: string; email
         {data.peer.contactEmail ? <p>Shared email: <a href={`mailto:${data.peer.contactEmail}`}>{data.peer.contactEmail}</a></p>
           : <p>This person has not shared their email.</p>}
       </section>
-      <section className="stack" aria-labelledby="match-sharing-heading">
+      <section className="stack match-connection__conversation" aria-labelledby="match-chat-heading">
+        <div className="match-connection__section-head"><h2 id="match-chat-heading">Conversation</h2><span className="match-connection__badge">{data.chatAvailable ? "Chat enabled by both" : data.sharing.chatEnabled ? "Waiting for their choice" : "Your permission needed"}</span></div>
+        {data.chatAvailable ? <>
+          {older && <Button variant="secondary" disabled={working} onClick={() => void loadOlder()}>Load older messages</Button>}
+          {!messages.length && <p>No messages yet. A simple hello is a good place to start.</p>}
+          <ol className="match-connection__messages" aria-label="Conversation messages">
+            {messages.map(message => <li key={message.id} className={`match-connection__message match-connection__message--${message.sender}`}>
+              <strong>{message.sender === "me" ? "You" : profile?.displayName ?? "Your match"}</strong>
+              <p className="match-connection__text">{message.text}</p>
+              <time dateTime={message.createdAt}>{new Date(message.createdAt).toLocaleString()}</time>
+            </li>)}
+          </ol>
+          <form className="stack" onSubmit={event => { event.preventDefault(); void send(); }}>
+            {pending && <p className="match-connection__retry" role="status">Delivery not confirmed. Retry sends the same message reference to avoid a duplicate.</p>}
+            <label htmlFor="connection-message">Message</label>
+            <textarea className="control" id="connection-message" aria-describedby="message-help" placeholder="Say hello, or ask about something they’ve shared…" maxLength={2000} rows={3} value={pending?.text ?? draft} disabled={working || !!pending}
+              onChange={event => setDraft(event.target.value)} />
+            <p id="message-help" className="small muted">{(pending?.text ?? draft).length}/2000 · Share contact details only when you feel comfortable.</p>
+            <Button type="submit" disabled={working || (!pending && !draft.trim())}>{pending ? "Retry message" : "Send message"}</Button>
+          </form>
+        </> : <p>{data.sharing.chatEnabled ? "Waiting for the other person to enable chat." : "Enable chat in your sharing choices. Both people must enable it before messages can be read or sent."}</p>}
+        {!data.chatAvailable && <a className="match-connection__sharing-link" href="#match-sharing-heading">Review your chat permission →</a>}
+      </section>
+      <section className="stack match-connection__sharing" aria-labelledby="match-sharing-heading">
         <h2 id="match-sharing-heading">What you share with this person</h2>
         <p>Profile sharing includes your name, age, city, occupation, bio, interests, values and chosen photo. You can turn each choice off. Information already seen may have been saved by its recipient.</p>
         <form className="stack" onSubmit={event => { event.preventDefault(); void saveSharing(); }}>
@@ -207,27 +238,8 @@ function ConnectionScreen({ connectionId, email }: { connectionId: string; email
           <Button type="submit" disabled={working}>Save sharing choices</Button>
         </form>
       </section>
-      <section className="stack" aria-labelledby="match-chat-heading">
-        <h2 id="match-chat-heading">Conversation</h2>
-        {data.chatAvailable ? <>
-          {older && <Button variant="secondary" disabled={working} onClick={() => void loadOlder()}>Load older messages</Button>}
-          {!messages.length && <p>No messages yet. Start your conversation.</p>}
-          <ol className="match-connection__messages" aria-label="Conversation messages">
-            {messages.map(message => <li key={message.id} className={`match-connection__message match-connection__message--${message.sender}`}>
-              <strong>{message.sender === "me" ? "You" : profile?.displayName ?? "Your match"}</strong>
-              <p className="match-connection__text">{message.text}</p>
-              <time dateTime={message.createdAt}>{new Date(message.createdAt).toLocaleString()}</time>
-            </li>)}
-          </ol>
-          <form className="stack" onSubmit={event => { event.preventDefault(); void send(); }}>
-            <label htmlFor="connection-message">Message</label>
-            <textarea className="control" id="connection-message" maxLength={2000} rows={3} value={pending?.text ?? draft} disabled={working || !!pending}
-              onChange={event => setDraft(event.target.value)} />
-            <Button type="submit" disabled={working || (!pending && !draft.trim())}>{pending ? "Retry message" : "Send message"}</Button>
-          </form>
-        </> : <p>{data.sharing.chatEnabled ? "Waiting for the other person to enable chat." : "Enable chat in your sharing choices. Both people must enable it before messages can be read or sent."}</p>}
-      </section>
-    </>}
+
+    </div>}
   </div>;
 }
 

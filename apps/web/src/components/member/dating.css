@@ -1,0 +1,62 @@
+.dating-workspace { max-width: 70rem; padding-top: 1rem; }
+.dating-workspace [hidden] { display: none !important; }
+.dating-workspace .page-header { max-width: 48rem; }
+.dating-path { display: flex; flex-wrap: wrap; gap: .75rem 2rem; padding: 1rem 1.25rem; border-radius: 1rem; background: #f1e5e9; color: #59334b; font-size: .875rem; }
+.dating-tabs { display: flex; flex-wrap: wrap; gap: .65rem; padding-block: .5rem; }
+.dating-introduction { display: grid; grid-template-columns: minmax(10rem, .7fr) minmax(0, 1.7fr); padding: 0; overflow: hidden; border: 1px solid #dfcdd6; border-radius: 1.5rem; box-shadow: 0 12px 32px #57334b0b; }
+.dating-introduction__art { display: grid; place-items: center; min-height: 15rem; font-size: 5rem; color: #784d68; background: radial-gradient(ellipse at 25% 30%, #fdf3e6 0, transparent 65%), linear-gradient(145deg, #e9d3df, #d8d9e8); }
+.dating-introduction__body { padding: 1.75rem; min-width: 0; }
+.dating-introduction h3 { margin-top: .35rem; font-size: 1.6rem; }
+.dating-introduction ul { padding-left: 1.2rem; margin-block: 1rem 1.5rem; }
+.dating-eyebrow { text-transform: uppercase; font-size: .75rem; letter-spacing: .12em; color: #70465e; font-weight: 600; }
+.dating-history > ul { list-style: none; padding: 0; display: grid; gap: 1rem; }
+.dating-decision { padding: 1.25rem; border: 1px solid var(--color-line); border-radius: 1rem; background: white; }
+.dating-decision--mutual { border-color: #aa798e; background: #fbf2f5; }
+@media (max-width: 40rem) {
+ .dating-introduction { grid-template-columns: 1fr; }
+ .dating-introduction__art { min-height: 7rem; font-size: 3rem; }
+ .dating-introduction__body { padding: 1.25rem; }
+ .dating-introduction .form-actions { display: grid; grid-template-columns: 1fr 1fr; gap: .5rem; }
+ .dating-tabs { display: grid; grid-template-columns: 1fr 1fr 1fr; }
+ .dating-tabs .button { padding-inline: .4rem; min-width: 0; font-size: .85rem; }
+}
+.dating-workspace .page-heading { padding-block: 1.25rem; }
+.dating-workspace .page-heading h1 { font-size: clamp(2rem, 4vw, 3rem); }
+.dating-workspace .page-heading > .button { width: auto; justify-self: start; }
+@media (max-width: 40rem) {
+ .dating-workspace.stack { gap: 1rem; }
+ .dating-workspace .page-heading { padding-block: .5rem; gap: .75rem; }
+ .dating-workspace .lede { font-size: 1rem; }
+ .dating-path { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .5rem; padding: .8rem; font-size: .75rem; }
+ .dating-workspace .member-hub-nav > .member-nav { display: grid; grid-template-columns: 1fr 1fr; gap: .5rem; padding-block: .5rem; font-size: .85rem; }
+}
+/* Keep the next introduction within easy reach rather than a full-height hero. */
+.dating-workspace.stack { gap: 1rem; }
+.dating-workspace .page-heading { padding-block: .5rem; gap: .5rem; grid-template-columns: minmax(0, 1fr) auto; align-items: center; }
+.dating-workspace .page-heading h1 { font-size: clamp(1.9rem, 3vw, 2.6rem); }
+.dating-workspace .page-heading .lede { font-size: 1rem; grid-column: 1; }
+.dating-workspace .page-heading > .button { grid-column: 2; grid-row: 1 / span 2; }
+.dating-guide { font-size: .85rem; color: #624457; }
+.dating-guide summary { cursor: pointer; padding-block: .25rem; }
+.dating-guide .dating-path { margin-block: .5rem; }
+.dating-tabs { border-bottom: 1px solid var(--color-line); padding-bottom: 1rem; }
+.dating-tabs .button { border-radius: 2rem; }
+.dating-introduction { grid-template-columns: 6rem minmax(0, 1fr); border-radius: 1.1rem; }
+.dating-introduction__art { min-height: 0; font-size: 2.5rem; }
+.dating-introduction__body { padding: 1.25rem; }
+.dating-introduction__label { margin-top: .5rem; font-size: .85rem; color: #70465e; }
+.dating-introduction h3 { font-size: 1.35rem; }
+.dating-introduction .form-actions { margin-bottom: .65rem; }
+.dating-decision { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; }
+.dating-decision .form-actions { margin-left: auto; }
+.dating-decision__status { font-weight: 600; }
+@media (max-width: 40rem) {
+ .dating-workspace .page-heading { display: flex; align-items: flex-start; flex-direction: column; }
+ .dating-introduction { grid-template-columns: minmax(0, 1fr); }
+ .dating-introduction__art { min-height: 3rem; font-size: 1.75rem; }
+ .dating-introduction__body { padding: 1rem; }
+ .dating-decision { display: block; }
+ .dating-decision .form-actions { margin-top: .75rem; }
+ .dating-tabs { display: flex; gap: .4rem; }
+ .dating-tabs .button { flex: 1; padding-inline: .6rem; }
+}
